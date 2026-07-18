@@ -8,8 +8,6 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
-import { button } from "@higgsfield/quanta/button";
-import { NotFound } from "@higgsfield/quanta/not-found";
 
 import appCss from "../styles.css?url";
 import { reportHiggsfieldError } from "../lib/higgsfield-error-reporting";
@@ -94,7 +92,14 @@ function buildHead(meta: AppMeta) {
       ...(ogVideo ? [{ property: "og:video", content: ogVideo }] : []),
     ],
     links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" as const },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap",
+      },
       { rel: "stylesheet", href: appCss },
+      { rel: "apple-touch-icon", href: "/assets/mark.png" },
       ...(favicon ? [{ rel: "icon", href: favicon }] : []),
     ],
   };
@@ -102,17 +107,13 @@ function buildHead(meta: AppMeta) {
 
 function NotFoundComponent() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-q-background-primary px-4">
-      <NotFound
-        className="mx-auto max-w-md"
-        icon={<span className="text-q-title-md-semi-bold text-q-text-primary">404</span>}
-        title="Page not found"
-        subtitle="The page you're looking for doesn't exist or has been moved."
-      >
-        <Link to="/" className={button({ variant: "primary", size: "md" }, "mt-3")}>
-          Go home
-        </Link>
-      </NotFound>
+    <div className="kp-syspage">
+      <p className="kp-syspage-code">404</p>
+      <h1>No signal on this route</h1>
+      <p className="kp-syspage-sub">The page you are looking for does not exist or has moved.</p>
+      <Link to="/" className="kp-cta-back">
+        Back to bench
+      </Link>
     </div>
   );
 }
@@ -125,26 +126,25 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   }, [error]);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-q-background-primary px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-q-title-lg-semi-bold text-q-text-primary">This page didn't load</h1>
-        <p className="mt-2 text-q-body-sm-regular text-q-text-secondary">
-          Something went wrong on our end. You can try refreshing or head back home.
-        </p>
-        <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <button
-            onClick={() => {
-              router.invalidate();
-              reset();
-            }}
-            className={button({ variant: "primary", size: "md" })}
-          >
-            Try again
-          </button>
-          <a href="/" className={button({ variant: "outline", size: "md" })}>
-            Go home
-          </a>
-        </div>
+    <div className="kp-syspage">
+      <p className="kp-syspage-code">FAULT</p>
+      <h1>This page did not load</h1>
+      <p className="kp-syspage-sub">
+        Something went wrong on our end. Retry, or head back to the bench.
+      </p>
+      <div className="kp-syspage-actions">
+        <button
+          onClick={() => {
+            router.invalidate();
+            reset();
+          }}
+          className="kp-cta-again"
+        >
+          Try again
+        </button>
+        <a href="/" className="kp-cta-back">
+          Back to bench
+        </a>
       </div>
     </div>
   );
@@ -168,7 +168,7 @@ function RootShell({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body className="bg-q-background-primary text-q-text-primary">
+      <body>
         {children}
         <Scripts />
       </body>

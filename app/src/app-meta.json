@@ -1,7 +1,8 @@
 {
-  "og_title": null,
-  "og_description": null,
-  "og_image_url": null,
-  "favicon_url": null,
+  "og_title": "Kernel Panic",
+  "og_description": "A playable prototype of the Kernel Panic dive system: four signal routing puzzles on one shared grid engine. Fix machines, outrace an intruder, dodge corruption, and patch hidden bugs.",
+  "og_image_url": "https://d2ol7oe51mr4n9.cloudfront.net/user_3Efd4RfnN6aVhptW3XfgorMQuew/ab149dc8-707d-4d09-a896-799530647632.png",
+  "marketplace_cover_url": "https://d2ol7oe51mr4n9.cloudfront.net/user_3Efd4RfnN6aVhptW3XfgorMQuew/5375f031-97ca-4d8d-8bf6-c002f59568b8.png",
+  "favicon_url": "https://d2ol7oe51mr4n9.cloudfront.net/user_3Efd4RfnN6aVhptW3XfgorMQuew/b96e030f-a844-4f46-98ab-d80eb175125f.png",
   "og_video_url": null
 }
