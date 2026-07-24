@@ -16,7 +16,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: false,
     ramCost: 2,
-    desc: "Trap an unpowered node on the opponent's grid. When their signal routes through it, the trap fires and costs them a turn.",
+    desc: "Trap any open node on the board. When their signal claims it, the trap fires: their flood stops dead and they lose a full turn.",
     p: { traps: 1 },
   },
   {
@@ -26,7 +26,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Trap two unpowered nodes on the opponent's grid in one cast.",
+    desc: "Trap two open nodes in one cast. Fence off a whole approach.",
     p: { traps: 2 },
   },
   {
@@ -36,8 +36,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Trap one node; when it fires it also drains 1 RAM from the opponent's next turn.",
-    p: { traps: 1, drain: 1 },
+    desc: "Trap one node; when it fires it also drains 2 RAM from their next active turn.",
+    p: { traps: 1, drain: 2 },
   },
   // ---- Scan ----
   {
@@ -47,7 +47,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: false,
     ramCost: 2,
-    desc: "Reveal every armed trap on your own grid. The direct counter to Arm Node.",
+    desc: "Expose every enemy trap on the board, permanently. The counter to Arm Node.",
     p: {},
   },
   {
@@ -57,7 +57,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Reveal traps on your grid and the opponent's next intent.",
+    desc: "Expose all traps and read the intrusion's next intent for the rest of the dive.",
     p: { intent: true },
   },
   {
@@ -67,8 +67,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Reveal traps on your grid and disarm one of them outright.",
-    p: { disarm: 1 },
+    desc: "Expose all traps and defuse two of them outright.",
+    p: { disarm: 2 },
   },
   // ---- Redirect ----
   {
@@ -78,7 +78,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: false,
     ramCost: 2,
-    desc: "Rotate one of the opponent's placed nodes a quarter turn, undoing progress.",
+    desc: "Twist any enemy or unclaimed node a quarter turn, anywhere on the board. Cuts power to everything downstream of it.",
     p: { rotSteps: 1, targets: 1 },
   },
   {
@@ -88,7 +88,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Rotate one opponent node a half turn — twice the work to undo.",
+    desc: "Twist an enemy node a half turn. Two RAM of repair work for them, minimum.",
     p: { rotSteps: 2, targets: 1 },
   },
   {
@@ -98,7 +98,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Rotate two opponent nodes a quarter turn each.",
+    desc: "Twist two enemy nodes a quarter turn each.",
     p: { rotSteps: 1, targets: 2 },
   },
   // ---- Shield ----
@@ -109,8 +109,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: false,
     ramCost: 2,
-    desc: "Lock one of your nodes against Arm Node and Redirect for a round.",
-    p: { shieldRounds: 1, targets: 1 },
+    desc: "Freeze any friendly or open junction for two rounds: it cannot be rotated, redirected or trapped. Lock your own line, or freeze a junction they need.",
+    p: { shieldRounds: 2, targets: 1 },
   },
   {
     id: "shieldLong",
@@ -119,8 +119,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Lock one of your nodes for two rounds.",
-    p: { shieldRounds: 2, targets: 1 },
+    desc: "Freeze a junction for three rounds.",
+    p: { shieldRounds: 3, targets: 1 },
   },
   {
     id: "shieldTwin",
@@ -129,8 +129,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 1,
     variant: true,
     ramCost: 3,
-    desc: "Lock two of your nodes for a round.",
-    p: { shieldRounds: 1, targets: 2 },
+    desc: "Freeze two junctions for two rounds each.",
+    p: { shieldRounds: 2, targets: 2 },
   },
   // ---- Overload ----
   {
@@ -140,8 +140,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 2,
     variant: false,
     ramCost: 3,
-    desc: "Disable one opponent ability for their next turn.",
-    p: { lockTurns: 1 },
+    desc: "Jam one enemy routine for their next two turns.",
+    p: { lockTurns: 2 },
   },
   {
     id: "overloadDeep",
@@ -150,8 +150,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 2,
     variant: true,
     ramCost: 4,
-    desc: "Disable one opponent ability for their next two turns.",
-    p: { lockTurns: 2 },
+    desc: "Jam one enemy routine for three turns.",
+    p: { lockTurns: 3 },
   },
   {
     id: "overloadBrown",
@@ -160,8 +160,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 2,
     variant: true,
     ramCost: 4,
-    desc: "The opponent generates 2 less RAM on their next turn.",
-    p: { enemyRamDrain: 2 },
+    desc: "Brownout: the intrusion generates 3 less RAM next turn.",
+    p: { enemyRamDrain: 3 },
   },
   // ---- Overclock ----
   {
@@ -171,8 +171,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 2,
     variant: false,
     ramCost: 3,
-    desc: "Generate 2 bonus RAM on your next turn — a tempo play.",
-    p: { ramBoost: 2, boostTurns: 1 },
+    desc: "Generate 3 bonus RAM on your next turn.",
+    p: { ramBoost: 3, boostTurns: 1 },
   },
   {
     id: "overclock2",
@@ -181,8 +181,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 2,
     variant: true,
     ramCost: 4,
-    desc: "Generate 3 bonus RAM on your next turn.",
-    p: { ramBoost: 3, boostTurns: 1 },
+    desc: "Generate 4 bonus RAM on your next turn.",
+    p: { ramBoost: 4, boostTurns: 1 },
   },
   {
     id: "overclockCache",
@@ -191,8 +191,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 2,
     variant: true,
     ramCost: 4,
-    desc: "Generate 2 bonus RAM on each of your next two turns.",
-    p: { ramBoost: 2, boostTurns: 2 },
+    desc: "Generate 2 bonus RAM on each of your next three turns.",
+    p: { ramBoost: 2, boostTurns: 3 },
   },
   // ---- Firewall ----
   {
@@ -202,8 +202,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 3,
     variant: false,
     ramCost: 4,
-    desc: "Your whole grid ignores Arm Node and Redirect for a round.",
-    p: { wallRounds: 1 },
+    desc: "Your territory and frontier ignore Arm, Redirect and enemy Shields for two rounds.",
+    p: { wallRounds: 2 },
   },
   {
     id: "firewall2",
@@ -212,8 +212,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 3,
     variant: true,
     ramCost: 5,
-    desc: "Whole-grid immunity for two rounds.",
-    p: { wallRounds: 2 },
+    desc: "Full immunity for three rounds.",
+    p: { wallRounds: 3 },
   },
   {
     id: "firewallSpiked",
@@ -222,8 +222,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 3,
     variant: true,
     ramCost: 5,
-    desc: "Whole-grid immunity for a round; the opponent also loses 1 RAM next turn.",
-    p: { wallRounds: 1, enemyRamDrain: 1 },
+    desc: "Immunity for two rounds; the intrusion also loses 2 RAM next turn.",
+    p: { wallRounds: 2, enemyRamDrain: 2 },
   },
   // ---- Backdoor ----
   {
@@ -233,7 +233,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 3,
     variant: false,
     ramCost: 4,
-    desc: "Instantly purge every trap on your grid — no Scan needed.",
+    desc: "Wipe every enemy trap off the entire board, revealed or not.",
     p: { purge: true },
   },
   {
@@ -243,8 +243,8 @@ export const ABILITIES: AbilityDef[] = [
     tier: 3,
     variant: true,
     ramCost: 5,
-    desc: "Purge every trap on your grid and shield one node for a round.",
-    p: { purge: true, shieldRounds: 1, targets: 1 },
+    desc: "Wipe all traps and freeze one of your junctions for two rounds.",
+    p: { purge: true, shieldRounds: 2, targets: 1 },
   },
   {
     id: "backdoorEcho",
@@ -253,7 +253,7 @@ export const ABILITIES: AbilityDef[] = [
     tier: 3,
     variant: true,
     ramCost: 5,
-    desc: "Purge every trap on your grid and glimpse the opponent's next intent.",
+    desc: "Wipe all traps and read the intrusion's next intent.",
     p: { purge: true, intent: true },
   },
 ];

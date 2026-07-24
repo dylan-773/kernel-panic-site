@@ -1,36 +1,30 @@
 import { ABILITY_BY_ID } from "./content/abilities";
 import {
-  advanceBag,
   applyCast,
   applyOverloadLock,
-  applyPlace,
   applyRotate,
   armTargetLegal,
   emit,
   endPlayerTurn,
-  placementLegal,
   redirectTargetLegal,
   say,
+  shieldTargetLegal,
 } from "./duel-actions";
+import { canRotate } from "./duel-power";
 import { AbilityId, DuelState } from "./duel-types";
 import { oppStep } from "./opponent";
 
 /**
- * Pure reducer for the duel, same architecture as the old dive reducer:
- * clone, mutate through shared helpers, queue fx in-state, drain explicitly.
- * Fully turn-based — there is no clock; the only recurring dispatch is
- * oppStep, which the UI fires on a short interval while it is the
- * opponent's turn so its moves read as a sequence.
+ * Pure reducer for the flood-claim duel: clone, mutate through the shared
+ * helpers, queue fx in-state, drain explicitly. Fully turn-based; the only
+ * recurring dispatch is oppStep on a short UI interval.
  */
 
 export type DuelAction =
-  | { type: "place"; idx: number; rot: number }
-  | { type: "rotateOwn"; idx: number }
-  | { type: "discard" }
+  | { type: "rotate"; idx: number }
   | { type: "ability"; id: AbilityId; targets: number[]; abilityTarget?: AbilityId }
   | { type: "endTurn" }
   | { type: "oppStep" }
-  | { type: "tutorialNext" }
   | { type: "fxDrain"; upTo: number };
 
 function cloneState(s: DuelState): DuelState {
@@ -42,7 +36,6 @@ function cloneState(s: DuelState): DuelState {
       opp: { ...s.econ.opp, disabled: { ...s.econ.opp.disabled } },
     },
     equipped: s.equipped.map((e) => ({ ...e })),
-    oppPlan: [...s.oppPlan],
     oppTurn: { ...s.oppTurn },
     fx: [...s.fx],
   };
@@ -52,6 +45,12 @@ function playerCanAct(s: DuelState): boolean {
   return s.phase === "playing" && s.turn === "player";
 }
 
+function deny(s: DuelState, msg?: string): DuelState {
+  emit(s, "deny");
+  if (msg) say(s, msg);
+  return s;
+}
+
 export function duelReducer(state: DuelState, action: DuelAction): DuelState {
   switch (action.type) {
     case "fxDrain": {
@@ -59,43 +58,21 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       return { ...state, fx: state.fx.filter((e) => e.id > action.upTo) };
     }
 
-    case "tutorialNext": {
-      return { ...state, beat: state.beat + 1 };
-    }
-
-    case "place": {
+    case "rotate": {
       if (!playerCanAct(state)) return state;
       const s = cloneState(state);
-      if (s.econ.player.ram < 2 || !placementLegal(s, "player", action.idx)) {
-        emit(s, "deny");
-        return s;
+      if (s.econ.player.ram < 1) return deny(s, "No RAM left. End the turn.");
+      if (!canRotate(s, "player", action.idx)) {
+        const c = s.cells[action.idx];
+        if (c && c.lockedThroughRound >= s.round && c.lockedBy === "opp") {
+          return deny(s, "That junction is shield-locked.");
+        }
+        if (c && c.kind === "node" && c.owner === "opp") {
+          return deny(s, "Enemy territory. Redirect can reach it.");
+        }
+        return deny(s, "Out of reach. Rotate from your frontier outward.");
       }
-      applyPlace(s, "player", action.idx, action.rot);
-      return s;
-    }
-
-    case "rotateOwn": {
-      if (!playerCanAct(state)) return state;
-      const s = cloneState(state);
-      const c = s.cells[action.idx];
-      if (!c || c.kind !== "node" || c.owner !== "player" || s.econ.player.ram < 1) {
-        emit(s, "deny");
-        return s;
-      }
-      applyRotate(s, "player", action.idx, 1);
-      return s;
-    }
-
-    case "discard": {
-      if (!playerCanAct(state)) return state;
-      const s = cloneState(state);
-      if (s.econ.player.ram < 1) {
-        emit(s, "deny");
-        return s;
-      }
-      s.econ.player.ram -= 1;
-      advanceBag(s, "player");
-      emit(s, "discard");
+      applyRotate(s, "player", action.idx);
       return s;
     }
 
@@ -105,27 +82,11 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       const econ = s.econ.player;
       const def = ABILITY_BY_ID[action.id];
       const slot = s.equipped.find((e) => e.id === action.id);
-      if (!def || !slot || slot.copies < 1) {
-        emit(s, "deny");
-        return s;
-      }
-      if (econ.abilityUsed) {
-        emit(s, "deny");
-        say(s, "One ability per turn");
-        return s;
-      }
-      if (action.id in econ.disabled) {
-        emit(s, "deny");
-        say(s, `${def.name} is jammed by Overload`);
-        return s;
-      }
-      if (econ.ram < def.ramCost) {
-        emit(s, "deny");
-        say(s, "Not enough RAM");
-        return s;
-      }
+      if (!def || !slot || slot.copies < 1) return deny(s);
+      if (econ.abilityUsed) return deny(s, "One ability per turn.");
+      if (action.id in econ.disabled) return deny(s, `${def.name} is jammed by Overload.`);
+      if (econ.ram < def.ramCost) return deny(s, "Not enough RAM.");
 
-      // Target validation per verb.
       const t = action.targets;
       switch (def.verb) {
         case "arm": {
@@ -143,17 +104,12 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
         case "shield": {
           const want = def.p.targets ?? 1;
           if (t.length < 1 || t.length > want) return deny(s);
-          if (!t.every((i) => s.cells[i]?.kind === "node" && s.cells[i].owner === "player")) {
-            return deny(s);
-          }
+          if (!t.every((i) => shieldTargetLegal(s, "player", i))) return deny(s);
           break;
         }
         case "backdoor": {
           if (def.p.shieldRounds) {
-            if (t.length > 1) return deny(s);
-            if (t.length === 1 && !(s.cells[t[0]]?.kind === "node" && s.cells[t[0]].owner === "player")) {
-              return deny(s);
-            }
+            if (t.length !== 1 || !shieldTargetLegal(s, "player", t[0])) return deny(s);
           }
           break;
         }
@@ -170,7 +126,7 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       applyCast(s, "player", def, t);
       if (def.verb === "overload" && def.p.lockTurns && action.abilityTarget) {
         applyOverloadLock(s, "player", def, action.abilityTarget);
-        say(s, `Overload: their ${ABILITY_BY_ID[action.abilityTarget]?.name ?? "routine"} is jammed`);
+        say(s, `OVERLOAD. Their ${ABILITY_BY_ID[action.abilityTarget]?.name ?? "routine"} is jammed.`);
       }
       slot.copies -= 1;
       return s;
@@ -190,9 +146,4 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       return s;
     }
   }
-}
-
-function deny(s: DuelState): DuelState {
-  emit(s, "deny");
-  return s;
 }

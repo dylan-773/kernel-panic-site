@@ -33,11 +33,6 @@ function armLines(mask: number, className: string, width: number): ReactElement[
   return out;
 }
 
-export interface GhostPiece {
-  mask: number;
-  rot: number;
-}
-
 interface DuelCellViewProps {
   cell: DuelCell;
   idx: number;
@@ -47,8 +42,6 @@ interface DuelCellViewProps {
   legal: boolean;
   selected: boolean;
   trapVisible: boolean;
-  ghost: GhostPiece | null;
-  interactive: boolean;
   onCell: (idx: number) => void;
 }
 
@@ -61,23 +54,26 @@ const DuelCellView = memo(function DuelCellView({
   legal,
   selected,
   trapVisible,
-  ghost,
-  interactive,
   onCell,
 }: DuelCellViewProps) {
   const cx = cell.x * CS + HALF;
   const cy = cell.y * CS + HALF;
   const mine = cell.owner === "player";
-  const lit = mine ? poweredP : poweredO;
-  const shielded = cell.shieldedThroughRound >= round;
+  const theirs = cell.owner === "opp";
+  const lit = mine ? poweredP : theirs ? poweredO : false;
+  const locked = cell.lockedThroughRound >= round;
 
   const classes = ["kp-dcell"];
-  if (cell.kind === "node") classes.push(mine ? "kp-dcell-p" : "kp-dcell-o");
-  if (lit && cell.kind === "node") classes.push("kp-dlit");
-  if (legal) classes.push("kp-dlegal");
+  if (cell.kind === "node") {
+    if (mine) classes.push("kp-dcell-p");
+    else if (theirs) classes.push("kp-dcell-o");
+    else classes.push("kp-dcell-n");
+    if (lit) classes.push("kp-dlit");
+  }
+  if (legal) classes.push("kp-dlegal", "kp-dlive");
   if (selected) classes.push("kp-dselected");
-  if (interactive) classes.push("kp-dlive");
 
+  const armClass = mine ? "kp-darm-p" : theirs ? "kp-darm-o" : "kp-darm-n";
   const label =
     cell.kind === "entryP"
       ? "Your port"
@@ -87,21 +83,19 @@ const DuelCellView = memo(function DuelCellView({
           ? "Core"
           : cell.kind === "block"
             ? "Dead sector"
-            : cell.kind === "node"
-              ? mine
-                ? "Your node"
-                : "Intrusion node"
-              : "Open sector";
-
-  const armClass = mine ? "kp-darm-p" : "kp-darm-o";
+            : mine
+              ? "Your junction"
+              : theirs
+                ? "Intrusion junction"
+                : "Open junction";
 
   return (
     <g
       className={classes.join(" ")}
       transform={`translate(${cx} ${cy})`}
-      onClick={interactive ? () => onCell(idx) : undefined}
+      onClick={legal ? () => onCell(idx) : undefined}
       onKeyDown={
-        interactive
+        legal
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -110,24 +104,11 @@ const DuelCellView = memo(function DuelCellView({
             }
           : undefined
       }
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      aria-label={interactive ? `${label}, select` : label}
+      role={legal ? "button" : undefined}
+      tabIndex={legal ? 0 : undefined}
+      aria-label={legal ? `${label}, select` : label}
     >
       <rect x={-HALF} y={-HALF} width={CS} height={CS} fill="transparent" />
-
-      {cell.kind === "empty" && (
-        <>
-          <circle r={1.6} className="kp-ddot" />
-          {legal && <rect x={-HALF + 5} y={-HALF + 5} width={CS - 10} height={CS - 10} className="kp-dlegal-ring" />}
-          {legal && ghost && (
-            <g className="kp-dghost" style={{ transform: `rotate(${ghost.rot * 90}deg)` }}>
-              {armLines(ghost.mask, "kp-dghost-arm", 5)}
-              <circle r={5.5} className="kp-dghost-node" />
-            </g>
-          )}
-        </>
-      )}
 
       {cell.kind === "block" && (
         <g className="kp-dblock">
@@ -137,30 +118,42 @@ const DuelCellView = memo(function DuelCellView({
       )}
 
       {cell.kind === "node" && (
-        <>
+        <g key={`cl-${cell.claimSeq}`} className={cell.claimSeq > 0 ? "kp-claimpop" : undefined}
+          style={cell.claimSeq > 0 ? { animationDelay: `${cell.claimWave * 55}ms` } : undefined}
+        >
+          {legal && <rect x={-HALF + 4} y={-HALF + 4} width={CS - 8} height={CS - 8} className="kp-dlegal-ring" />}
           <g className="kp-darms" style={{ transform: `rotate(${cell.spin * 90}deg)` }}>
             {armLines(cell.base, armClass, 6)}
-            {lit && armLines(cell.base, `${armClass}-glow`, 11)}
+            {lit && armLines(cell.base, `${armClass}-glow`, 12)}
             {lit && armLines(cell.base, `${armClass}-lit`, 3)}
           </g>
-          <circle className={mine ? "kp-dnode kp-dnode-p" : "kp-dnode kp-dnode-o"} r={6.5} />
-          {shielded && (
+          <circle
+            className={
+              mine ? "kp-dnode kp-dnode-p" : theirs ? "kp-dnode kp-dnode-o" : "kp-dnode kp-dnode-n"
+            }
+            r={mine || theirs ? 6.5 : 5}
+          />
+          {locked && (
             <g className="kp-dshield">
-              <path d="M -12 -8 L -12 -13 L -7 -13 M 7 -13 L 12 -13 L 12 -8" className="kp-dshield-b" />
-              <path d="M -12 8 L -12 13 L -7 13 M 7 13 L 12 13 L 12 8" className="kp-dshield-b" />
+              <path d="M -13 -9 L -13 -14 L -8 -14 M 8 -14 L 13 -14 L 13 -9" className="kp-dshield-b" />
+              <path d="M -13 9 L -13 14 L -8 14 M 8 14 L 13 14 L 13 9" className="kp-dshield-b" />
+              <rect x={-4} y={-3} width={8} height={6} className="kp-dshield-lock" />
             </g>
           )}
           {cell.trap && trapVisible && (
             <g className={cell.trap.by === "player" ? "kp-dtrap kp-dtrap-p" : "kp-dtrap kp-dtrap-o"}>
-              <path d="M 0 -14 L 3 -8 L 9 -7 L 5 -2 L 6 4 L 0 1 L -6 4 L -5 -2 L -9 -7 L -3 -8 Z" className="kp-dtrap-body" />
+              <path
+                d="M 0 -14 L 3 -8 L 9 -7 L 5 -2 L 6 4 L 0 1 L -6 4 L -5 -2 L -9 -7 L -3 -8 Z"
+                className="kp-dtrap-body"
+              />
             </g>
           )}
-        </>
+        </g>
       )}
 
       {cell.kind === "entryP" && (
         <g className="kp-dport kp-dport-p">
-          <g className="kp-darms">{armLines(rotateArms(cell.base, cell.rot), "kp-darm-p", 6)}</g>
+          <g>{armLines(rotateArms(cell.base, cell.rot), "kp-darm-p-lit", 5)}</g>
           <rect x={-11} y={-11} width={22} height={22} className="kp-dport-body" />
           <circle r={4.5} className="kp-dport-eye" />
           <text className="kp-dtag" y={22}>
@@ -171,7 +164,7 @@ const DuelCellView = memo(function DuelCellView({
 
       {cell.kind === "entryO" && (
         <g className="kp-dport kp-dport-o">
-          <g className="kp-darms">{armLines(rotateArms(cell.base, cell.rot), "kp-darm-o", 6)}</g>
+          <g>{armLines(rotateArms(cell.base, cell.rot), "kp-darm-o-lit", 5)}</g>
           <rect x={-11} y={-11} width={22} height={22} className="kp-dport-body" />
           <circle r={4.5} className="kp-dport-eye" />
           <text className="kp-dtag kp-dtag-o" y={22}>
@@ -182,7 +175,7 @@ const DuelCellView = memo(function DuelCellView({
 
       {cell.kind === "core" && (
         <g className={poweredP || poweredO ? "kp-dcore kp-dcore-lit" : "kp-dcore"}>
-          <g className="kp-darms">{armLines(cell.base, "kp-darm-core", 5)}</g>
+          <g>{armLines(cell.base, "kp-darm-core", 5)}</g>
           <polygon
             points="14,0 9.9,9.9 0,14 -9.9,9.9 -14,0 -9.9,-9.9 0,-14 9.9,-9.9"
             className="kp-dcore-body"
@@ -200,15 +193,12 @@ const DuelCellView = memo(function DuelCellView({
 
 export interface DuelBoardProps {
   state: DuelState;
-  /** Cells the current interaction may click. */
   legal: Set<number>;
-  /** Cells already picked in a multi-target ability. */
   selected: Set<number>;
-  ghost: GhostPiece | null;
   onCell: (idx: number) => void;
 }
 
-export function DuelBoard({ state, legal, selected, ghost, onCell }: DuelBoardProps) {
+export function DuelBoard({ state, legal, selected, onCell }: DuelBoardProps) {
   const { w, h, cells } = state;
   const vw = w * CS;
   const vh = h * CS;
@@ -231,8 +221,6 @@ export function DuelBoard({ state, legal, selected, ghost, onCell }: DuelBoardPr
       <rect x={-6} y={-6} width={vw + 12} height={vh + 12} className="kp-dboard-frame" />
 
       {cells.map((cell, idx) => {
-        // Traps: yours on their grid always show; theirs on yours only when
-        // revealed by Scan (or if the duel is over).
         const trapVisible =
           !!cell.trap &&
           (cell.trap.by === "player" || cell.trap.revealed || state.phase !== "playing");
@@ -247,8 +235,6 @@ export function DuelBoard({ state, legal, selected, ghost, onCell }: DuelBoardPr
             legal={legal.has(idx)}
             selected={selected.has(idx)}
             trapVisible={trapVisible}
-            ghost={ghost}
-            interactive={legal.has(idx)}
             onCell={onCell}
           />
         );

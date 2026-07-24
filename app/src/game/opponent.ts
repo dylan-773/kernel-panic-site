@@ -1,47 +1,32 @@
 import { ABILITY_BY_ID } from "./content/abilities";
 import {
-  advanceBag,
   applyCast,
   applyOverloadLock,
-  applyPlace,
   applyRotate,
   armTargetLegal,
   endOppTurn,
-  fireTrapIfAny,
-  placementLegal,
+  finishDuel,
   redirectTargetLegal,
   roll,
   say,
+  shieldTargetLegal,
 } from "./duel-actions";
-import { placementPath, placementsToCore } from "./duel-power";
+import { canRotate, isFrontier, routeCost, routePlan } from "./duel-power";
 import { AbilityDef, DuelState, Side } from "./duel-types";
-import { DX, DY, cellIndex, oppositeDir, rotateArms } from "./types";
 
 /**
- * The scripted opponent: not a live agent, a legible machine. Each oppStep
- * performs exactly one visible move (trap check, ability, one rotation, one
- * placement) so the turn reads as a sequence in the UI. All randomness runs
- * through the state's threaded RNG — a duel replays identically from its
- * seed. The routing helpers are side-parameterized so the balance harness
- * can drive a proxy player with the exact same movement rules.
+ * The scripted opponent, v2: it plans with the same rotation-cost Dijkstra
+ * the board generator uses, aligns junctions frontier-outward along the
+ * cheapest route, and spends its one ability per turn where it hurts —
+ * blocking the player's route when they close on the core, hardening its
+ * own chokepoints, purging interference. Tier scales RAM, mistake rate and
+ * cast frequency, never the rules. One visible move per oppStep.
  */
 
 function coreDist(s: DuelState, idx: number): number {
   const c = s.cells[idx];
   const core = s.cells[s.coreIdx];
   return Math.abs(c.x - core.x) + Math.abs(c.y - core.y);
-}
-
-function nodesOf(s: DuelState, side: Side): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < s.cells.length; i++) {
-    if (s.cells[i].kind === "node" && s.cells[i].owner === side) out.push(i);
-  }
-  return out;
-}
-
-function entryOf(side: Side): "entryP" | "entryO" {
-  return side === "player" ? "entryP" : "entryO";
 }
 
 function kitDefs(s: DuelState): AbilityDef[] {
@@ -51,38 +36,41 @@ function kitDefs(s: DuelState): AbilityDef[] {
     .filter(Boolean);
 }
 
-/** Decide this turn's ability cast (id only; targets resolve at cast time). */
+/** Decide this turn's cast by priority; targets resolve at cast time. */
 function decideAbility(s: DuelState): void {
   const econ = s.econ.opp;
   if (econ.abilityUsed) return;
   const kit = kitDefs(s).filter((d) => d.ramCost <= econ.ram);
   if (kit.length === 0) return;
 
-  const playerDist = placementsToCore(s.cells, s.w, s.h, "player", s.coreIdx);
+  const playerCost = routeCost(s, "player");
+  const ownCost = routeCost(s, "opp");
 
-  // Reactive offense: the player is about to reach the core.
-  if (playerDist <= 2) {
-    const stopper =
-      kit.find((d) => d.verb === "redirect") ?? kit.find((d) => d.verb === "arm");
-    if (stopper) {
-      s.oppTurn.pendingAbility = stopper.id;
+  // 1. The player is closing on the core: block their route.
+  if (isFinite(playerCost) && playerCost <= 4 && playerCost <= ownCost) {
+    const blocker =
+      kit.find((d) => d.verb === "arm") ??
+      kit.find((d) => d.verb === "redirect") ??
+      kit.find((d) => d.verb === "shield");
+    if (blocker) {
+      s.oppTurn.pendingAbility = blocker.id;
       return;
     }
   }
 
-  // Reactive defense: the player interfered with our grid recently.
-  if (s.lastPlayerHitRound >= s.round - 1 && s.lastPlayerHitRound > 0) {
+  // 2. The player interfered recently: clean up or harden.
+  if (s.lastPlayerHitRound >= s.round - 1 && s.lastPlayerHitRound > 0 && roll(s) < 0.6) {
     const guard =
       kit.find((d) => d.verb === "backdoor") ??
-      kit.find((d) => d.verb === "shield") ??
-      kit.find((d) => d.verb === "firewall");
-    if (guard && roll(s) < 0.75) {
+      kit.find((d) => d.verb === "firewall") ??
+      kit.find((d) => d.verb === "shield");
+    if (guard) {
       s.oppTurn.pendingAbility = guard.id;
       return;
     }
   }
 
-  // The Analyze readout must come true: guarantee the dominant verb early.
+  // 3. The Analyze readout must come true early.
   if (!s.oppDominantUsed && s.round >= 2) {
     const dom = kit.find((d) => d.verb === s.cfg.dominant);
     if (dom) {
@@ -91,8 +79,15 @@ function decideAbility(s: DuelState): void {
     }
   }
 
-  // Proactive: frequency roll, dominant verb double-weighted.
+  // 4. Proactive: tempo when the route is long, dominant double-weighted.
   if (roll(s) < s.cfg.abilityFreq) {
+    if (isFinite(ownCost) && ownCost > econ.ramPerTurn * 2) {
+      const clock = kit.find((d) => d.verb === "overclock");
+      if (clock && roll(s) < 0.5) {
+        s.oppTurn.pendingAbility = clock.id;
+        return;
+      }
+    }
     const weighted: AbilityDef[] = [];
     for (const d of kit) {
       weighted.push(d);
@@ -108,14 +103,10 @@ function computeIntent(s: DuelState): void {
     s.oppNextIntent = def ? `Charging ${def.name}` : "Charging a routine";
     return;
   }
-  const path = placementPath(s.cells, s.w, s.h, "opp", s.coreIdx);
-  if (!path) {
-    s.oppNextIntent = "Probing for a route";
-  } else if (path.length <= 2) {
-    s.oppNextIntent = "Final approach to the core";
-  } else {
-    s.oppNextIntent = "Routing toward the core";
-  }
+  const cost = routeCost(s, "opp");
+  if (!isFinite(cost)) s.oppNextIntent = "Probing for a route";
+  else if (cost <= 3) s.oppNextIntent = "FINAL APPROACH to the core";
+  else s.oppNextIntent = "Aligning junctions toward the core";
 }
 
 /** Resolve targets and cast the pending ability. True if a cast happened. */
@@ -130,40 +121,79 @@ function castPending(s: DuelState): boolean {
   const targets: number[] = [];
   switch (def.verb) {
     case "arm": {
-      const pool = nodesOf(s, "player")
+      // Trap the player's predicted route, deep enough that they commit.
+      const plan = routePlan(s, "player");
+      const pool = (plan ? plan.path.map((p) => p.idx) : [])
         .filter((i) => armTargetLegal(s, "opp", i))
-        .sort((a, b) => coreDist(s, a) - coreDist(s, b));
+        .reverse();
+      if (pool.length === 0) {
+        const any = s.cells
+          .map((_, i) => i)
+          .filter((i) => armTargetLegal(s, "opp", i) && isFrontier(s, "player", i));
+        pool.push(...any);
+      }
       targets.push(...pool.slice(0, def.p.traps ?? 1));
       if (targets.length === 0) return false;
       break;
     }
     case "redirect": {
-      const pool = nodesOf(s, "player")
-        .filter((i) => redirectTargetLegal(s, "opp", i))
-        .sort((a, b) => {
-          const pa = s.power.player[a] ? 0 : 1;
-          const pb = s.power.player[b] ? 0 : 1;
-          return pa - pb || coreDist(s, a) - coreDist(s, b);
-        });
-      targets.push(...pool.slice(0, def.p.targets ?? 1));
-      if (targets.length === 0) return false;
+      // Pick the twist that raises the player's route cost the most.
+      const candidates = s.cells
+        .map((_, i) => i)
+        .filter((i) => redirectTargetLegal(s, "opp", i) && s.cells[i].owner === "player")
+        .sort((a, b) => coreDist(s, a) - coreDist(s, b))
+        .slice(0, 6);
+      const steps = def.p.rotSteps ?? 1;
+      let best = -1;
+      let bestGain = -1;
+      const before = routeCost(s, "player");
+      for (const i of candidates) {
+        const c = s.cells[i];
+        c.rot = (c.rot + steps) % 4;
+        const after = routeCost(s, "player");
+        c.rot = (c.rot - steps + 4) % 4;
+        const gain = (isFinite(after) ? after : 99) - (isFinite(before) ? before : 99);
+        if (gain > bestGain) {
+          bestGain = gain;
+          best = i;
+        }
+      }
+      if (best === -1) return false;
+      targets.push(best);
+      const want = def.p.targets ?? 1;
+      if (want > 1) {
+        const extra = candidates.filter((i) => i !== best).slice(0, want - 1);
+        targets.push(...extra);
+      }
       break;
     }
     case "shield": {
-      const pool = nodesOf(s, "opp")
-        .filter((i) => s.cells[i].shieldedThroughRound < s.round)
-        .sort((a, b) => {
-          const pa = s.power.opp[a] ? 0 : 1;
-          const pb = s.power.opp[b] ? 0 : 1;
-          return pa - pb || coreDist(s, a) - coreDist(s, b);
-        });
-      targets.push(...pool.slice(0, def.p.targets ?? 1));
+      const playerCost = routeCost(s, "player");
+      if (isFinite(playerCost) && playerCost <= 4) {
+        // Freeze the player's next junction: they cannot rotate it while locked.
+        const plan = routePlan(s, "player");
+        const choke = plan?.path.find(
+          (p) => s.cells[p.idx].owner === "none" && shieldTargetLegal(s, "opp", p.idx),
+        );
+        if (choke) {
+          targets.push(choke.idx);
+          break;
+        }
+      }
+      const own = s.cells
+        .map((_, i) => i)
+        .filter((i) => s.cells[i].owner === "opp" && shieldTargetLegal(s, "opp", i))
+        .sort((a, b) => coreDist(s, a) - coreDist(s, b));
+      targets.push(...own.slice(0, def.p.targets ?? 1));
       if (targets.length === 0) return false;
       break;
     }
     case "backdoor": {
       if (def.p.shieldRounds) {
-        const tip = nodesOf(s, "opp").sort((a, b) => coreDist(s, a) - coreDist(s, b))[0];
+        const tip = s.cells
+          .map((_, i) => i)
+          .filter((i) => s.cells[i].owner === "opp" && s.cells[i].kind === "node")
+          .sort((a, b) => coreDist(s, a) - coreDist(s, b))[0];
         if (tip !== undefined) targets.push(tip);
       }
       break;
@@ -178,274 +208,121 @@ function castPending(s: DuelState): boolean {
   if (def.verb === "overload" && def.p.lockTurns) {
     const options = s.equipped.filter((e) => e.copies > 0);
     if (options.length > 0) {
-      const pick = options[Math.floor(roll(s) * options.length)];
-      applyOverloadLock(s, "opp", def, pick.id);
+      options.sort((a, b) => (ABILITY_BY_ID[b.id]?.tier ?? 0) - (ABILITY_BY_ID[a.id]?.tier ?? 0));
+      applyOverloadLock(s, "opp", def, options[0].id);
     }
   }
   if (def.verb === s.cfg.dominant) s.oppDominantUsed = true;
   return true;
 }
 
+type QueueEntry = { idx: number; targetRot: number };
+
 /**
- * One repair rotation for either side: find an unpowered own node adjacent
- * to the powered network that a rotation can rejoin, turn it one step.
+ * Build a committed rotation queue from the current cheapest route: one
+ * entry per misaligned junction, in path order, with ABSOLUTE target
+ * rotations. Executing the whole queue in order produces a conducting
+ * chain from port to core; the queue never oscillates the way per-step
+ * replanning does. Returns [] when no route exists.
  */
-export function botRepairStep(s: DuelState, side: Side): boolean {
-  const econ = s.econ[side];
-  if (econ.ram < 1) return false;
-  for (const i of nodesOf(s, side).sort((a, b) => coreDist(s, a) - coreDist(s, b))) {
-    if (s.power[side][i]) continue;
-    const c = s.cells[i];
-    const feeds: number[] = [];
-    for (let d = 0; d < 4; d++) {
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      const ni = cellIndex(s.w, nx, ny);
-      const nc = s.cells[ni];
-      const owned =
-        (nc.kind === "node" && nc.owner === side) || nc.kind === entryOf(side) || nc.kind === "core";
-      if (!owned || !s.power[side][ni]) continue;
-      if ((rotateArms(nc.base, nc.rot) & (1 << oppositeDir(d))) !== 0) feeds.push(d);
-    }
-    if (feeds.length === 0) continue;
-    for (let k = 1; k < 4; k++) {
-      const arms = rotateArms(c.base, (c.rot + k) % 4);
-      if (feeds.some((d) => (arms & (1 << d)) !== 0)) {
-        applyRotate(s, side, i, 1);
-        return true;
-      }
-    }
+function buildQueue(s: DuelState, side: Side): QueueEntry[] {
+  let plan = routePlan(s, side);
+  if (
+    plan &&
+    plan.steps.some(
+      (p) => s.cells[p.idx].lockedThroughRound >= s.round && s.cells[p.idx].lockedBy !== side,
+    )
+  ) {
+    // A shield sits on the route: try to route around every locked junction.
+    const avoid = new Set(
+      plan.steps
+        .filter((p) => s.cells[p.idx].lockedThroughRound >= s.round && s.cells[p.idx].lockedBy !== side)
+        .map((p) => p.idx),
+    );
+    plan = routePlan(s, side, avoid) ?? plan;
   }
-  return false;
+  if (!plan) return [];
+  return plan.steps.map((p) => ({ idx: p.idx, targetRot: p.targetRot }));
 }
 
-/** Best rotation of a piece at a target cell: connect back, then onward. */
-export function bestRotation(
+/**
+ * Execute one rotation from a committed queue. Returns false when the
+ * turn has nothing more it can usefully do. `replan` must implement a
+ * cost-improvement guard, or a blindspot route would burn RAM in cycles.
+ */
+function queueRotateStep(
   s: DuelState,
   side: Side,
-  piece: number,
-  idx: number,
-  onwardIdx: number | null,
-): { rot: number; score: number } {
-  const c = s.cells[idx];
-  const backDirs: number[] = [];
-  for (let d = 0; d < 4; d++) {
-    const nx = c.x + DX[d];
-    const ny = c.y + DY[d];
-    if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-    const ni = cellIndex(s.w, nx, ny);
-    const nc = s.cells[ni];
-    const owned = (nc.kind === "node" && nc.owner === side) || nc.kind === entryOf(side);
-    if (!owned) continue;
-    if ((rotateArms(nc.base, nc.rot) & (1 << oppositeDir(d))) !== 0) backDirs.push(d);
-  }
-  let onwardDir = -1;
-  if (onwardIdx !== null) {
-    const oc = s.cells[onwardIdx];
-    const dx = oc.x - c.x;
-    const dy = oc.y - c.y;
-    if (dx === 1) onwardDir = 1;
-    else if (dx === -1) onwardDir = 3;
-    else if (dy === 1) onwardDir = 2;
-    else if (dy === -1) onwardDir = 0;
-  }
-  let best = { rot: 0, score: -1 };
-  for (let r = 0; r < 4; r++) {
-    const arms = rotateArms(piece, r);
-    let score = 0;
-    if (backDirs.some((d) => (arms & (1 << d)) !== 0)) score += 2;
-    if (onwardDir !== -1 && (arms & (1 << onwardDir)) !== 0) score += 1;
-    if (score > best.score) best = { rot: r, score };
-  }
-  return best;
-}
-
-/**
- * Placements-to-core distance for every empty cell, walking only through
- * empty cells (future placements). Cells the side can never use (adjacent
- * to the enemy port) are excluded.
- */
-function emptyDistFromCore(s: DuelState, side: Side): number[] {
-  const dist = new Array<number>(s.cells.length).fill(Infinity);
-  const enemyEntry = side === "player" ? s.entryO : s.entryP;
-  const banned = (i: number): boolean => {
-    const c = s.cells[i];
-    for (let d = 0; d < 4; d++) {
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      if (cellIndex(s.w, nx, ny) === enemyEntry) return true;
-    }
-    return false;
-  };
-  const queue: number[] = [];
-  const core = s.cells[s.coreIdx];
-  for (let d = 0; d < 4; d++) {
-    const nx = core.x + DX[d];
-    const ny = core.y + DY[d];
-    if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-    const ni = cellIndex(s.w, nx, ny);
-    if (s.cells[ni].kind === "empty" && !banned(ni) && dist[ni] > 1) {
-      dist[ni] = 1;
-      queue.push(ni);
-    }
-  }
-  for (let qi = 0; qi < queue.length; qi++) {
-    const i = queue[qi];
-    const c = s.cells[i];
-    for (let d = 0; d < 4; d++) {
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      const ni = cellIndex(s.w, nx, ny);
-      if (s.cells[ni].kind !== "empty" || banned(ni)) continue;
-      if (dist[ni] <= dist[i] + 1) continue;
-      dist[ni] = dist[i] + 1;
-      queue.push(ni);
-    }
-  }
-  return dist;
-}
-
-/**
- * One rotation of a POWERED tip node so it keeps its feed and gains an arm
- * toward an empty cell — recovers lines whose free arm points nowhere.
- * Only single-step fixes are attempted, so it can never oscillate.
- */
-function retipStep(s: DuelState, side: Side): boolean {
+  queue: QueueEntry[],
+  greed: number,
+  replan: () => void,
+): boolean {
   const econ = s.econ[side];
   if (econ.ram < 1) return false;
-  const distCore = emptyDistFromCore(s, side);
-  for (const i of nodesOf(s, side)) {
-    if (!s.power[side][i]) continue;
-    const c = s.cells[i];
-    const armsNow = rotateArms(c.base, c.rot);
-    const armsNext = rotateArms(c.base, (c.rot + 1) % 4);
-    let fedAfter = false;
-    let opensEmpty = false;
-    let opensEmptyNow = false;
-    for (let d = 0; d < 4; d++) {
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      const ni = cellIndex(s.w, nx, ny);
-      const nc = s.cells[ni];
-      const owned =
-        (nc.kind === "node" && nc.owner === side) || nc.kind === entryOf(side);
-      if (owned && s.power[side][ni]) {
-        const feeds = (rotateArms(nc.base, nc.rot) & (1 << oppositeDir(d))) !== 0;
-        if (feeds && (armsNext & (1 << d)) !== 0) fedAfter = true;
-      }
-      if (nc.kind === "empty" && isFinite(distCore[ni])) {
-        if ((armsNext & (1 << d)) !== 0) opensEmpty = true;
-        if ((armsNow & (1 << d)) !== 0) opensEmptyNow = true;
-      }
-    }
-    if (fedAfter && opensEmpty && !opensEmptyNow) {
-      applyRotate(s, side, i, 1);
-      return true;
+
+  while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
+  let head = queue[0];
+  if (!head) {
+    replan();
+    while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
+    head = queue[0];
+    if (!head) return false;
+  }
+  if (!canRotate(s, side, head.idx)) {
+    // Claimed out from under us or shield-locked: rebuild from scratch.
+    queue.length = 0;
+    replan();
+    while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
+    head = queue[0];
+    if (!head || !canRotate(s, side, head.idx)) return false;
+  }
+
+  if (roll(s) >= greed) {
+    // Fumble: twist a random frontier node instead; the queue stands.
+    const pool = s.cells
+      .map((_, i) => i)
+      .filter((i) => i !== head.idx && canRotate(s, side, i) && s.cells[i].owner === "none");
+    if (pool.length > 0) {
+      const pick = pool[Math.floor(roll(s) * pool.length)];
+      return applyRotate(s, side, pick);
     }
   }
-  return false;
+  return applyRotate(s, side, head.idx);
+}
+
+interface ReplanMem {
+  n: number;
+  lastCost: number;
+}
+
+/** Replanner with a strict-progress guard against planner blindspots. */
+function makeReplanner(s: DuelState, side: Side, queue: QueueEntry[], mem: ReplanMem) {
+  return () => {
+    if (mem.n <= 0) return;
+    const cost = routeCost(s, side);
+    if (!(cost < mem.lastCost)) {
+      // No strict progress since the previous replan: stop feeding a cycle.
+      return;
+    }
+    mem.lastCost = cost;
+    mem.n--;
+    queue.length = 0;
+    queue.push(...buildQueue(s, side));
+  };
 }
 
 /**
- * One placement for either side: pick the empty cell reachable from an arm
- * of the powered network that is closest to the core, orient the draw to
- * connect back and point onward. greed < 1 injects legible mistakes.
+ * Play one whole turn for a side with the committed-queue bot. Used by the
+ * balance harness as the proxy player. Does not end the turn.
  */
-export function botPlaceStep(s: DuelState, side: Side, greed: number): boolean {
-  const econ = s.econ[side];
-  if (econ.ram < 2) return false;
-  const distCore = emptyDistFromCore(s, side);
-
-  let target = -1;
-  let bestScore = Infinity;
-  for (let i = 0; i < s.cells.length; i++) {
-    const c = s.cells[i];
-    const owned =
-      (c.kind === "node" && c.owner === side) || c.kind === entryOf(side);
-    if (!owned || !s.power[side][i]) continue;
-    const arms = rotateArms(c.base, c.rot);
-    for (let d = 0; d < 4; d++) {
-      if ((arms & (1 << d)) === 0) continue;
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      const ni = cellIndex(s.w, nx, ny);
-      if (!placementLegal(s, side, ni)) continue;
-      const score = ni === s.coreIdx ? 0 : distCore[ni];
-      if (score < bestScore) {
-        bestScore = score;
-        target = ni;
-      }
-    }
+export function botPlayTurn(s: DuelState, side: Side, greed: number): void {
+  const queue = buildQueue(s, side);
+  const mem: ReplanMem = { n: 3, lastCost: Infinity };
+  const replan = makeReplanner(s, side, queue, mem);
+  let guard = 0;
+  while (s.phase === "playing" && s.turn === side && s.econ[side].ram >= 1 && guard++ < 40) {
+    if (!queueRotateStep(s, side, queue, greed, replan)) break;
   }
-
-  if (target === -1) {
-    if (retipStep(s, side)) return true;
-    return false;
-  }
-
-  // Onward: the neighbor of the target that shortens the route most.
-  let onward: number | null = null;
-  let onwardScore = Infinity;
-  {
-    const c = s.cells[target];
-    for (let d = 0; d < 4; d++) {
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      const ni = cellIndex(s.w, nx, ny);
-      if (ni === s.coreIdx) {
-        onward = ni;
-        onwardScore = 0;
-        break;
-      }
-      if (s.cells[ni].kind === "empty" && distCore[ni] < onwardScore) {
-        onwardScore = distCore[ni];
-        onward = ni;
-      }
-    }
-  }
-
-  const { rot, score } = bestRotation(s, side, econ.drawCur, target, onward);
-  if (score < 2) {
-    // Cannot connect back at all (should not happen); cycle the bag.
-    if (econ.ram >= 3) {
-      econ.ram -= 1;
-      advanceBag(s, side);
-      return true;
-    }
-    return false;
-  }
-  // A straight that cannot bend toward the next step is a wasted cell more
-  // often than not: swap it out when the turn can afford the discard.
-  if (score === 2 && onward !== null && econ.ram >= 3 && roll(s) < 0.6) {
-    econ.ram -= 1;
-    advanceBag(s, side);
-    return true;
-  }
-
-  if (roll(s) < greed) {
-    applyPlace(s, side, target, rot);
-  } else if (roll(s) < 0.5) {
-    applyPlace(s, side, target, (rot + 1) % 4); // misrotation, fixable next turn
-  } else {
-    const alternates: number[] = [];
-    for (let i = 0; i < s.cells.length; i++) {
-      if (i !== target && placementLegal(s, side, i)) alternates.push(i);
-    }
-    if (alternates.length > 0) {
-      const alt = alternates[Math.floor(roll(s) * alternates.length)];
-      const bestAlt = bestRotation(s, side, econ.drawCur, alt, s.coreIdx);
-      applyPlace(s, side, alt, bestAlt.rot);
-    } else {
-      applyPlace(s, side, target, rot);
-    }
-  }
-  return true;
 }
 
 /** Perform one opponent move. Ends the opponent turn when nothing is left. */
@@ -453,30 +330,36 @@ export function oppStep(s: DuelState): void {
   if (s.phase !== "playing" || s.turn !== "opp") return;
   const ot = s.oppTurn;
 
-  if (!ot.trapChecked) {
-    ot.trapChecked = true;
-    if (fireTrapIfAny(s, "opp")) {
-      endOppTurn(s);
-      return;
-    }
+  // The tutorial machine never lets the dive drag: if the player somehow
+  // walls it off, it stops playing fair and seals the duel on the spot.
+  if (s.cfg.tutorial && !isFinite(routeCost(s, "opp"))) {
+    say(s, "The machine stops pretending. The door was never really open.");
+    finishDuel(s, "opp", "core");
+    return;
+  }
+
+  if (!ot.started) {
+    ot.started = true;
     decideAbility(s);
     computeIntent(s);
-    if (s.cfg.tutorial && s.round === 1) {
-      say(s, "The machine is awake. It is not waiting for you.");
-    }
-    return;
+    ot.queue = buildQueue(s, "opp");
+    return; // one visible "thinking" beat
   }
 
   if (ot.pendingAbility) {
-    if (castPending(s)) return;
+    if (castPending(s)) {
+      // Abilities can reshape the board; recommit the movement plan.
+      ot.queue = buildQueue(s, "opp");
+      return;
+    }
   }
 
-  if (botRepairStep(s, "opp")) return;
-
-  if (ot.placed < s.cfg.placesPerTurn && botPlaceStep(s, "opp", s.cfg.greed)) {
-    ot.placed++;
-    return;
-  }
+  const mem: ReplanMem = { n: ot.replans, lastCost: ot.lastReplanCost };
+  const replan = makeReplanner(s, "opp", ot.queue, mem);
+  const acted = queueRotateStep(s, "opp", ot.queue, s.cfg.greed, replan);
+  ot.replans = mem.n;
+  ot.lastReplanCost = mem.lastCost;
+  if (acted) return;
 
   endOppTurn(s);
 }

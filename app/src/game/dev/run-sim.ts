@@ -15,7 +15,7 @@ import { finaleWinScene, runEndScene, runOpenerScene, DAY_LINES } from "../conte
 import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
 import { DuelState } from "../duel-types";
-import { botPlaceStep, botRepairStep, oppStep } from "../opponent";
+import { botPlayTurn, oppStep } from "../opponent";
 import { GameState, runReducer, RunAction } from "../run-reducer";
 import { EMPTY_META } from "../save";
 
@@ -34,12 +34,7 @@ function playDuelToEnd(duel: DuelState): { won: boolean; chip: number; capWin: b
   let guard = 0;
   while (duel.phase === "playing" && guard++ < 4000) {
     if (duel.turn === "player") {
-      let inner = 0;
-      while (duel.phase === "playing" && duel.turn === "player" && inner++ < 40) {
-        if (botRepairStep(duel, "player")) continue;
-        if (botPlaceStep(duel, "player", 0.93)) continue;
-        break;
-      }
+      botPlayTurn(duel, "player", 0.95);
       if (duel.phase === "playing" && duel.turn === "player") endPlayerTurn(duel);
     } else {
       oppStep(duel);

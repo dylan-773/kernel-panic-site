@@ -1,20 +1,19 @@
 /**
- * Balance harness for the duel engine. Not imported by app code.
+ * Balance harness for the flood-claim duel. Not imported by app code.
  * Run from app/: bun run src/game/dev/sim.ts
  *
- * A proxy player using the same routing bot as the opponent (high greed, no
- * abilities) plays every day config across many seeds. This is a lower bound
- * on real player strength — humans also get abilities — so target win rates
- * sit below the design targets by a margin.
+ * A proxy player using the same Dijkstra routing bot as the opponent (high
+ * greed, no abilities) plays every day config across many seeds — a lower
+ * bound on real player strength, since humans also get the ability kit.
  */
 
 import { dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
 import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
 import { AbilityVerb, DuelState } from "../duel-types";
-import { botPlaceStep, botRepairStep, oppStep } from "../opponent";
+import { botPlayTurn, oppStep } from "../opponent";
 
-const PROXY_GREED = 0.93;
+const PROXY_GREED = 0.95;
 const SEEDS = 200;
 const VERBS: AbilityVerb[] = [
   "arm",
@@ -28,16 +27,11 @@ const VERBS: AbilityVerb[] = [
 ];
 
 function playPlayerTurn(s: DuelState): void {
-  let guard = 0;
-  while (s.phase === "playing" && s.turn === "player" && guard++ < 40) {
-    if (botRepairStep(s, "player")) continue;
-    if (botPlaceStep(s, "player", PROXY_GREED)) continue;
-    break;
-  }
+  botPlayTurn(s, "player", PROXY_GREED);
   if (s.phase === "playing" && s.turn === "player") endPlayerTurn(s);
 }
 
-function playDuel(s: DuelState): { rounds: number; won: boolean; cap: boolean; chip: number } {
+export function playDuel(s: DuelState): { rounds: number; won: boolean; cap: boolean; chip: number } {
   let guard = 0;
   while (s.phase === "playing" && guard++ < 4000) {
     if (s.turn === "player") playPlayerTurn(s);
@@ -83,22 +77,23 @@ function runDay(label: string, mk: (seed: number) => DuelState): void {
   );
 }
 
-// Tutorial: must be a 0% player win rate, always.
-{
-  let playerWins = 0;
-  for (let i = 0; i < SEEDS; i++) {
-    const s = createDuel(tutorialConfig(), mixSeed(999, i), [], 4);
-    const r = playDuel(s);
-    if (r.won) playerWins++;
+if (import.meta.main) {
+  {
+    let playerWins = 0;
+    for (let i = 0; i < SEEDS; i++) {
+      const s = createDuel(tutorialConfig(), mixSeed(999, i), [], 5);
+      const r = playDuel(s);
+      if (r.won) playerWins++;
+    }
+    console.log(`tutorial   player wins: ${playerWins} of ${SEEDS} (must be 0)`);
   }
-  console.log(`tutorial   player wins: ${playerWins} of ${SEEDS} (must be 0)`);
-}
 
-for (let day = 1; day <= 9; day++) {
-  const ram = 4 + Math.floor((day - 1) / 2);
-  runDay(`day ${day} r${ram}`, (seed) =>
-    createDuel(dayDuelConfig(day, VERBS[seed % VERBS.length], seed), seed, [], ram),
-  );
-}
+  for (let day = 1; day <= 9; day++) {
+    const ram = 5 + Math.floor((day - 1) / 2);
+    runDay(`day ${day} r${ram}`, (seed) =>
+      createDuel(dayDuelConfig(day, VERBS[seed % VERBS.length], seed), seed, [], ram),
+    );
+  }
 
-runDay("finale r8", (seed) => createDuel(finaleConfig(), seed, [], 8));
+  runDay("finale r9", (seed) => createDuel(finaleConfig(), seed, [], 9));
+}

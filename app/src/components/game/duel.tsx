@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  playBoom,
+  playCascade,
+  playFx,
+  playStinger,
+  playUiPress,
+} from "../../game/audio";
 import { ABILITY_BY_ID, VERB_LABEL } from "../../game/content/abilities";
-import { FxKind, playFx } from "../../game/audio";
 import {
   armTargetLegal,
-  placementLegal,
   redirectTargetLegal,
+  shieldTargetLegal,
 } from "../../game/duel-actions";
+import { canRotate } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
 import {
@@ -16,35 +23,19 @@ import {
   EquippedAbility,
   ROUND_CAP,
 } from "../../game/duel-types";
-import { DuelBoard, GhostPiece } from "./duel-board";
-import { PiecePreview } from "./piece-preview";
-
-/** Map duel fx names onto the synth's existing voices. */
-const FX_MAP: Record<string, FxKind> = {
-  place: "patch",
-  rotate: "rotate",
-  discard: "jam",
-  deny: "deny",
-  power: "power",
-  win: "win",
-  lose: "lose",
-  endTurn: "ping",
-  trapSet: "block",
-  trapFire: "scramble",
-  redirect: "scramble",
-  shield: "unjam",
-  scan: "ping",
-  overload: "freeze",
-  overclock: "power",
-  firewall: "andOpen",
-  backdoor: "loot",
-};
+import { DuelBoard } from "./duel-board";
 
 interface Targeting {
   def: AbilityDef;
-  mode: "arm" | "redirect" | "shield" | "overload";
+  mode: "arm" | "redirect" | "shield";
   picked: number[];
   want: number;
+}
+
+interface Pulse {
+  id: number;
+  text: string;
+  cls: string;
 }
 
 export interface DuelFinish {
@@ -64,27 +55,99 @@ export interface DuelScreenProps {
   dominantTell: string | null;
   strain: number;
   day: number;
-  onFinish: (r: DuelFinish) => void;
   soundOn: boolean;
+  onFinish: (r: DuelFinish) => void;
+  onToggleSound: () => void;
 }
 
 function coachLine(s: DuelState): string | null {
-  if (!s.cfg.tutorial) return null;
-  if (s.phase !== "playing") return null;
-  const placed = s.cells.some((c) => c.kind === "node" && c.owner === "player");
-  if (s.turn === "player" && s.round === 1 && !placed) {
-    return "Route power from YOUR port toward the CORE. Click a marked sector to place a node. R rotates it first.";
+  if (!s.cfg.tutorial || s.phase !== "playing") return null;
+  const owned = s.cells.filter((c) => c.kind === "node" && c.owner === "player").length;
+  if (s.turn === "player" && s.round === 1 && owned <= 2) {
+    return "The grid is live. Click a glowing junction to rotate it (1 RAM). Line the pipes up and your signal floods forward on its own.";
   }
   if (s.turn === "player" && s.round === 1) {
-    return "Placing costs 2 RAM, rotating a placed node costs 1, swapping your draw costs 1. Spend what you have, then END TURN.";
+    return "Chain rotations toward the CORE. When a junction clicks into line, everything connected claims at once. Spend your RAM, then END TURN.";
   }
   if (s.turn === "opp" && s.round === 1) {
-    return "Now it moves. Watch how much it can afford.";
+    return "Now watch how much it can afford per turn.";
   }
-  if (s.round === 2) {
-    return "It generates twice your RAM and it does not misplace. This is not a fight you can win today.";
+  return "Reach the core first. That is the whole game. It is just faster than you, today.";
+}
+
+/** fx → screen shake magnitude, impact label, and sound. */
+function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake: number; pulse: Pulse | null } {
+  let shake = 0;
+  let pulse: Pulse | null = null;
+  const mk = (text: string, cls: string): Pulse => ({ id: 0, text, cls });
+  switch (kind) {
+    case "cascade":
+      shake = n && n >= 5 ? 2 : 1;
+      pulse = mk(`CASCADE x${n ?? 2}`, "kp-pulse-good");
+      if (soundOn) playCascade(n ?? 2);
+      break;
+    case "claim":
+      if (soundOn) playCascade(1);
+      break;
+    case "trapFire":
+      shake = 3;
+      pulse = mk("TRAP SPRUNG", "kp-pulse-bad");
+      if (soundOn) playBoom();
+      break;
+    case "turnLost":
+      shake = 2;
+      pulse = mk("TURN LOST", "kp-pulse-bad");
+      if (soundOn) playBoom();
+      break;
+    case "win":
+      shake = 3;
+      if (soundOn) playStinger(true);
+      break;
+    case "lose":
+      shake = 3;
+      if (soundOn) playStinger(false);
+      break;
+    case "redirect":
+      shake = 1;
+      if (soundOn) playFx("scramble");
+      break;
+    case "rotate":
+      if (soundOn) playFx("rotate");
+      break;
+    case "deny":
+      if (soundOn) playFx("deny");
+      break;
+    case "endTurn":
+      if (soundOn) playFx("ping");
+      break;
+    case "trapSet":
+      if (soundOn) playFx("block");
+      break;
+    case "scan":
+      if (soundOn) playFx("ping");
+      pulse = mk("SCANNED", "kp-pulse-info");
+      break;
+    case "shield":
+      if (soundOn) playFx("unjam");
+      break;
+    case "overload":
+      if (soundOn) playFx("freeze");
+      pulse = mk("JAMMED", "kp-pulse-info");
+      break;
+    case "overclock":
+      if (soundOn) playFx("power");
+      break;
+    case "firewall":
+      if (soundOn) playFx("andOpen");
+      pulse = mk("FIREWALL UP", "kp-pulse-info");
+      break;
+    case "backdoor":
+      if (soundOn) playFx("loot");
+      break;
+    default:
+      break;
   }
-  return "Reach the core first. That is the whole game. It just happens to be faster.";
+  return { shake, pulse };
 }
 
 export function DuelScreen(props: DuelScreenProps) {
@@ -94,9 +157,11 @@ export function DuelScreen(props: DuelScreenProps) {
     undefined,
     () => createDuel(cfg, seed, equipped, ramPerTurn),
   );
-  const [pendingRot, setPendingRot] = useState(0);
   const [targeting, setTargeting] = useState<Targeting | null>(null);
   const [overloadPick, setOverloadPick] = useState<AbilityDef | null>(null);
+  const [infoDef, setInfoDef] = useState<AbilityDef | null>(null);
+  const [shake, setShake] = useState<{ mag: number; key: number }>({ mag: 0, key: 0 });
+  const [pulses, setPulses] = useState<Pulse[]>([]);
   const finishedRef = useRef(false);
 
   const playerTurn = state.phase === "playing" && state.turn === "player";
@@ -105,18 +170,23 @@ export function DuelScreen(props: DuelScreenProps) {
   // Opponent moves on a readable cadence.
   useEffect(() => {
     if (state.phase !== "playing" || state.turn !== "opp") return;
-    const t = setInterval(() => dispatch({ type: "oppStep" }), 460);
+    const t = setInterval(() => dispatch({ type: "oppStep" }), 420);
     return () => clearInterval(t);
   }, [state.phase, state.turn]);
 
-  // Sound: drain the fx queue.
+  // Juice: drain the fx queue into sound, shake, and impact labels.
   useEffect(() => {
     if (state.fx.length === 0) return;
-    if (soundOn) {
-      for (const e of state.fx) {
-        const mapped = FX_MAP[e.kind];
-        if (mapped) playFx(mapped);
-      }
+    let maxShake = 0;
+    const newPulses: Pulse[] = [];
+    for (const e of state.fx) {
+      const j = fxJuice(e.kind, e.n, soundOn);
+      maxShake = Math.max(maxShake, j.shake);
+      if (j.pulse) newPulses.push({ ...j.pulse, id: e.id });
+    }
+    if (maxShake > 0) setShake((sh) => ({ mag: maxShake, key: sh.key + 1 }));
+    if (newPulses.length > 0) {
+      setPulses((p) => [...p.slice(-3), ...newPulses]);
     }
     dispatch({ type: "fxDrain", upTo: state.fx[state.fx.length - 1].id });
   }, [state.fx, soundOn]);
@@ -124,16 +194,11 @@ export function DuelScreen(props: DuelScreenProps) {
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "KeyR") {
-        e.preventDefault();
-        setPendingRot((r) => (r + 1) % 4);
-      } else if (e.code === "Escape") {
+      if (e.code === "Escape") {
         setTargeting(null);
         setOverloadPick(null);
       } else if (e.code === "KeyE" && playerTurn && !targeting) {
         dispatch({ type: "endTurn" });
-      } else if (e.code === "KeyD" && playerTurn && !targeting) {
-        dispatch({ type: "discard" });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -149,53 +214,35 @@ export function DuelScreen(props: DuelScreenProps) {
         if (targeting.picked.includes(i)) continue;
         if (targeting.mode === "arm" && armTargetLegal(state, "player", i)) out.add(i);
         if (targeting.mode === "redirect" && redirectTargetLegal(state, "player", i)) out.add(i);
-        if (
-          targeting.mode === "shield" &&
-          state.cells[i].kind === "node" &&
-          state.cells[i].owner === "player"
-        ) {
-          out.add(i);
-        }
+        if (targeting.mode === "shield" && shieldTargetLegal(state, "player", i)) out.add(i);
       }
       return out;
     }
+    if (econ.ram < 1) return out;
     for (let i = 0; i < state.cells.length; i++) {
-      const c = state.cells[i];
-      if (c.kind === "empty" && econ.ram >= 2 && placementLegal(state, "player", i)) out.add(i);
-      if (c.kind === "node" && c.owner === "player" && econ.ram >= 1) out.add(i);
+      if (canRotate(state, "player", i)) out.add(i);
     }
     return out;
   }, [state, playerTurn, targeting, econ.ram]);
-
-  const ghost: GhostPiece | null =
-    playerTurn && !targeting ? { mask: econ.drawCur, rot: pendingRot } : null;
 
   const onCell = (idx: number) => {
     if (!playerTurn) return;
     if (targeting) {
       const picked = [...targeting.picked, idx];
       if (picked.length >= targeting.want) {
-        castTargeted(targeting.def, picked);
+        dispatch({ type: "ability", id: targeting.def.id, targets: picked });
         setTargeting(null);
       } else {
         setTargeting({ ...targeting, picked });
       }
       return;
     }
-    const c = state.cells[idx];
-    if (c.kind === "empty") {
-      dispatch({ type: "place", idx, rot: pendingRot });
-    } else if (c.kind === "node" && c.owner === "player") {
-      dispatch({ type: "rotateOwn", idx });
-    }
-  };
-
-  const castTargeted = (def: AbilityDef, targets: number[]) => {
-    dispatch({ type: "ability", id: def.id, targets });
+    dispatch({ type: "rotate", idx });
   };
 
   const onAbility = (def: AbilityDef) => {
     if (!playerTurn || econ.abilityUsed) return;
+    if (soundOn) playUiPress();
     setOverloadPick(null);
     switch (def.verb) {
       case "arm":
@@ -208,11 +255,8 @@ export function DuelScreen(props: DuelScreenProps) {
         setTargeting({ def, mode: "shield", picked: [], want: def.p.targets ?? 1 });
         break;
       case "backdoor":
-        if (def.p.shieldRounds) {
-          setTargeting({ def, mode: "shield", picked: [], want: 1 });
-        } else {
-          dispatch({ type: "ability", id: def.id, targets: [] });
-        }
+        if (def.p.shieldRounds) setTargeting({ def, mode: "shield", picked: [], want: 1 });
+        else dispatch({ type: "ability", id: def.id, targets: [] });
         break;
       case "overload":
         if (def.p.lockTurns) setOverloadPick(def);
@@ -238,18 +282,21 @@ export function DuelScreen(props: DuelScreenProps) {
   };
 
   const coach = coachLine(state);
-  const oppRam = state.econ.opp;
+  const oppEcon = state.econ.opp;
 
   return (
-    <div className="kp-duel">
-      <header className="kp-duel-head">
-        <div className="kp-duel-title">
+    <div
+      key={shake.key}
+      className={`kp-dive2 ${shake.mag > 0 ? `kp-shake-${shake.mag}` : ""}`}
+    >
+      <header className="kp-dive2-top">
+        <div className="kp-dive2-job">
           <strong>{props.jobTitle}</strong>
           <span>{props.jobSub}</span>
         </div>
-        <div className="kp-duel-meters">
-          <span className="kp-duel-day">DAY {props.day}</span>
-          <span className="kp-duel-round">
+        <div className="kp-dive2-osk">
+          <span className="kp-osk-item">DAY {props.day === 0 ? "--" : props.day}</span>
+          <span className="kp-osk-item">
             R{Math.min(state.round, ROUND_CAP)}/{ROUND_CAP}
           </span>
           <div className="kp-strain" title="Neural Strain">
@@ -257,20 +304,28 @@ export function DuelScreen(props: DuelScreenProps) {
             <div className="kp-strain-bar">
               <div className="kp-strain-fill" style={{ width: `${props.strain}%` }} />
             </div>
-            <em>{props.strain}</em>
           </div>
+          <button type="button" className="kp-osk-btn" onClick={props.onToggleSound}>
+            SND {soundOn ? "ON" : "OFF"}
+          </button>
         </div>
       </header>
 
-      <div className="kp-duel-main">
-        <div className="kp-duel-boardwrap">
+      <div className="kp-dive2-stage">
+        <div className="kp-dive2-boardwrap">
           <DuelBoard
             state={state}
             legal={legal}
             selected={new Set(targeting?.picked ?? [])}
-            ghost={ghost}
             onCell={onCell}
           />
+          <div className="kp-pulses" aria-hidden="true">
+            {pulses.map((p) => (
+              <div key={p.id} className={`kp-pulse ${p.cls}`}>
+                {p.text}
+              </div>
+            ))}
+          </div>
           {state.notice && (
             <div key={state.notice.id} className="kp-toast">
               {state.notice.text}
@@ -287,7 +342,7 @@ export function DuelScreen(props: DuelScreenProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    castTargeted(targeting.def, targeting.picked);
+                    dispatch({ type: "ability", id: targeting.def.id, targets: targeting.picked });
                     setTargeting(null);
                   }}
                 >
@@ -295,115 +350,91 @@ export function DuelScreen(props: DuelScreenProps) {
                 </button>
               )}
               <button type="button" onClick={() => setTargeting(null)}>
-                CANCEL
+                CANCEL (ESC)
               </button>
             </div>
           )}
         </div>
 
-        <aside className="kp-duel-rail">
-          <section className="kp-rail-block kp-rail-opp">
-            <h3>INTRUSION</h3>
-            <div className="kp-rail-row">
-              <span>RAM</span>
-              <em>{state.turn === "opp" ? oppRam.ram : oppRam.ramPerTurn}</em>
-            </div>
-            {props.dominantTell && <p className="kp-rail-tell">{props.dominantTell}</p>}
-            {state.intentRevealed && state.oppNextIntent && (
-              <p className="kp-rail-intent">INTENT: {state.oppNextIntent}</p>
-            )}
-            <div className={state.turn === "opp" ? "kp-turnlight kp-turnlight-on" : "kp-turnlight"}>
-              {state.turn === "opp" ? "IT IS MOVING" : "HOLDING"}
-            </div>
-          </section>
-
-          <section className="kp-rail-block">
-            <h3>PIPELINE</h3>
-            <div className="kp-pieces">
-              <div className="kp-piece-slot">
-                <span>NOW</span>
-                <PiecePreview mask={econ.drawCur} rot={pendingRot} highlight />
-              </div>
-              <div className="kp-piece-slot">
-                <span>NEXT</span>
-                <PiecePreview mask={econ.drawNext} rot={0} />
-              </div>
-              <div className="kp-piece-actions">
-                <button
-                  type="button"
-                  onClick={() => setPendingRot((r) => (r + 1) % 4)}
-                  title="Rotate pending piece (R)"
-                >
-                  ROT (R)
-                </button>
-                <button
-                  type="button"
-                  disabled={!playerTurn || econ.ram < 1}
-                  onClick={() => dispatch({ type: "discard" })}
-                  title="Swap draw for 1 RAM (D)"
-                >
-                  SWAP (D)
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section className="kp-rail-block">
-            <h3>
-              RAM <em className="kp-ram-count">{playerTurn ? econ.ram : 0}</em>
-            </h3>
-            <div className="kp-ram-pips">
-              {Array.from({ length: Math.max(econ.ramPerTurn + 2, econ.ram) }).map((_, i) => (
-                <span key={i} className={i < econ.ram && playerTurn ? "kp-pip kp-pip-on" : "kp-pip"} />
-              ))}
-            </div>
-          </section>
-
-          <section className="kp-rail-block kp-rail-abilities">
-            <h3>LOADOUT</h3>
-            {state.equipped.length === 0 && <p className="kp-rail-dim">Nothing equipped.</p>}
-            <div className="kp-ability-bar">
-              {state.equipped.map((slot) => {
-                const def = ABILITY_BY_ID[slot.id];
-                if (!def) return null;
-                const jammed = slot.id in econ.disabled;
-                const disabled =
-                  !playerTurn ||
-                  slot.copies < 1 ||
-                  econ.abilityUsed ||
-                  jammed ||
-                  econ.ram < def.ramCost;
-                return (
-                  <button
-                    key={slot.id}
-                    type="button"
-                    className={`kp-ability ${targeting?.def.id === slot.id ? "kp-ability-arming" : ""}`}
-                    disabled={disabled}
-                    onClick={() => onAbility(def)}
-                    title={`${def.name} (${def.ramCost} RAM): ${def.desc}${jammed ? " [JAMMED]" : ""}`}
-                  >
-                    <span className="kp-ability-name">{def.name}</span>
-                    <span className="kp-ability-meta">
-                      {def.ramCost}R x{slot.copies}
-                      {jammed ? " JAM" : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {econ.abilityUsed && <p className="kp-rail-dim">Ability spent this turn.</p>}
-          </section>
-
-          <button
-            type="button"
-            className="kp-endturn"
-            disabled={!playerTurn}
-            onClick={() => dispatch({ type: "endTurn" })}
-          >
-            END TURN (E)
-          </button>
+        <aside className="kp-dive2-opp">
+          <h3>INTRUSION</h3>
+          <div className="kp-rail-row">
+            <span>RAM/TURN</span>
+            <em>{oppEcon.ramPerTurn}</em>
+          </div>
+          {props.dominantTell && <p className="kp-rail-tell">{props.dominantTell}</p>}
+          {state.intentRevealed && state.oppNextIntent && (
+            <p className="kp-rail-intent">INTENT: {state.oppNextIntent}</p>
+          )}
+          <div className={state.turn === "opp" ? "kp-turnlight kp-turnlight-on" : "kp-turnlight"}>
+            {state.turn === "opp" ? "IT IS MOVING" : "HOLDING"}
+          </div>
         </aside>
       </div>
+
+      <footer className="kp-dive2-dock">
+        <div className="kp-dock-ram">
+          <span className="kp-dock-label">
+            RAM <em>{playerTurn ? econ.ram : 0}</em>
+          </span>
+          <div className="kp-ram-pips">
+            {Array.from({ length: Math.max(econ.ramPerTurn + 3, econ.ram) }).map((_, i) => (
+              <span key={i} className={i < econ.ram && playerTurn ? "kp-pip kp-pip-on" : "kp-pip"} />
+            ))}
+          </div>
+        </div>
+
+        <div className="kp-dock-abilities">
+          {state.equipped.length === 0 && <span className="kp-rail-dim">No loadout</span>}
+          {state.equipped.map((slot) => {
+            const def = ABILITY_BY_ID[slot.id];
+            if (!def) return null;
+            const jammed = slot.id in econ.disabled;
+            const disabled =
+              !playerTurn || slot.copies < 1 || econ.abilityUsed || jammed || econ.ram < def.ramCost;
+            return (
+              <button
+                key={slot.id}
+                type="button"
+                className={`kp-ability ${targeting?.def.id === slot.id ? "kp-ability-arming" : ""}`}
+                disabled={disabled}
+                onClick={() => onAbility(def)}
+                onMouseEnter={() => setInfoDef(def)}
+                onMouseLeave={() => setInfoDef(null)}
+                onFocus={() => setInfoDef(def)}
+                onBlur={() => setInfoDef(null)}
+              >
+                <span className="kp-ability-name">{def.name}</span>
+                <span className="kp-ability-meta">
+                  {def.ramCost}R x{slot.copies}
+                  {jammed ? " JAM" : ""}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          className="kp-endturn"
+          disabled={!playerTurn}
+          onClick={() => {
+            if (soundOn) playUiPress();
+            dispatch({ type: "endTurn" });
+          }}
+        >
+          END TURN (E)
+        </button>
+      </footer>
+
+      {infoDef && (
+        <div className="kp-ability-info">
+          <strong>
+            {infoDef.name} <em>T{infoDef.tier} {VERB_LABEL[infoDef.verb]} - {infoDef.ramCost} RAM</em>
+          </strong>
+          <p>{infoDef.desc}</p>
+        </div>
+      )}
 
       {overloadPick && (
         <div className="kp-overlay kp-overlay-pick">
@@ -417,12 +448,7 @@ export function DuelScreen(props: DuelScreenProps) {
                   key={id}
                   type="button"
                   onClick={() => {
-                    dispatch({
-                      type: "ability",
-                      id: overloadPick.id,
-                      targets: [],
-                      abilityTarget: id,
-                    });
+                    dispatch({ type: "ability", id: overloadPick.id, targets: [], abilityTarget: id });
                     setOverloadPick(null);
                   }}
                 >
@@ -439,7 +465,7 @@ export function DuelScreen(props: DuelScreenProps) {
 
       {state.phase !== "playing" && (
         <div className="kp-overlay">
-          <div className="kp-result">
+          <div className={`kp-result ${state.phase === "won" ? "kp-result-w" : "kp-result-l"}`}>
             {cfg.tutorial ? (
               <>
                 <h2 className="kp-result-lost">THE MACHINE SEALS ITSELF</h2>
@@ -450,11 +476,11 @@ export function DuelScreen(props: DuelScreenProps) {
               </>
             ) : state.phase === "won" ? (
               <>
-                <h2 className="kp-result-won">SIGNAL SEATED</h2>
+                <h2 className="kp-result-won">CORE SEIZED</h2>
                 <p>
                   {state.winKind === "cap"
-                    ? "The link timed out with your route closer to the core. It counts, barely."
-                    : "Your route reached the core first. The intrusion collapses behind it."}
+                    ? "The link timed out with your route closer. It counts, barely."
+                    : "Your flood touched the core first. The intrusion collapses."}
                 </p>
                 {state.strainChip > 0 && (
                   <p className="kp-result-chip">Messy work. Neural Strain -{state.strainChip}.</p>
@@ -463,7 +489,7 @@ export function DuelScreen(props: DuelScreenProps) {
             ) : (
               <>
                 <h2 className="kp-result-lost">CORE LOST</h2>
-                <p>It reached the core first. Neural Strain zeroes. The run is over.</p>
+                <p>Its flood got there first. Neural Strain zeroes. The run is over.</p>
               </>
             )}
             <button type="button" className="kp-result-btn" onClick={finish}>

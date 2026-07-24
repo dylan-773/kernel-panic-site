@@ -1,11 +1,12 @@
 import { AbilityId, AbilityVerb, DuelConfig } from "../duel-types";
 import { Rng } from "../rng";
-import { ABILITIES, BASE_ABILITIES } from "./abilities";
+import { BASE_ABILITIES } from "./abilities";
 
 /**
- * The fixed escalation curve. Every run walks the same ten days, ending in
- * the finale; per-day numbers live here so balance is one table, not code.
- * Day 10 is the finale duel alone — reaching it is the day.
+ * The fixed escalation curve for the flood-claim duel. Every run walks the
+ * same ten days, ending in the finale; per-day numbers live here so balance
+ * is one table, not code. minCost is the target route cost in rotation RAM;
+ * headStart is how many nodes deep the intrusion already sits at dive start.
  */
 
 export interface DayConfig {
@@ -13,10 +14,7 @@ export interface DayConfig {
   oppRam: number;
   greed: number;
   abilityFreq: number;
-  placesPerTurn: number;
-  /** Target winding-route length produced by the slag scatter. */
-  minPath: number;
-  /** Pre-placed intrusion nodes at dive start. */
+  minCost: number;
   headStart: number;
   /** Opponent difficulty tier of the day's three jobs. */
   jobTiers: [number, number, number];
@@ -24,15 +22,15 @@ export interface DayConfig {
 }
 
 export const DAY_CONFIGS: Record<number, DayConfig> = {
-  1: { grid: [7, 7], oppRam: 3, greed: 0.45, abilityFreq: 0.1, placesPerTurn: 1, minPath: 6, headStart: 0, jobTiers: [1, 1, 1], kitSize: 1 },
-  2: { grid: [9, 7], oppRam: 3, greed: 0.55, abilityFreq: 0.15, placesPerTurn: 1, minPath: 7, headStart: 0, jobTiers: [1, 1, 2], kitSize: 2 },
-  3: { grid: [9, 7], oppRam: 4, greed: 0.6, abilityFreq: 0.2, placesPerTurn: 2, minPath: 7, headStart: 0, jobTiers: [1, 2, 2], kitSize: 2 },
-  4: { grid: [9, 9], oppRam: 4, greed: 0.65, abilityFreq: 0.25, placesPerTurn: 2, minPath: 8, headStart: 1, jobTiers: [2, 2, 3], kitSize: 2 },
-  5: { grid: [9, 9], oppRam: 5, greed: 0.7, abilityFreq: 0.3, placesPerTurn: 2, minPath: 8, headStart: 1, jobTiers: [2, 3, 3], kitSize: 3 },
-  6: { grid: [9, 9], oppRam: 5, greed: 0.78, abilityFreq: 0.35, placesPerTurn: 3, minPath: 9, headStart: 2, jobTiers: [3, 3, 3], kitSize: 3 },
-  7: { grid: [11, 9], oppRam: 6, greed: 0.82, abilityFreq: 0.4, placesPerTurn: 3, minPath: 9, headStart: 2, jobTiers: [3, 3, 4], kitSize: 3 },
-  8: { grid: [11, 9], oppRam: 7, greed: 0.88, abilityFreq: 0.45, placesPerTurn: 3, minPath: 10, headStart: 3, jobTiers: [4, 4, 4], kitSize: 4 },
-  9: { grid: [11, 11], oppRam: 8, greed: 0.92, abilityFreq: 0.5, placesPerTurn: 4, minPath: 11, headStart: 3, jobTiers: [4, 4, 5], kitSize: 4 },
+  1: { grid: [9, 7], oppRam: 6, greed: 0.75, abilityFreq: 0.35, minCost: 16, headStart: 0, jobTiers: [1, 1, 1], kitSize: 1 },
+  2: { grid: [9, 7], oppRam: 6, greed: 0.78, abilityFreq: 0.4, minCost: 16, headStart: 1, jobTiers: [1, 1, 2], kitSize: 2 },
+  3: { grid: [9, 9], oppRam: 6, greed: 0.82, abilityFreq: 0.45, minCost: 18, headStart: 1, jobTiers: [1, 2, 2], kitSize: 2 },
+  4: { grid: [9, 9], oppRam: 7, greed: 0.85, abilityFreq: 0.5, minCost: 18, headStart: 2, jobTiers: [2, 2, 3], kitSize: 2 },
+  5: { grid: [11, 9], oppRam: 7, greed: 0.88, abilityFreq: 0.55, minCost: 20, headStart: 2, jobTiers: [2, 3, 3], kitSize: 3 },
+  6: { grid: [11, 9], oppRam: 7, greed: 0.9, abilityFreq: 0.6, minCost: 20, headStart: 2, jobTiers: [3, 3, 3], kitSize: 3 },
+  7: { grid: [11, 9], oppRam: 8, greed: 0.93, abilityFreq: 0.65, minCost: 21, headStart: 3, jobTiers: [3, 3, 4], kitSize: 3 },
+  8: { grid: [11, 11], oppRam: 8, greed: 0.95, abilityFreq: 0.7, minCost: 22, headStart: 3, jobTiers: [4, 4, 4], kitSize: 4 },
+  9: { grid: [11, 11], oppRam: 9, greed: 0.97, abilityFreq: 0.75, minCost: 22, headStart: 4, jobTiers: [4, 4, 5], kitSize: 4 },
 };
 
 export const FINAL_DAY = 10;
@@ -56,8 +54,7 @@ export function dayDuelConfig(day: number, dominant: AbilityVerb, kitSeed: numbe
     oppRam: d.oppRam,
     greed: d.greed,
     abilityFreq: d.abilityFreq,
-    placesPerTurn: d.placesPerTurn,
-    minPath: d.minPath,
+    minCost: d.minCost,
     headStart: d.headStart,
     oppKit: buildOppKit(d.kitSize, dominant, kitSeed),
     dominant,
@@ -65,39 +62,37 @@ export function dayDuelConfig(day: number, dominant: AbilityVerb, kitSeed: numbe
 }
 
 /**
- * The father's machine. Top of every curve, full mirrored kit (every base
- * verb), the biggest grid. Mechanically an ordinary duel — that is the point.
+ * The father's machine. Top of every curve, the full kit, the biggest grid,
+ * already four nodes deep when you sit down. Mechanically an ordinary duel;
+ * that is the point.
  */
 export function finaleConfig(): DuelConfig {
   return {
     w: 13,
     h: 11,
-    oppRam: 9,
-    greed: 0.97,
-    abilityFreq: 0.55,
-    placesPerTurn: 4,
-    minPath: 12,
-    headStart: 4,
+    oppRam: 10,
+    greed: 1,
+    abilityFreq: 0.8,
+    minCost: 24,
+    headStart: 5,
     oppKit: BASE_ABILITIES.map((a) => a.id),
     dominant: "redirect",
   };
 }
 
 /**
- * The scripted, unwinnable opening dive. The machine draws only crosses,
- * never misplays, and out-generates the player three to one on a grid too
- * wide to rush: it reaches the core on its first turn cycle no matter what
- * the player does. Losing it is the tutorial's final lesson.
+ * The scripted, unwinnable opening dive: the machine generates nearly
+ * triple the player's RAM against a route it can finish in one turn cycle.
+ * Losing it is the tutorial's final lesson.
  */
 export function tutorialConfig(): DuelConfig {
   return {
     w: 9,
     h: 7,
-    oppRam: 8,
+    oppRam: 22,
     greed: 1,
     abilityFreq: 0,
-    placesPerTurn: 3,
-    minPath: 0,
+    minCost: 14,
     headStart: 0,
     oppKit: [],
     dominant: "redirect",

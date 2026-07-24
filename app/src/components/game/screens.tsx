@@ -183,9 +183,11 @@ export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
 export function BuildScreen({
   state,
   dispatch,
+  floating = false,
 }: {
   state: GameState;
   dispatch: Dispatch;
+  floating?: boolean;
 }) {
   const run = state.run as RunState;
   const meta = state.meta;
@@ -236,11 +238,12 @@ export function BuildScreen({
               const price = copyPrice(def);
               return (
                 <div key={id} className={equipped ? "kp-arch-item kp-arch-eq" : "kp-arch-item"}>
-                  <div className="kp-arch-info" title={def.desc}>
+                  <div className="kp-arch-info">
                     <strong>{def.name}</strong>
                     <span>
                       {VERB_LABEL[def.verb]} - T{def.tier} - {def.ramCost} RAM - x{copies}
                     </span>
+                    <p className="kp-arch-desc">{def.desc}</p>
                   </div>
                   <div className="kp-arch-actions">
                     <button
@@ -271,16 +274,18 @@ export function BuildScreen({
           </div>
         </div>
       </div>
-      <div className="kp-screen-actions">
-        {!isFinale && (
-          <button type="button" className="kp-btn-ghost" onClick={() => dispatch({ type: "backToDay" })}>
-            BACK
+      {!floating && (
+        <div className="kp-screen-actions">
+          {!isFinale && (
+            <button type="button" className="kp-btn-ghost" onClick={() => dispatch({ type: "backToDay" })}>
+              BACK
+            </button>
+          )}
+          <button type="button" className="kp-btn kp-btn-dive" onClick={() => dispatch({ type: "startDuel" })}>
+            {isFinale ? "DIVE INTO THE MACHINE" : "DIVE"}
           </button>
-        )}
-        <button type="button" className="kp-btn kp-btn-dive" onClick={() => dispatch({ type: "startDuel" })}>
-          {isFinale ? "DIVE INTO THE MACHINE" : "DIVE"}
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

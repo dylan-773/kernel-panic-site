@@ -182,3 +182,49 @@ export function playFx(kind: FxKind): void {
       break;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Juice voices for the flood-claim duel                               */
+/* ------------------------------------------------------------------ */
+
+/** Rising arpeggio, one tick per claimed node. The cascade sound. */
+export function playCascade(n: number): void {
+  const scale = [330, 392, 440, 523, 587, 659, 784, 880, 988, 1175];
+  const steps = Math.min(n, scale.length);
+  for (let i = 0; i < steps; i++) {
+    tone(scale[i], 0.09, { type: "square", at: i * 0.045, vol: 0.5 });
+  }
+  if (n >= 5) tone(1318, 0.22, { type: "triangle", at: steps * 0.045, vol: 0.55 });
+}
+
+/** Low slam for traps, turn loss, and other bad news. */
+export function playBoom(): void {
+  tone(90, 0.4, { type: "sawtooth", vol: 0.8, slide: 38 });
+  noise(0.32, { vol: 0.6, cutoff: 500 });
+}
+
+/** End-of-duel stinger. */
+export function playStinger(won: boolean): void {
+  if (won) {
+    tone(392, 0.12, { vol: 0.5 });
+    tone(523, 0.12, { at: 0.1, vol: 0.5 });
+    tone(659, 0.14, { at: 0.2, vol: 0.55 });
+    tone(784, 0.34, { at: 0.32, type: "triangle", vol: 0.6 });
+    tone(1046, 0.4, { at: 0.42, type: "triangle", vol: 0.4 });
+  } else {
+    tone(220, 0.18, { vol: 0.55 });
+    tone(174, 0.2, { at: 0.16, vol: 0.55 });
+    tone(116, 0.5, { at: 0.34, type: "sawtooth", vol: 0.6, slide: 60 });
+    noise(0.4, { at: 0.34, vol: 0.4, cutoff: 400 });
+  }
+}
+
+/** Small UI feedback ticks. */
+export function playUiTick(): void {
+  tone(880, 0.03, { vol: 0.16 });
+}
+
+export function playUiPress(): void {
+  tone(240, 0.06, { vol: 0.3 });
+  tone(480, 0.04, { at: 0.02, vol: 0.2 });
+}

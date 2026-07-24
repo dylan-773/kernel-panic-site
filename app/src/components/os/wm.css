@@ -1,0 +1,188 @@
+/* ============================================================
+   KP/OS window manager + desktop icons
+   Pixel-art chrome: no radius, 2px borders, hard drop shadows,
+   steps() timing only. Uses --kp-* tokens exclusively.
+   ============================================================ */
+
+/* ---------- floating window ---------- */
+
+.kp-fw {
+  position: absolute;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  background: var(--kp-panel);
+  border: 2px solid var(--kp-line);
+  box-shadow:
+    0 0 0 2px #05060a,
+    8px 8px 0 rgba(0, 0, 0, 0.45);
+  animation: kp-fw-in 140ms steps(3) both;
+  outline: none;
+}
+
+.kp-fw:focus {
+  outline: none;
+}
+
+.kp-fw-focused {
+  border-color: var(--kp-signal);
+}
+
+.kp-fw-dragging {
+  user-select: none;
+}
+
+@keyframes kp-fw-in {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.kp-fw-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 6px 10px;
+  background: linear-gradient(180deg, var(--kp-panel2), var(--kp-panel));
+  border-bottom: 2px solid var(--kp-line);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.kp-fw-dragging .kp-fw-bar {
+  cursor: grabbing;
+}
+
+.kp-fw-title {
+  font-family: var(--kp-display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--kp-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kp-fw-focused .kp-fw-title {
+  color: var(--kp-signal);
+  text-shadow: 0 0 8px var(--kp-signal-glow);
+}
+
+.kp-fw-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--kp-display);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--kp-text);
+  background: var(--kp-panel2);
+  border: 2px solid var(--kp-line);
+  padding: 0;
+  cursor: pointer;
+}
+
+.kp-fw-close:hover {
+  border-color: var(--kp-rose);
+  color: var(--kp-rose-hot);
+  background: var(--kp-rose-soft);
+}
+
+.kp-fw-close:active {
+  transform: translate(1px, 1px);
+}
+
+.kp-fw-body {
+  flex: 1;
+  min-height: 0;
+  max-height: 62vh;
+  overflow: auto;
+  color: var(--kp-text);
+  font-family: var(--kp-mono);
+}
+
+/* ---------- desktop icons ---------- */
+
+.kp-dicon-grid {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kp-dicon {
+  width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  background: transparent;
+  border: 2px solid transparent;
+  color: var(--kp-text);
+  cursor: pointer;
+}
+
+.kp-dicon:hover {
+  outline: 2px solid var(--kp-signal);
+  outline-offset: -2px;
+}
+
+.kp-dicon:active {
+  transform: translate(1px, 1px);
+}
+
+.kp-dicon-glyph {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
+}
+
+.kp-dicon-label {
+  font-family: var(--kp-display);
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: var(--kp-text);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.9);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kp-dicon-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--kp-rose);
+  border: 2px solid var(--kp-bg0);
+  color: var(--kp-signal-hot);
+  font-family: var(--kp-display);
+  font-size: 9px;
+  line-height: 1;
+}

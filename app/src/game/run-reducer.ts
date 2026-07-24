@@ -42,7 +42,7 @@ export type RunAction =
   | { type: "endRunAck" }
   | { type: "toggleSound" };
 
-export const BASE_RAM = 4;
+export const BASE_RAM = 5;
 export const BASE_CAPACITY = 2;
 export const START_STRAIN = 100;
 
@@ -145,7 +145,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     }
 
     case "equip": {
-      if (!run || run.screen !== "build") return state;
+      if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
       if (run.equipped.includes(action.id)) return state;
       if (run.equipped.length >= run.capacity) return state;
       if (!meta.unlocked.includes(action.id)) return state;
@@ -154,7 +154,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     }
 
     case "unequip": {
-      if (!run || run.screen !== "build") return state;
+      if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
       return {
         ...state,
         run: { ...run, equipped: run.equipped.filter((id) => id !== action.id) },
@@ -162,7 +162,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     }
 
     case "buyCopy": {
-      if (!run || run.screen !== "build") return state;
+      if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
       const def = ABILITY_BY_ID[action.id];
       if (!def || !meta.unlocked.includes(action.id)) return state;
       const price = copyPrice(def);
