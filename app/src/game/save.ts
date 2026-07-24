@@ -14,6 +14,7 @@ export interface MetaState {
   runCount: number;
   machineOpened: boolean;
   sound: boolean;
+  music: boolean;
 }
 
 export type RunScreen =
@@ -70,6 +71,7 @@ export const EMPTY_META: MetaState = {
   runCount: 0,
   machineOpened: false,
   sound: true,
+  music: true,
 };
 
 export function loadMeta(): MetaState {
@@ -83,6 +85,7 @@ export function loadMeta(): MetaState {
       runCount: typeof p.runCount === "number" ? p.runCount : 0,
       machineOpened: p.machineOpened === true,
       sound: p.sound !== false,
+      music: p.music !== false,
     };
   } catch {
     return EMPTY_META;
@@ -179,6 +182,7 @@ export function loadSlotMeta(slot: number): MetaState {
       runCount: typeof p.runCount === "number" ? p.runCount : 0,
       machineOpened: p.machineOpened === true,
       sound: p.sound !== false,
+      music: p.music !== false,
     };
   } catch {
     return EMPTY_META;

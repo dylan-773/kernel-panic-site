@@ -5,6 +5,9 @@ import {
   playFx,
   playStinger,
   playUiPress,
+  sfx,
+  startDrone,
+  stopDrone,
 } from "../../game/audio";
 import { ABILITY_BY_ID, VERB_LABEL } from "../../game/content/abilities";
 import {
@@ -12,7 +15,7 @@ import {
   redirectTargetLegal,
   shieldTargetLegal,
 } from "../../game/duel-actions";
-import { canRotate } from "../../game/duel-power";
+import { canRotate, routeCost } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
 import {
@@ -126,40 +129,40 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
       break;
     case "redirect":
       shake = 1;
-      if (soundOn) playFx("scramble");
+      if (soundOn) sfx("redirect", { jitter: 0.03 });
       break;
     case "rotate":
-      if (soundOn) playFx("rotate");
+      if (soundOn) sfx("rotate", { jitter: 0.06 });
       break;
     case "deny":
-      if (soundOn) playFx("deny");
+      if (soundOn) sfx("deny");
       break;
     case "endTurn":
-      if (soundOn) playFx("ping");
+      if (soundOn) sfx("endTurn");
       break;
     case "trapSet":
-      if (soundOn) playFx("block");
+      if (soundOn) sfx("trapSet");
       break;
     case "scan":
-      if (soundOn) playFx("ping");
+      if (soundOn) sfx("scanCast");
       pulse = mk("SCANNED", "kp-pulse-info");
       break;
     case "shield":
-      if (soundOn) playFx("unjam");
+      if (soundOn) sfx("shieldCast");
       break;
     case "overload":
-      if (soundOn) playFx("freeze");
+      if (soundOn) sfx("overloadCast");
       pulse = mk("JAMMED", "kp-pulse-info");
       break;
     case "overclock":
-      if (soundOn) playFx("power");
+      if (soundOn) sfx("overclockCast");
       break;
     case "firewall":
-      if (soundOn) playFx("andOpen");
+      if (soundOn) sfx("firewallCast");
       pulse = mk("FIREWALL UP", "kp-pulse-info");
       break;
     case "backdoor":
-      if (soundOn) playFx("loot");
+      if (soundOn) sfx("backdoorCast");
       break;
     default:
       break;
@@ -186,12 +189,31 @@ export function DuelScreen(props: DuelScreenProps) {
   const playerTurn = state.phase === "playing" && state.turn === "player";
   const econ = state.econ.player;
 
-  // Opponent moves on a readable cadence.
+  // Opponent moves on a readable cadence, with a low presence drone.
   useEffect(() => {
     if (state.phase !== "playing" || state.turn !== "opp") return;
+    if (soundOn) startDrone();
     const t = setInterval(() => dispatch({ type: "oppStep" }), 420);
+    return () => {
+      clearInterval(t);
+      stopDrone();
+    };
+  }, [state.phase, state.turn, soundOn]);
+
+  // Tension heartbeat when either flood is within reach of the core.
+  useEffect(() => {
+    if (state.phase !== "playing" || !soundOn) return;
+    const pc = routeCost(state, "player");
+    const oc = routeCost(state, "opp");
+    const near = Math.min(isFinite(pc) ? pc : 99, isFinite(oc) ? oc : 99);
+    if (near > 3) return;
+    const beat = () => {
+      sfx("heartbeat", { vol: near <= 1 ? 1 : 0.7, rate: near <= 1 ? 1.15 : 1 });
+    };
+    beat();
+    const t = setInterval(beat, near <= 1 ? 650 : 950);
     return () => clearInterval(t);
-  }, [state.phase, state.turn]);
+  }, [state.round, state.turn, state.phase, soundOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Juice: drain the fx queue into sound, shake, and impact labels.
   useEffect(() => {
@@ -200,7 +222,7 @@ export function DuelScreen(props: DuelScreenProps) {
     const newPulses: Pulse[] = [];
     for (const e of state.fx) {
       if (e.kind === "oppAim") {
-        if (soundOn) playFx("block");
+        if (soundOn) sfx("aim", { jitter: 0.04 });
         continue;
       }
       if (e.kind.startsWith("oppCast:")) {
@@ -208,7 +230,7 @@ export function DuelScreen(props: DuelScreenProps) {
         const lines = VIRUS_LINES[verb] ?? VIRUS_LINES.arm;
         setVirus({ key: e.id, text: lines[Math.floor(Math.random() * lines.length)] });
         if (verb === "arm") setSweep((n) => n + 1);
-        if (soundOn) playFx("alarm");
+        if (soundOn) sfx("virusSting");
         maxShake = Math.max(maxShake, 1);
         continue;
       }

@@ -40,7 +40,8 @@ export type RunAction =
   | { type: "chooseUpgrade"; pick: "ram" | "cap" }
   | { type: "startFinale" }
   | { type: "endRunAck" }
-  | { type: "toggleSound" };
+  | { type: "toggleSound" }
+  | { type: "toggleMusic" };
 
 export const BASE_RAM = 5;
 export const BASE_CAPACITY = 2;
@@ -87,6 +88,9 @@ export function runReducer(state: GameState, action: RunAction): GameState {
 
     case "toggleSound":
       return { ...state, meta: { ...meta, sound: !meta.sound } };
+
+    case "toggleMusic":
+      return { ...state, meta: { ...meta, music: !meta.music } };
 
     case "startRun": {
       const runNumber = meta.runCount + 1;

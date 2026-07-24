@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -155,6 +156,10 @@ export function FloatingWindow({
   const barRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    void import("../../game/audio").then((a) => a.sfx("winOpen", { bus: "ui" }));
+  }, []);
 
   const clampAndMove = useCallback(
     (rawX: number, rawY: number) => {

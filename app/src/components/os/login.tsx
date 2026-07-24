@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { playUiPress, playUiTick } from "../../game/audio";
+import { playUiPress, playUiTick, sfx } from "../../game/audio";
 import { SlotSummary, slotSummaries } from "../../game/save";
 
 /**
@@ -37,7 +37,7 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
         playUiTick();
         setLogin({ ...login, typedPass: PASSWORD.slice(0, login.typedPass.length + 1) });
       } else {
-        playUiPress();
+        sfx("granted", { bus: "ui" });
         setLogin({ ...login, granted: true });
       }
     }, login.typedUser.length < login.user.length ? 70 : 45);

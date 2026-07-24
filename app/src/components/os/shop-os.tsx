@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, type ReactNode } from "react";
-import { setMuted } from "../../game/audio";
+import { playMusic, playUiPress, setMuted, setMusicOn, sfx } from "../../game/audio";
 import { ABILITIES, VERB_LABEL, VERB_TELL } from "../../game/content/abilities";
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../../game/content/arc";
 import { finaleWinScene, runEndScene, runOpenerScene } from "../../game/content/story";
@@ -152,6 +152,31 @@ export function ShopOS() {
     setMuted(!state.meta.sound);
   }, [state.meta.sound]);
 
+  useEffect(() => {
+    setMusicOn(state.meta.music);
+  }, [state.meta.music]);
+
+  // Which bed fits the moment: the machine's theme for the tutorial and
+  // finale dives, the duel bed for jobs, the desk bed everywhere else.
+  const musicScreen = state.run?.screen ?? null;
+  const inDive = musicScreen === "duel" || musicScreen === "tutorial";
+  const isFinaleDive =
+    musicScreen === "tutorial" || (musicScreen === "duel" && state.run?.day === FINAL_DAY);
+  useEffect(() => {
+    if (slot === null) return;
+    void playMusic(inDive ? (isFinaleDive ? "finale" : "dive") : "desk");
+  }, [inDive, isFinaleDive, slot]);
+
+  // One delegated listener gives every OS button a press sound.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("button")) playUiPress();
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, []);
+
   // Every flow transition surfaces the shopfront window (the user may have
   // closed it to sit on the desktop; new game states reopen and focus it).
   const flowScreen = state.run?.screen ?? null;
@@ -296,6 +321,7 @@ export function ShopOS() {
   // or pre-dive check backs out to the queue; the queue itself just closes.
   const flowClosable = !UNCLOSABLE_SCREENS.has(screen ?? "");
   const closeFlow = () => {
+    sfx("winClose", { bus: "ui" });
     if (screen === "analyze" || screen === "build") dispatch({ type: "backToDay" });
     wm.close("flow");
   };
@@ -309,12 +335,15 @@ export function ShopOS() {
             label="JOBS.QUE"
             icon="jobs"
             badge={run && openJobs > 0 ? openJobs : undefined}
-            onOpen={() => wm.open("flow")}
+            onOpen={() => {
+              sfx("icon", { bus: "ui" });
+              wm.open("flow");
+            }}
           />
-          <DesktopIcon label="LOADOUT.CFG" icon="loadout" onOpen={() => wm.toggle("loadout")} />
-          <DesktopIcon label="DAD.LOG" icon="journal" onOpen={() => wm.toggle("journal")} />
-          <DesktopIcon label="MANUAL.TXT" icon="manual" onOpen={() => wm.toggle("manual")} />
-          <DesktopIcon label="LEDGER.LOG" icon="ledger" onOpen={() => wm.toggle("ledger")} />
+          <DesktopIcon label="LOADOUT.CFG" icon="loadout" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("loadout"); }} />
+          <DesktopIcon label="DAD.LOG" icon="journal" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("journal"); }} />
+          <DesktopIcon label="MANUAL.TXT" icon="manual" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("manual"); }} />
+          <DesktopIcon label="LEDGER.LOG" icon="ledger" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("ledger"); }} />
         </IconGrid>
 
         {WIN_DEFS.map((def) => {
@@ -328,7 +357,7 @@ export function ShopOS() {
               z={wm.zIndexOf(def.id)}
               focused={topId === def.id}
               closable={isFlow ? flowClosable : true}
-              onClose={isFlow ? closeFlow : () => wm.close(def.id)}
+              onClose={isFlow ? closeFlow : () => { sfx("winClose", { bus: "ui" }); wm.close(def.id); }}
               onFocus={() => wm.focus(def.id)}
               onMove={(x, y) => wm.move(def.id, x, y)}
             >
@@ -371,9 +400,13 @@ export function ShopOS() {
         {startOpen && (
           <div className="kp-startmenu">
             <span className="kp-startmenu-user">USER 0{slot}</span>
+            <button type="button" onClick={() => dispatch({ type: "toggleMusic" })}>
+              MUSIC {meta.music ? "ON" : "OFF"}
+            </button>
             <button
               type="button"
               onClick={() => {
+                void playMusic(null);
                 setStartOpen(false);
                 setSlot(null);
                 dispatch({ type: "hydrate", meta: EMPTY_META, run: null });

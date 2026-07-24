@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { sfx } from "../../game/audio";
 import { ABILITY_BY_ID, VERB_LABEL, VERB_TELL, copyPrice } from "../../game/content/abilities";
 import { DAY_CONFIGS, FINAL_DAY } from "../../game/content/arc";
 import { CUSTOMERS, CustomerProfile } from "../../game/content/customers";
@@ -31,6 +32,7 @@ export function StoryScene({ scene, onDone }: { scene: Scene; onDone: () => void
   if (!b) return null;
   const last = beat >= scene.beats.length - 1;
   const advance = () => {
+    sfx("story", { bus: "ui", jitter: 0.05 });
     if (last) onDone();
     else setBeat(beat + 1);
   };
@@ -296,6 +298,9 @@ export function BuildScreen({
 
 export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
   const r = run.lastResult;
+  useEffect(() => {
+    if (r?.unlocked) sfx("unlock", { at: 0.3 });
+  }, [r?.unlocked]);
   if (!r) return null;
   const job = run.jobs[r.jobIndex];
   const c = job ? customerById(job.customerId) : null;
