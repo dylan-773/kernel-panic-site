@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, type ReactNode } from "react";
-import { playMusic, playUiPress, setMuted, setMusicOn, sfx, unlockAudio } from "../../game/audio";
+import { playMusic, playUiPress, setMuted, setMusicOn, sfx, testBeep, unlockAudio } from "../../game/audio";
 import { ABILITIES, VERB_LABEL, VERB_TELL } from "../../game/content/abilities";
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../../game/content/arc";
 import { finaleWinScene, runEndScene, runOpenerScene } from "../../game/content/story";
@@ -408,6 +408,9 @@ export function ShopOS() {
             <span className="kp-startmenu-user">USER 0{slot}</span>
             <button type="button" onClick={() => dispatch({ type: "toggleMusic" })}>
               MUSIC {meta.music ? "ON" : "OFF"}
+            </button>
+            <button type="button" onClick={() => testBeep()}>
+              TEST SOUND
             </button>
             <button
               type="button"

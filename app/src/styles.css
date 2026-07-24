@@ -2665,3 +2665,36 @@ img {
     animation: none;
   }
 }
+
+/* ---------- audio check ---------- */
+
+.kp-audiocheck {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 430px;
+  text-align: center;
+}
+
+.kp-audiocheck button {
+  font-family: var(--kp-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  padding: 9px 16px;
+  background: var(--kp-panel2);
+  border: 2px solid var(--kp-gold);
+  color: var(--kp-gold);
+  cursor: pointer;
+}
+
+.kp-audiocheck button:hover {
+  background: rgba(217, 165, 63, 0.12);
+}
+
+.kp-audiocheck p {
+  font-family: var(--kp-term);
+  font-size: 17px;
+  line-height: 1.3;
+  color: var(--kp-steel);
+}

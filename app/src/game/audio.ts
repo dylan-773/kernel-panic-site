@@ -30,6 +30,37 @@ export function unlockAudio(): void {
   ensureCtx();
 }
 
+/** Diagnostic snapshot for the in-game audio check. */
+export function audioDebug(): { state: string; rate: number; masterGain: number; muted: boolean } {
+  return {
+    state: ctx ? ctx.state : "not created",
+    rate: ctx ? ctx.sampleRate : 0,
+    masterGain: master ? master.gain.value : -1,
+    muted,
+  };
+}
+
+/**
+ * Loud, unmissable two-tone beep wired straight to the destination,
+ * bypassing every bus and mute flag. If this is silent, the problem is
+ * outside the page (tab mute, per-site sound setting, output device).
+ */
+export function testBeep(): void {
+  const c = ensureCtx();
+  if (!c) return;
+  const gain = c.createGain();
+  gain.gain.value = 0.5;
+  gain.connect(c.destination);
+  for (const [freq, at] of [[660, 0], [880, 0.25]] as Array<[number, number]>) {
+    const osc = c.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    osc.start(c.currentTime + at);
+    osc.stop(c.currentTime + at + 0.2);
+  }
+}
+
 function ensureCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   const Ctor = window.AudioContext;

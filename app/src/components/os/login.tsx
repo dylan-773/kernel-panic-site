@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { playUiPress, playUiTick, sfx } from "../../game/audio";
+import { audioDebug, playUiPress, playUiTick, sfx, testBeep } from "../../game/audio";
 import { SlotSummary, slotSummaries } from "../../game/save";
 
 /**
@@ -21,6 +21,7 @@ interface LoginState {
 export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
   const [slots, setSlots] = useState<SlotSummary[] | null>(null);
   const [login, setLogin] = useState<LoginState | null>(null);
+  const [audioStatus, setAudioStatus] = useState<string | null>(null);
 
   useEffect(() => {
     setSlots(slotSummaries());
@@ -107,6 +108,28 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
               )}
             </button>
           ))}
+        </div>
+      )}
+
+      {!login && (
+        <div className="kp-audiocheck">
+          <button
+            type="button"
+            onClick={() => {
+              testBeep();
+              setTimeout(() => {
+                const d = audioDebug();
+                setAudioStatus(
+                  d.state === "running"
+                    ? `beep played - audio engine RUNNING at ${Math.round(d.rate / 1000)}kHz. Silent? Check the tab mute, the site sound permission, and your output device.`
+                    : `audio engine ${d.state.toUpperCase()} - your browser is blocking sound. Click this button again, or check the site permissions.`,
+                );
+              }, 350);
+            }}
+          >
+            TEST SOUND
+          </button>
+          {audioStatus && <p>{audioStatus}</p>}
         </div>
       )}
 
