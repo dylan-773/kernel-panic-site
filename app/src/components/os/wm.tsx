@@ -116,6 +116,8 @@ export interface FloatingWindowProps {
   def: WinDef;
   z: number;
   focused: boolean;
+  /** When false the close button is hidden and Escape does not close. */
+  closable?: boolean;
   onClose: () => void;
   onFocus: () => void;
   onMove: (x: number, y: number) => void;
@@ -139,7 +141,16 @@ interface DragState {
   originY: number;
 }
 
-export function FloatingWindow({ def, z, focused, onClose, onFocus, onMove, children }: FloatingWindowProps) {
+export function FloatingWindow({
+  def,
+  z,
+  focused,
+  closable = true,
+  onClose,
+  onFocus,
+  onMove,
+  children,
+}: FloatingWindowProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -210,12 +221,12 @@ export function FloatingWindow({ def, z, focused, onClose, onFocus, onMove, chil
 
   const handleKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && closable) {
         e.stopPropagation();
         onClose();
       }
     },
-    [onClose],
+    [onClose, closable],
   );
 
   const width = Math.max(def.w, MIN_WIDTH);
@@ -243,9 +254,11 @@ export function FloatingWindow({ def, z, focused, onClose, onFocus, onMove, chil
         onPointerCancel={endDrag}
       >
         <span className="kp-fw-title">{def.title}</span>
-        <button type="button" className="kp-fw-close" onClick={onClose} aria-label={`Close ${def.title}`}>
-          <span aria-hidden="true">X</span>
-        </button>
+        {closable && (
+          <button type="button" className="kp-fw-close" onClick={onClose} aria-label={`Close ${def.title}`}>
+            <span aria-hidden="true">X</span>
+          </button>
+        )}
       </div>
       <div className="kp-fw-body">{children}</div>
     </div>

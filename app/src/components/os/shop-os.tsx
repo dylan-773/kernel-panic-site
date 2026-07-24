@@ -23,9 +23,10 @@ import { DesktopIcon, IconGrid } from "./icons";
 import { FloatingWindow, useWindowManager, WinDef } from "./wm";
 
 const WIN_DEFS: WinDef[] = [
-  { id: "loadout", title: "LOADOUT.CFG", x: 320, y: 36, w: 620 },
-  { id: "manual", title: "MANUAL.TXT", x: 120, y: 56, w: 540 },
-  { id: "ledger", title: "LEDGER.LOG", x: 480, y: 110, w: 380 },
+  { id: "flow", title: "SHOPFRONT.EXE", x: 230, y: 16, w: 780 },
+  { id: "loadout", title: "LOADOUT.CFG", x: 340, y: 46, w: 620 },
+  { id: "manual", title: "MANUAL.TXT", x: 120, y: 66, w: 540 },
+  { id: "ledger", title: "LEDGER.LOG", x: 500, y: 120, w: 380 },
 ];
 
 function windowTitle(screen: string | null): string {
@@ -49,21 +50,8 @@ function windowTitle(screen: string | null): string {
   }
 }
 
-function OsWindow({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="kp-window">
-      <header className="kp-window-bar">
-        <span className="kp-window-title">{title}</span>
-        <span className="kp-window-lights" aria-hidden="true">
-          <i />
-          <i />
-          <i className="kp-window-close" />
-        </span>
-      </header>
-      <div className="kp-window-body">{children}</div>
-    </section>
-  );
-}
+/** Flow screens where closing the window has no sensible meaning. */
+const UNCLOSABLE_SCREENS = new Set(["opener", "runEnd", "finaleWin", "upgrade", "result"]);
 
 function ManualContent() {
   return (
@@ -123,6 +111,15 @@ export function ShopOS() {
   useEffect(() => {
     setMuted(!state.meta.sound);
   }, [state.meta.sound]);
+
+  // Every flow transition surfaces the shopfront window (the user may have
+  // closed it to sit on the desktop; new game states reopen and focus it).
+  const flowScreen = state.run?.screen ?? null;
+  useEffect(() => {
+    if (flowScreen === "duel" || flowScreen === "tutorial") return;
+    wm.open("flow");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowScreen]);
 
   if (!ready || !booted) {
     return <BootScreen onSkip={ready ? () => setBooted(true) : undefined} />;
@@ -238,6 +235,20 @@ export function ShopOS() {
 
   const openJobs = run ? run.jobsDone.filter((d) => !d).length : 0;
 
+  // Highest z among open windows owns focus styling.
+  const topId = wm.openIds.reduce(
+    (top, id) => (wm.zIndexOf(id) > wm.zIndexOf(top) ? id : top),
+    wm.openIds[0] ?? "",
+  );
+
+  // Closing the shopfront means different things per screen: a diagnostic
+  // or pre-dive check backs out to the queue; the queue itself just closes.
+  const flowClosable = !UNCLOSABLE_SCREENS.has(screen ?? "");
+  const closeFlow = () => {
+    if (screen === "analyze" || screen === "build") dispatch({ type: "backToDay" });
+    wm.close("flow");
+  };
+
   return (
     <div className="kp-os">
       <div className="kp-wallpaper" aria-hidden="true" />
@@ -247,33 +258,29 @@ export function ShopOS() {
             label="JOBS.QUE"
             icon="jobs"
             badge={run && openJobs > 0 ? openJobs : undefined}
-            onOpen={() => {
-              if (run && (run.screen === "analyze" || run.screen === "build")) {
-                dispatch({ type: "backToDay" });
-              }
-            }}
+            onOpen={() => wm.open("flow")}
           />
           <DesktopIcon label="LOADOUT.CFG" icon="loadout" onOpen={() => wm.toggle("loadout")} />
           <DesktopIcon label="MANUAL.TXT" icon="manual" onOpen={() => wm.toggle("manual")} />
           <DesktopIcon label="LEDGER.LOG" icon="ledger" onOpen={() => wm.toggle("ledger")} />
         </IconGrid>
 
-        <OsWindow title={windowTitle(screen)}>{content}</OsWindow>
-
         {WIN_DEFS.map((def) => {
           if (!wm.isOpen(def.id)) return null;
           const pos = wm.posOf(def.id);
-          const focused = wm.openIds[wm.openIds.length - 1] === def.id;
+          const isFlow = def.id === "flow";
           return (
             <FloatingWindow
               key={def.id}
-              def={{ ...def, x: pos.x, y: pos.y }}
+              def={{ ...def, title: isFlow ? windowTitle(screen) : def.title, x: pos.x, y: pos.y }}
               z={wm.zIndexOf(def.id)}
-              focused={focused}
-              onClose={() => wm.close(def.id)}
+              focused={topId === def.id}
+              closable={isFlow ? flowClosable : true}
+              onClose={isFlow ? closeFlow : () => wm.close(def.id)}
               onFocus={() => wm.focus(def.id)}
               onMove={(x, y) => wm.move(def.id, x, y)}
             >
+              {isFlow && content}
               {def.id === "manual" && <ManualContent />}
               {def.id === "loadout" &&
                 (run ? (

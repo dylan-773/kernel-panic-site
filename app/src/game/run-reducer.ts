@@ -136,7 +136,10 @@ export function runReducer(state: GameState, action: RunAction): GameState {
 
     case "backToDay": {
       if (!run) return state;
-      return { ...state, run: { ...run, activeJob: null, screen: "day" } };
+      // Day 10 has no job board; backing out of the finale build returns to
+      // the back-room door instead.
+      const screen = run.day === FINAL_DAY ? "finalePre" : "day";
+      return { ...state, run: { ...run, activeJob: null, screen } };
     }
 
     case "toBuild": {
