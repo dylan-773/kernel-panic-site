@@ -101,11 +101,13 @@ export function renderSfxr(ps: SfxrParams): Float32Array {
   };
   reseedNoise();
 
-  // Envelope lengths in samples.
+  // Envelope lengths in samples. Unlike original sfxr (which squares a
+  // 0..1 knob), attack/sustain/decay here are plain SECONDS - the preset
+  // palette is authored that way.
   const envLength = [
-    Math.floor(ps.attack * ps.attack * 100000),
-    Math.floor(ps.sustain * ps.sustain * 100000),
-    Math.floor(ps.decay * ps.decay * 100000),
+    Math.floor(ps.attack * SAMPLE_RATE),
+    Math.floor(ps.sustain * SAMPLE_RATE),
+    Math.floor(ps.decay * SAMPLE_RATE),
   ];
   const totalLength = Math.max(envLength[0] + envLength[1] + envLength[2], SAMPLE_RATE * 0.02);
 
@@ -244,7 +246,7 @@ export function renderSfxr(ps: SfxrParams): Float32Array {
 
       ssample += sample * envVol;
     }
-    ssample = (ssample / 8) * 0.16 * ps.volume * 2;
+    ssample = (ssample / 8) * 0.5 * ps.volume * 2;
     out[t] = Math.max(-1, Math.min(1, ssample));
     written = t + 1;
   }

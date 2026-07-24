@@ -234,6 +234,23 @@ export function saveSlotRun(slot: number, r: RunState | null): void {
   }
 }
 
+const SOUND_RESET_KEY = "kernel-panic-sound-reset-v4";
+
+/**
+ * Pre-v4 builds were effectively silent, so a stale muted flag would make
+ * the first audible build seem broken. Reset the flags once, ever.
+ */
+export function applyOneTimeSoundReset(meta: MetaState): MetaState {
+  if (typeof window === "undefined") return meta;
+  try {
+    if (window.localStorage.getItem(SOUND_RESET_KEY)) return meta;
+    window.localStorage.setItem(SOUND_RESET_KEY, "1");
+    return { ...meta, sound: true, music: true };
+  } catch {
+    return meta;
+  }
+}
+
 export interface SlotSummary {
   slot: number;
   empty: boolean;

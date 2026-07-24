@@ -18,11 +18,16 @@ let musicOn = true;
 
 export function setMuted(m: boolean): void {
   muted = m;
-  if (master && ctx) master.gain.setTargetAtTime(m ? 0 : 0.55, ctx.currentTime, 0.02);
+  if (master && ctx) master.gain.setTargetAtTime(m ? 0 : 0.8, ctx.currentTime, 0.02);
 }
 
 export function isMuted(): boolean {
   return muted;
+}
+
+/** Create/resume the context inside a user gesture (autoplay unlock). */
+export function unlockAudio(): void {
+  ensureCtx();
 }
 
 function ensureCtx(): AudioContext | null {
@@ -32,16 +37,16 @@ function ensureCtx(): AudioContext | null {
   if (!ctx) {
     ctx = new Ctor();
     master = ctx.createGain();
-    master.gain.value = muted ? 0 : 0.55;
+    master.gain.value = muted ? 0 : 0.8;
     master.connect(ctx.destination);
     uiBus = ctx.createGain();
-    uiBus.gain.value = 0.5;
+    uiBus.gain.value = 0.7;
     uiBus.connect(master);
     gameBus = ctx.createGain();
-    gameBus.gain.value = 0.85;
+    gameBus.gain.value = 1;
     gameBus.connect(master);
     musicBus = ctx.createGain();
-    musicBus.gain.value = musicOn ? 0.34 : 0;
+    musicBus.gain.value = musicOn ? 0.3 : 0;
     musicBus.connect(master);
   }
   if (ctx.state === "suspended") void ctx.resume();
@@ -289,7 +294,7 @@ let loadingTrack: MusicTrack | null = null;
 
 export function setMusicOn(on: boolean): void {
   musicOn = on;
-  if (musicBus && ctx) musicBus.gain.setTargetAtTime(on ? 0.34 : 0, ctx.currentTime, 0.3);
+  if (musicBus && ctx) musicBus.gain.setTargetAtTime(on ? 0.3 : 0, ctx.currentTime, 0.3);
   if (on && wantedTrack) void playMusic(wantedTrack);
 }
 

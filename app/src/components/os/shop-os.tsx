@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, type ReactNode } from "react";
-import { playMusic, playUiPress, setMuted, setMusicOn, sfx } from "../../game/audio";
+import { playMusic, playUiPress, setMuted, setMusicOn, sfx, unlockAudio } from "../../game/audio";
 import { ABILITIES, VERB_LABEL, VERB_TELL } from "../../game/content/abilities";
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../../game/content/arc";
 import { finaleWinScene, runEndScene, runOpenerScene } from "../../game/content/story";
@@ -8,6 +8,7 @@ import { visibleJournal } from "../../game/content/journal";
 import { runReducer } from "../../game/run-reducer";
 import {
   EMPTY_META,
+  applyOneTimeSoundReset,
   loadSlotMeta,
   loadSlotRun,
   migrateLegacySave,
@@ -170,6 +171,7 @@ export function ShopOS() {
   // One delegated listener gives every OS button a press sound.
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
+      unlockAudio();
       const t = e.target as HTMLElement | null;
       if (t?.closest("button")) playUiPress();
     };
@@ -194,7 +196,11 @@ export function ShopOS() {
     return (
       <LoginScreen
         onLogin={(n) => {
-          dispatch({ type: "hydrate", meta: loadSlotMeta(n), run: loadSlotRun(n) });
+          dispatch({
+            type: "hydrate",
+            meta: applyOneTimeSoundReset(loadSlotMeta(n)),
+            run: loadSlotRun(n),
+          });
           setSlot(n);
         }}
       />
