@@ -96,7 +96,7 @@ function buildHead(meta: AppMeta) {
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" as const },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap",
       },
       { rel: "stylesheet", href: appCss },
       { rel: "apple-touch-icon", href: "/assets/mark.png" },
@@ -112,7 +112,7 @@ function NotFoundComponent() {
       <h1>No signal on this route</h1>
       <p className="kp-syspage-sub">The page you are looking for does not exist or has moved.</p>
       <Link to="/" className="kp-cta-back">
-        Back to bench
+        Back to the shop
       </Link>
     </div>
   );
