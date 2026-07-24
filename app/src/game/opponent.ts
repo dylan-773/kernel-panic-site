@@ -4,6 +4,7 @@ import {
   applyOverloadLock,
   applyRotate,
   armTargetLegal,
+  emit,
   endOppTurn,
   finishDuel,
   redirectTargetLegal,
@@ -109,14 +110,19 @@ function computeIntent(s: DuelState): void {
   else s.oppNextIntent = "Aligning junctions toward the core";
 }
 
-/** Resolve targets and cast the pending ability. True if a cast happened. */
-function castPending(s: DuelState): boolean {
+type CastAim = { kind: "cast"; id: string; targets: number[]; abilityTarget?: string };
+
+/**
+ * Resolve the pending ability into a telegraphed cast: targets chosen now,
+ * shown to the player for one beat, applied on the next step.
+ */
+function prepareCast(s: DuelState): CastAim | null {
   const id = s.oppTurn.pendingAbility;
-  if (!id) return false;
+  if (!id) return null;
   const def = ABILITY_BY_ID[id];
   const econ = s.econ.opp;
   s.oppTurn.pendingAbility = null;
-  if (!def || econ.abilityUsed || def.ramCost > econ.ram) return false;
+  if (!def || econ.abilityUsed || def.ramCost > econ.ram) return null;
 
   const targets: number[] = [];
   switch (def.verb) {
@@ -133,7 +139,7 @@ function castPending(s: DuelState): boolean {
         pool.push(...any);
       }
       targets.push(...pool.slice(0, def.p.traps ?? 1));
-      if (targets.length === 0) return false;
+      if (targets.length === 0) return null;
       break;
     }
     case "redirect": {
@@ -158,7 +164,7 @@ function castPending(s: DuelState): boolean {
           best = i;
         }
       }
-      if (best === -1) return false;
+      if (best === -1) return null;
       targets.push(best);
       const want = def.p.targets ?? 1;
       if (want > 1) {
@@ -185,7 +191,7 @@ function castPending(s: DuelState): boolean {
         .filter((i) => s.cells[i].owner === "opp" && shieldTargetLegal(s, "opp", i))
         .sort((a, b) => coreDist(s, a) - coreDist(s, b));
       targets.push(...own.slice(0, def.p.targets ?? 1));
-      if (targets.length === 0) return false;
+      if (targets.length === 0) return null;
       break;
     }
     case "backdoor": {
@@ -204,16 +210,27 @@ function castPending(s: DuelState): boolean {
       break;
   }
 
-  applyCast(s, "opp", def, targets);
+  let abilityTarget: string | undefined;
   if (def.verb === "overload" && def.p.lockTurns) {
     const options = s.equipped.filter((e) => e.copies > 0);
     if (options.length > 0) {
       options.sort((a, b) => (ABILITY_BY_ID[b.id]?.tier ?? 0) - (ABILITY_BY_ID[a.id]?.tier ?? 0));
-      applyOverloadLock(s, "opp", def, options[0].id);
+      abilityTarget = options[0].id;
     }
   }
+  return { kind: "cast", id: def.id, targets, abilityTarget };
+}
+
+/** Land a telegraphed cast. Conditions cannot change between the beats. */
+function executeCast(s: DuelState, aim: CastAim): void {
+  const def = ABILITY_BY_ID[aim.id];
+  const econ = s.econ.opp;
+  if (!def || econ.abilityUsed || def.ramCost > econ.ram) return;
+  applyCast(s, "opp", def, aim.targets);
+  if (def.verb === "overload" && def.p.lockTurns && aim.abilityTarget) {
+    applyOverloadLock(s, "opp", def, aim.abilityTarget);
+  }
   if (def.verb === s.cfg.dominant) s.oppDominantUsed = true;
-  return true;
 }
 
 type QueueEntry = { idx: number; targetRot: number };
@@ -246,19 +263,20 @@ function buildQueue(s: DuelState, side: Side): QueueEntry[] {
 }
 
 /**
- * Execute one rotation from a committed queue. Returns false when the
- * turn has nothing more it can usefully do. `replan` must implement a
- * cost-improvement guard, or a blindspot route would burn RAM in cycles.
+ * Choose the next rotation from a committed queue WITHOUT applying it.
+ * Returns the cell index, or -1 when the turn has nothing left. `replan`
+ * must implement a cost-improvement guard, or a blindspot route would
+ * burn RAM in cycles. Fumble rolls happen here, at pick time.
  */
-function queueRotateStep(
+function pickFromQueue(
   s: DuelState,
   side: Side,
   queue: QueueEntry[],
   greed: number,
   replan: () => void,
-): boolean {
+): number {
   const econ = s.econ[side];
-  if (econ.ram < 1) return false;
+  if (econ.ram < 1) return -1;
 
   while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
   let head = queue[0];
@@ -266,7 +284,7 @@ function queueRotateStep(
     replan();
     while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
     head = queue[0];
-    if (!head) return false;
+    if (!head) return -1;
   }
   if (!canRotate(s, side, head.idx)) {
     // Claimed out from under us or shield-locked: rebuild from scratch.
@@ -274,7 +292,7 @@ function queueRotateStep(
     replan();
     while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
     head = queue[0];
-    if (!head || !canRotate(s, side, head.idx)) return false;
+    if (!head || !canRotate(s, side, head.idx)) return -1;
   }
 
   if (roll(s) >= greed) {
@@ -283,11 +301,23 @@ function queueRotateStep(
       .map((_, i) => i)
       .filter((i) => i !== head.idx && canRotate(s, side, i) && s.cells[i].owner === "none");
     if (pool.length > 0) {
-      const pick = pool[Math.floor(roll(s) * pool.length)];
-      return applyRotate(s, side, pick);
+      return pool[Math.floor(roll(s) * pool.length)];
     }
   }
-  return applyRotate(s, side, head.idx);
+  return head.idx;
+}
+
+/** Pick and apply in one beat: the balance harness's proxy-player path. */
+function queueRotateStep(
+  s: DuelState,
+  side: Side,
+  queue: QueueEntry[],
+  greed: number,
+  replan: () => void,
+): boolean {
+  const idx = pickFromQueue(s, side, queue, greed, replan);
+  if (idx === -1) return false;
+  return applyRotate(s, side, idx);
 }
 
 interface ReplanMem {
@@ -346,20 +376,43 @@ export function oppStep(s: DuelState): void {
     return; // one visible "thinking" beat
   }
 
-  if (ot.pendingAbility) {
-    if (castPending(s)) {
+  // A telegraphed move lands one beat after it was shown.
+  if (ot.aim) {
+    const aim = ot.aim;
+    ot.aim = null;
+    if (aim.kind === "cast") {
+      executeCast(s, aim);
       // Abilities can reshape the board; recommit the movement plan.
       ot.queue = buildQueue(s, "opp");
+      return;
+    }
+    if (canRotate(s, "opp", aim.idx) && s.econ.opp.ram >= 1) {
+      applyRotate(s, "opp", aim.idx);
+      return;
+    }
+    // The aimed junction was stolen between beats; fall through and replan.
+  }
+
+  if (ot.pendingAbility) {
+    const prepared = prepareCast(s);
+    if (prepared) {
+      ot.aim = prepared;
+      const def = ABILITY_BY_ID[prepared.id];
+      emit(s, `oppCast:${def?.verb ?? "arm"}`);
       return;
     }
   }
 
   const mem: ReplanMem = { n: ot.replans, lastCost: ot.lastReplanCost };
   const replan = makeReplanner(s, "opp", ot.queue, mem);
-  const acted = queueRotateStep(s, "opp", ot.queue, s.cfg.greed, replan);
+  const idx = pickFromQueue(s, "opp", ot.queue, s.cfg.greed, replan);
   ot.replans = mem.n;
   ot.lastReplanCost = mem.lastCost;
-  if (acted) return;
+  if (idx !== -1) {
+    ot.aim = { kind: "rotate", idx };
+    emit(s, "oppAim", idx);
+    return;
+  }
 
   endOppTurn(s);
 }

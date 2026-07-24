@@ -4,8 +4,16 @@ import { ABILITIES, VERB_LABEL, VERB_TELL } from "../../game/content/abilities";
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../../game/content/arc";
 import { finaleWinScene, runEndScene, runOpenerScene } from "../../game/content/story";
 import { mixSeed } from "../../game/duel-setup";
+import { visibleJournal } from "../../game/content/journal";
 import { runReducer } from "../../game/run-reducer";
-import { EMPTY_META, loadMeta, loadRun, saveMeta, saveRun } from "../../game/save";
+import {
+  EMPTY_META,
+  loadSlotMeta,
+  loadSlotRun,
+  migrateLegacySave,
+  saveSlotMeta,
+  saveSlotRun,
+} from "../../game/save";
 import { DuelScreen } from "../game/duel";
 import {
   AnalyzeScreen,
@@ -19,6 +27,7 @@ import {
   customerById,
 } from "../game/screens";
 import { BootScreen } from "./boot";
+import { LoginScreen } from "./login";
 import { DesktopIcon, IconGrid } from "./icons";
 import { FloatingWindow, useWindowManager, WinDef } from "./wm";
 
@@ -27,6 +36,7 @@ const WIN_DEFS: WinDef[] = [
   { id: "loadout", title: "LOADOUT.CFG", x: 340, y: 46, w: 620 },
   { id: "manual", title: "MANUAL.TXT", x: 120, y: 66, w: 540 },
   { id: "ledger", title: "LEDGER.LOG", x: 500, y: 120, w: 380 },
+  { id: "journal", title: "DAD.LOG", x: 200, y: 30, w: 560 },
 ];
 
 function windowTitle(screen: string | null): string {
@@ -89,24 +99,54 @@ function ManualContent() {
   );
 }
 
+function JournalContent({ meta }: { meta: import("../../game/save").MetaState }) {
+  const { unlocked, nextLocked } = visibleJournal(meta);
+  return (
+    <div className="kp-journal">
+      {unlocked.map((e) => (
+        <article key={e.id} className={`kp-jentry kp-jentry-${e.kind}`}>
+          <header>
+            <strong>{e.title}</strong>
+            <span>{e.date}</span>
+          </header>
+          {e.body.map((line, i) => (
+            <p key={i}>{line}</p>
+          ))}
+        </article>
+      ))}
+      {nextLocked && (
+        <article className="kp-jentry kp-jentry-locked">
+          <header>
+            <strong>????</strong>
+            <span>keep diving</span>
+          </header>
+          <p>There is more in the drawer. It can wait until you cannot sleep again.</p>
+        </article>
+      )}
+    </div>
+  );
+}
+
 export function ShopOS() {
   const [state, dispatch] = useReducer(runReducer, { meta: EMPTY_META, run: null });
   const [ready, setReady] = useState(false);
   const [booted, setBooted] = useState(false);
+  const [slot, setSlot] = useState<number | null>(null);
+  const [startOpen, setStartOpen] = useState(false);
   const wm = useWindowManager(WIN_DEFS);
 
   useEffect(() => {
-    dispatch({ type: "hydrate", meta: loadMeta(), run: loadRun() });
+    migrateLegacySave();
     setReady(true);
     const t = setTimeout(() => setBooted(true), 1700);
     return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
-    saveMeta(state.meta);
-    saveRun(state.run);
-  }, [state, ready]);
+    if (!ready || slot === null) return;
+    saveSlotMeta(slot, state.meta);
+    saveSlotRun(slot, state.run);
+  }, [state, ready, slot]);
 
   useEffect(() => {
     setMuted(!state.meta.sound);
@@ -123,6 +163,17 @@ export function ShopOS() {
 
   if (!ready || !booted) {
     return <BootScreen onSkip={ready ? () => setBooted(true) : undefined} />;
+  }
+
+  if (slot === null) {
+    return (
+      <LoginScreen
+        onLogin={(n) => {
+          dispatch({ type: "hydrate", meta: loadSlotMeta(n), run: loadSlotRun(n) });
+          setSlot(n);
+        }}
+      />
+    );
   }
 
   const { meta, run } = state;
@@ -261,6 +312,7 @@ export function ShopOS() {
             onOpen={() => wm.open("flow")}
           />
           <DesktopIcon label="LOADOUT.CFG" icon="loadout" onOpen={() => wm.toggle("loadout")} />
+          <DesktopIcon label="DAD.LOG" icon="journal" onOpen={() => wm.toggle("journal")} />
           <DesktopIcon label="MANUAL.TXT" icon="manual" onOpen={() => wm.toggle("manual")} />
           <DesktopIcon label="LEDGER.LOG" icon="ledger" onOpen={() => wm.toggle("ledger")} />
         </IconGrid>
@@ -282,6 +334,7 @@ export function ShopOS() {
             >
               {isFlow && content}
               {def.id === "manual" && <ManualContent />}
+              {def.id === "journal" && <JournalContent meta={meta} />}
               {def.id === "loadout" &&
                 (run ? (
                   <BuildScreen state={state} dispatch={dispatch} floating />
@@ -308,7 +361,32 @@ export function ShopOS() {
       </main>
 
       <footer className="kp-taskbar">
-        <span className="kp-task-mark">KP/OS</span>
+        <button
+          type="button"
+          className={startOpen ? "kp-task-mark kp-task-mark-open" : "kp-task-mark"}
+          onClick={() => setStartOpen((v) => !v)}
+        >
+          KP/OS
+        </button>
+        {startOpen && (
+          <div className="kp-startmenu">
+            <span className="kp-startmenu-user">USER 0{slot}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setStartOpen(false);
+                setSlot(null);
+                dispatch({ type: "hydrate", meta: EMPTY_META, run: null });
+              }}
+            >
+              LOG OUT
+            </button>
+            <button type="button" onClick={() => setStartOpen(false)}>
+              CLOSE
+            </button>
+          </div>
+        )}
+        <span className="kp-task-item">USER 0{slot}</span>
         <span className="kp-task-item">{run ? `DAY ${Math.min(run.day, FINAL_DAY)}/10` : "STANDBY"}</span>
         {run && <span className="kp-task-item">STRAIN {run.strain}</span>}
         {run && <span className="kp-task-item">{run.credits} CR</span>}

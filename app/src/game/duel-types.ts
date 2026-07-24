@@ -195,6 +195,14 @@ export interface DuelState {
     replans: number;
     /** Route cost at the last replan; the next needs strict progress. */
     lastReplanCost: number;
+    /**
+     * Telegraph beat: the move the machine has locked in but not yet made.
+     * The UI highlights it for one tick before it lands.
+     */
+    aim:
+      | { kind: "rotate"; idx: number }
+      | { kind: "cast"; id: AbilityId; targets: number[]; abilityTarget?: AbilityId }
+      | null;
   };
   oppDominantUsed: boolean;
   /** Round when the player last hit the opponent (Arm/Redirect/Shield-lock). */

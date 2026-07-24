@@ -41,6 +41,7 @@ interface DuelCellViewProps {
   poweredO: boolean;
   legal: boolean;
   selected: boolean;
+  aimed: boolean;
   trapVisible: boolean;
   onCell: (idx: number) => void;
 }
@@ -53,6 +54,7 @@ const DuelCellView = memo(function DuelCellView({
   poweredO,
   legal,
   selected,
+  aimed,
   trapVisible,
   onCell,
 }: DuelCellViewProps) {
@@ -109,6 +111,13 @@ const DuelCellView = memo(function DuelCellView({
       aria-label={legal ? `${label}, select` : label}
     >
       <rect x={-HALF} y={-HALF} width={CS} height={CS} fill="transparent" />
+
+      {aimed && (
+        <g className="kp-daim" aria-hidden="true">
+          <path d="M -18 -10 L -18 -18 L -10 -18 M 10 -18 L 18 -18 L 18 -10" className="kp-daim-b" />
+          <path d="M -18 10 L -18 18 L -10 18 M 10 18 L 18 18 L 18 10" className="kp-daim-b" />
+        </g>
+      )}
 
       {cell.kind === "block" && (
         <g className="kp-dblock">
@@ -195,10 +204,12 @@ export interface DuelBoardProps {
   state: DuelState;
   legal: Set<number>;
   selected: Set<number>;
+  /** Cells the machine has locked onto this beat (telegraphed move). */
+  aimed: Set<number>;
   onCell: (idx: number) => void;
 }
 
-export function DuelBoard({ state, legal, selected, onCell }: DuelBoardProps) {
+export function DuelBoard({ state, legal, selected, aimed, onCell }: DuelBoardProps) {
   const { w, h, cells } = state;
   const vw = w * CS;
   const vh = h * CS;
@@ -234,6 +245,7 @@ export function DuelBoard({ state, legal, selected, onCell }: DuelBoardProps) {
             poweredO={state.power.opp[idx] ?? false}
             legal={legal.has(idx)}
             selected={selected.has(idx)}
+            aimed={aimed.has(idx)}
             trapVisible={trapVisible}
             onCell={onCell}
           />

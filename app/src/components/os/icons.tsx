@@ -92,7 +92,29 @@ function BackroomIcon(): ReactElement {
   );
 }
 
-export type IconName = "jobs" | "loadout" | "manual" | "ledger" | "backroom";
+export type IconName = "jobs" | "loadout" | "manual" | "ledger" | "backroom" | "journal";
+
+function JournalIcon(): ReactElement {
+  return (
+    <svg viewBox="0 0 32 32" width={32} height={32} shapeRendering="crispEdges" aria-hidden="true">
+      {/* worn diary: cover, spine rings, rose bookmark, taped corner */}
+      <rect x={7} y={4} width={19} height={24} fill="currentColor" opacity={0.35} />
+      <rect x={6} y={3} width={19} height={24} fill="currentColor" />
+      <rect x={8} y={5} width={15} height={20} fill="var(--kp-bg0, #101218)" />
+      <rect x={6} y={3} width={3} height={24} fill="var(--kp-gold)" />
+      <rect x={4} y={6} width={3} height={2} fill="currentColor" />
+      <rect x={4} y={12} width={3} height={2} fill="currentColor" />
+      <rect x={4} y={18} width={3} height={2} fill="currentColor" />
+      <rect x={4} y={24} width={3} height={2} fill="currentColor" />
+      <rect x={18} y={3} width={4} height={9} fill="var(--kp-rose)" />
+      <rect x={19} y={12} width={2} height={2} fill="var(--kp-rose)" />
+      <rect x={11} y={9} width={9} height={2} fill="currentColor" opacity={0.8} />
+      <rect x={11} y={13} width={7} height={2} fill="currentColor" opacity={0.6} />
+      <rect x={11} y={17} width={9} height={2} fill="currentColor" opacity={0.6} />
+      <rect x={11} y={21} width={5} height={2} fill="currentColor" opacity={0.4} />
+    </svg>
+  );
+}
 
 export const ICONS: Record<IconName, () => ReactElement> = {
   jobs: JobsIcon,
@@ -100,6 +122,7 @@ export const ICONS: Record<IconName, () => ReactElement> = {
   manual: ManualIcon,
   ledger: LedgerIcon,
   backroom: BackroomIcon,
+  journal: JournalIcon,
 };
 
 export interface DesktopIconProps {

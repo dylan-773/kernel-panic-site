@@ -165,7 +165,7 @@ export function createDuel(
       fx: [],
       fxNext: 1,
       notice: null,
-      oppTurn: { started: false, pendingAbility: null, queue: [], replans: 3, lastReplanCost: Infinity },
+      oppTurn: { started: false, pendingAbility: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null },
       oppDominantUsed: false,
       lastPlayerHitRound: 0,
       tutorialSealRound: 3,

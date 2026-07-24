@@ -38,6 +38,23 @@ interface Pulse {
   cls: string;
 }
 
+/** Center-screen virus-speak when the machine charges a routine. */
+const VIRUS_LINES: Record<string, string[]> = {
+  arm: ["DA3M0N R3L3AS3D. H4PPY HUNT1NG >:)", "M1N3S 1N TH3 W1R3S. ST3P L1GHTLY", "S0M3TH1NG SL33PS WH3R3 Y0U W4LK"],
+  redirect: ["R3R0UT1NG Y0UR L1F3 >:)", "Y0UR W0RK. MY RUL3S", "TW1ST. SN4P. S0RRY N0T S0RRY"],
+  shield: ["TH1S 0N3 1S M1N3 N0W", "FR0Z3N S0L1D. TRY 4G41N L4T3R"],
+  overload: ["T00LS D0WN, K1DD0 >:)", "N0 T0YS F0R Y0U TH1S TURN"],
+  overclock: ["F33D1NG CYCL3S. GR0W1NG STR0NG", "MMM. R4M"],
+  firewall: ["W4LLS UP. KN0CK 4LL Y0U W4NT", "N0 3NTRY. N0 3XC3PT10NS"],
+  backdoor: ["SW3PT CL34N. N1C3 TRY", "F0UND Y0UR L1TTL3 G1FTS >:)"],
+  scan: ["1 S33 3V3RYTH1NG Y0U H1D", "P33K4B00"],
+};
+
+interface VirusMsg {
+  key: number;
+  text: string;
+}
+
 export interface DuelFinish {
   won: boolean;
   chip: number;
@@ -162,6 +179,8 @@ export function DuelScreen(props: DuelScreenProps) {
   const [infoDef, setInfoDef] = useState<AbilityDef | null>(null);
   const [shake, setShake] = useState<{ mag: number; key: number }>({ mag: 0, key: 0 });
   const [pulses, setPulses] = useState<Pulse[]>([]);
+  const [virus, setVirus] = useState<VirusMsg | null>(null);
+  const [sweep, setSweep] = useState(0);
   const finishedRef = useRef(false);
 
   const playerTurn = state.phase === "playing" && state.turn === "player";
@@ -180,6 +199,19 @@ export function DuelScreen(props: DuelScreenProps) {
     let maxShake = 0;
     const newPulses: Pulse[] = [];
     for (const e of state.fx) {
+      if (e.kind === "oppAim") {
+        if (soundOn) playFx("block");
+        continue;
+      }
+      if (e.kind.startsWith("oppCast:")) {
+        const verb = e.kind.slice(8);
+        const lines = VIRUS_LINES[verb] ?? VIRUS_LINES.arm;
+        setVirus({ key: e.id, text: lines[Math.floor(Math.random() * lines.length)] });
+        if (verb === "arm") setSweep((n) => n + 1);
+        if (soundOn) playFx("alarm");
+        maxShake = Math.max(maxShake, 1);
+        continue;
+      }
       const j = fxJuice(e.kind, e.n, soundOn);
       maxShake = Math.max(maxShake, j.shake);
       if (j.pulse) newPulses.push({ ...j.pulse, id: e.id });
@@ -190,6 +222,13 @@ export function DuelScreen(props: DuelScreenProps) {
     }
     dispatch({ type: "fxDrain", upTo: state.fx[state.fx.length - 1].id });
   }, [state.fx, soundOn]);
+
+  // Virus banners burn out on their own.
+  useEffect(() => {
+    if (!virus) return;
+    const t = setTimeout(() => setVirus(null), 2400);
+    return () => clearTimeout(t);
+  }, [virus]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -224,6 +263,21 @@ export function DuelScreen(props: DuelScreenProps) {
     }
     return out;
   }, [state, playerTurn, targeting, econ.ram]);
+
+  const aimed = useMemo(() => {
+    const a = state.oppTurn.aim;
+    if (!a || state.phase !== "playing") return new Set<number>();
+    return new Set(a.kind === "rotate" ? [a.idx] : a.targets);
+  }, [state.oppTurn.aim, state.phase]);
+
+  const armedCount = useMemo(
+    () => state.cells.filter((c) => c.trap && c.trap.by === "opp").length,
+    [state.cells],
+  );
+  const revealedCount = useMemo(
+    () => state.cells.filter((c) => c.trap && c.trap.by === "opp" && c.trap.revealed).length,
+    [state.cells],
+  );
 
   const onCell = (idx: number) => {
     if (!playerTurn) return;
@@ -317,8 +371,15 @@ export function DuelScreen(props: DuelScreenProps) {
             state={state}
             legal={legal}
             selected={new Set(targeting?.picked ?? [])}
+            aimed={aimed}
             onCell={onCell}
           />
+          {sweep > 0 && <div key={`sw-${sweep}`} className="kp-sweep" aria-hidden="true" />}
+          {virus && (
+            <div key={virus.key} className="kp-virus" aria-live="polite">
+              {virus.text}
+            </div>
+          )}
           <div className="kp-pulses" aria-hidden="true">
             {pulses.map((p) => (
               <div key={p.id} className={`kp-pulse ${p.cls}`}>
@@ -361,6 +422,10 @@ export function DuelScreen(props: DuelScreenProps) {
           <div className="kp-rail-row">
             <span>RAM/TURN</span>
             <em>{oppEcon.ramPerTurn}</em>
+          </div>
+          <div className="kp-rail-row">
+            <span>ARMED NODES</span>
+            <em>{armedCount > 0 ? `${armedCount}${revealedCount < armedCount ? " (hidden)" : ""}` : "0"}</em>
           </div>
           {props.dominantTell && <p className="kp-rail-tell">{props.dominantTell}</p>}
           {state.intentRevealed && state.oppNextIntent && (

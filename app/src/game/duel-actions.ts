@@ -154,7 +154,7 @@ export function applyCast(s: DuelState, side: Side, def: AbilityDef, targets: nu
       }
       if (side === "player") s.lastPlayerHitRound = s.round;
       emit(s, "trapSet");
-      say(s, side === "player" ? "Trap armed. Let it walk into it." : "It planted something out there.");
+      say(s, side === "player" ? "Trap armed. Let it walk into it." : "It planted a trap on an open junction nearby. Tread carefully.");
       break;
     }
     case "scan": {
@@ -195,7 +195,7 @@ export function applyCast(s: DuelState, side: Side, def: AbilityDef, targets: nu
       }
       if (side === "player") s.lastPlayerHitRound = s.round;
       emit(s, "redirect", targets.length);
-      say(s, side === "player" ? "REDIRECT. Their line twists off true." : "It twisted your line.");
+      say(s, side === "player" ? "REDIRECT. Their line twists off true." : "It twisted one of your junctions off true. Power is down past the break.");
       settleFloods(s, side);
       break;
     }
@@ -211,7 +211,7 @@ export function applyCast(s: DuelState, side: Side, def: AbilityDef, targets: nu
         s.lastPlayerHitRound = s.round;
       }
       emit(s, "shield");
-      say(s, side === "player" ? "SHIELD. That junction is frozen solid." : "It hardened a junction.");
+      say(s, side === "player" ? "SHIELD. That junction is frozen solid." : "It froze a junction solid. You cannot turn that one for now.");
       break;
     }
     case "overload": {
@@ -301,7 +301,7 @@ function beginTurnEconomy(s: DuelState, side: Side): boolean {
 
 export function startOppTurn(s: DuelState): void {
   s.turn = "opp";
-  s.oppTurn = { started: false, pendingAbility: null, queue: [], replans: 3, lastReplanCost: Infinity };
+  s.oppTurn = { started: false, pendingAbility: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null };
   const acts = beginTurnEconomy(s, "opp");
   if (!acts) {
     endOppTurn(s);
