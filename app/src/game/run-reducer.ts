@@ -26,7 +26,6 @@ export type RunAction =
   | { type: "tutorialDone" }
   | { type: "pickJob"; index: number }
   | { type: "backToDay" }
-  | { type: "toBuild" }
   | { type: "setAttackMode"; mode: AttackMode }
   | { type: "setDefendMode"; mode: DefendMode }
   | { type: "startDuel" }
@@ -161,11 +160,6 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       return { ...state, run: { ...run, activeJob: null, screen } };
     }
 
-    case "toBuild": {
-      if (!run || (run.screen !== "analyze" && run.screen !== "finalePre")) return state;
-      return { ...state, run: { ...run, screen: "build" } };
-    }
-
     case "setAttackMode": {
       if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
       if (!run.kit.attackModes.includes(action.mode)) return state;
@@ -179,13 +173,15 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     }
 
     case "startDuel": {
-      if (!run || run.screen !== "build") return state;
+      // Kit config is optional: the dive launches straight off the
+      // diagnostic. The loadout window is always a click away instead.
+      if (!run || run.screen !== "analyze" || run.activeJob === null) return state;
       return { ...state, run: { ...run, screen: "duel" } };
     }
 
     case "startFinale": {
       if (!run || run.screen !== "finalePre") return state;
-      return { ...state, run: { ...run, screen: "build" } };
+      return { ...state, run: { ...run, screen: "duel" } };
     }
 
     case "duelFinished": {

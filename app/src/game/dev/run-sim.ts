@@ -85,9 +85,8 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       const job = s.run!.jobs[idx];
       must(!!MODE_TELL[job.dominant], "analyze tell exists");
       must(CUSTOMERS.some((c) => c.id === job.customerId), "customer exists");
-      s = d(s, { type: "toBuild" });
       s = d(s, { type: "startDuel" });
-      must(s.run!.screen === "duel", "duel screen");
+      must(s.run!.screen === "duel", "dive launches straight from analyze");
       const duel = createDuel(
         dayDuelConfig(run.day, job.dominant, job.tier, job.kitSeed),
         mixSeed(run.runSeed, run.day, idx),
@@ -129,8 +128,7 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       must(s.run!.kit.scanTier <= 3 && s.run!.kit.attackTier <= 3, "tiers capped");
     } else if (run.screen === "finalePre") {
       s = d(s, { type: "startFinale" });
-      must(s.run!.screen === "build", "finale goes through build");
-      s = d(s, { type: "startDuel" });
+      must(s.run!.screen === "duel", "finale dives directly");
       const duel = createDuel(
         finaleConfig(),
         mixSeed(run.runSeed, FINAL_DAY, 9),

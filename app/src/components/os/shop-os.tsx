@@ -52,8 +52,6 @@ function windowTitle(screen: string | null): string {
   switch (screen) {
     case "analyze":
       return "DIAGNOSTIC.LOG";
-    case "build":
-      return "PRE-DIVE CHECK";
     case "opener":
     case "runEnd":
     case "finaleWin":
@@ -323,10 +321,16 @@ export function ShopOS() {
         content = <JobBoard run={run} dispatch={dispatch} />;
         break;
       case "analyze":
-        content = <AnalyzeScreen run={run} dispatch={dispatch} />;
-        break;
-      case "build":
-        content = <KitScreen state={state} dispatch={dispatch} />;
+        content = (
+          <AnalyzeScreen
+            run={run}
+            dispatch={dispatch}
+            onConfigureKit={() => {
+              sfx("icon", { bus: "ui" });
+              wm.open("loadout");
+            }}
+          />
+        );
         break;
       case "result":
         content = <ResultScreen run={run} dispatch={dispatch} />;
@@ -335,7 +339,15 @@ export function ShopOS() {
         content = <UpgradeScreen run={run} dispatch={dispatch} />;
         break;
       case "finalePre":
-        content = <FinalePre dispatch={dispatch} />;
+        content = (
+          <FinalePre
+            dispatch={dispatch}
+            onConfigureKit={() => {
+              sfx("icon", { bus: "ui" });
+              wm.open("loadout");
+            }}
+          />
+        );
         break;
       case "runEnd":
         content = (
@@ -361,11 +373,11 @@ export function ShopOS() {
   );
 
   // Closing the shopfront means different things per screen: a diagnostic
-  // or pre-dive check backs out to the queue; the queue itself just closes.
+  // backs out to the queue; the queue itself just closes.
   const flowClosable = !UNCLOSABLE_SCREENS.has(screen ?? "");
   const closeFlow = () => {
     sfx("winClose", { bus: "ui" });
-    if (screen === "analyze" || screen === "build") dispatch({ type: "backToDay" });
+    if (screen === "analyze") dispatch({ type: "backToDay" });
     wm.close("flow");
   };
 
@@ -409,7 +421,7 @@ export function ShopOS() {
               {def.id === "journal" && <JournalContent meta={meta} />}
               {def.id === "loadout" &&
                 (run ? (
-                  <KitScreen state={state} dispatch={dispatch} floating />
+                  <KitScreen state={state} dispatch={dispatch} />
                 ) : (
                   <p className="kp-rail-dim kp-float-pad">No active run. Open the shop first.</p>
                 ))}

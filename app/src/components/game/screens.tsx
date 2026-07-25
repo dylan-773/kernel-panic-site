@@ -129,7 +129,15 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
 /* Analyze                                                             */
 /* ------------------------------------------------------------------ */
 
-export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
+export function AnalyzeScreen({
+  run,
+  dispatch,
+  onConfigureKit,
+}: {
+  run: RunState;
+  dispatch: Dispatch;
+  onConfigureKit: () => void;
+}) {
   const job = run.activeJob !== null ? run.jobs[run.activeJob] : null;
   if (!job) return null;
   const c = customerById(job.customerId);
@@ -182,8 +190,11 @@ export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         <button type="button" className="kp-btn-ghost" onClick={() => dispatch({ type: "backToDay" })}>
           BACK
         </button>
-        <button type="button" className="kp-btn" onClick={() => dispatch({ type: "toBuild" })}>
+        <button type="button" className="kp-btn-ghost" onClick={onConfigureKit}>
           CONFIGURE KIT
+        </button>
+        <button type="button" className="kp-btn kp-btn-dive" onClick={() => dispatch({ type: "startDuel" })}>
+          DIVE
         </button>
       </div>
     </div>
@@ -197,25 +208,16 @@ export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
 const ATTACK_MODES_ALL: AttackMode[] = ["redirect", "armHalt", "armSiphon"];
 const DEFEND_MODES_ALL: DefendMode[] = ["purge", "lock", "ward"];
 
-export function KitScreen({
-  state,
-  dispatch,
-  floating = false,
-}: {
-  state: GameState;
-  dispatch: Dispatch;
-  floating?: boolean;
-}) {
+export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dispatch }) {
   const run = state.run as RunState;
   const kit = run.kit;
-  const isFinale = run.day === FINAL_DAY;
   return (
     <div className="kp-screen kp-build">
       <header className="kp-screen-head">
         <h2>KIT CONFIG</h2>
         <p>
           Three programs, 1 RAM each, once per turn each. Tiers come from closed days; configs come
-          from cleared jobs.
+          from cleared jobs. Tune it whenever; it holds until you change it.
         </p>
       </header>
       <div className="kp-kit-grid">
@@ -303,18 +305,21 @@ export function KitScreen({
           )}
         </div>
       </div>
-      {!floating && (
-        <div className="kp-screen-actions">
-          {!isFinale && (
-            <button type="button" className="kp-btn-ghost" onClick={() => dispatch({ type: "backToDay" })}>
-              BACK
-            </button>
-          )}
+      <div className="kp-screen-actions">
+        {run.screen === "analyze" && (
           <button type="button" className="kp-btn kp-btn-dive" onClick={() => dispatch({ type: "startDuel" })}>
-            {isFinale ? "DIVE INTO THE MACHINE" : "DIVE"}
+            DIVE
           </button>
-        </div>
-      )}
+        )}
+        {run.screen === "finalePre" && (
+          <button type="button" className="kp-btn kp-btn-dive" onClick={() => dispatch({ type: "startFinale" })}>
+            DIVE INTO THE MACHINE
+          </button>
+        )}
+        {run.screen !== "analyze" && run.screen !== "finalePre" && (
+          <span className="kp-rail-dim">Pick a ticket to dive.</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -461,7 +466,13 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
 /* Finale gate                                                         */
 /* ------------------------------------------------------------------ */
 
-export function FinalePre({ dispatch }: { dispatch: Dispatch }) {
+export function FinalePre({
+  dispatch,
+  onConfigureKit,
+}: {
+  dispatch: Dispatch;
+  onConfigureKit: () => void;
+}) {
   return (
     <div className="kp-screen kp-finalepre">
       <header className="kp-screen-head">
@@ -472,6 +483,9 @@ export function FinalePre({ dispatch }: { dispatch: Dispatch }) {
         <p>It has watched you work for nine days. It will not go easy. It never once has.</p>
       </div>
       <div className="kp-screen-actions">
+        <button type="button" className="kp-btn-ghost" onClick={onConfigureKit}>
+          CONFIGURE KIT
+        </button>
         <button type="button" className="kp-btn kp-btn-dive" onClick={() => dispatch({ type: "startFinale" })}>
           OPEN THE BACK ROOM
         </button>
