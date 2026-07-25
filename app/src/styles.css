@@ -2853,3 +2853,45 @@ img {
   margin-left: 6px;
   letter-spacing: 0.14em;
 }
+
+/* ---------- v5.1: login slot management + tutorial gating ---------- */
+
+.kp-slotwrap {
+  position: relative;
+  animation: kp-slot-in 300ms steps(5) both;
+}
+
+.kp-slotwrap .kp-slot {
+  animation: none;
+}
+
+.kp-slot-del {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 1;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  padding: 5px 7px;
+  background: var(--kp-panel2);
+  border: 2px solid var(--kp-line);
+  color: var(--kp-dim);
+  cursor: pointer;
+  box-shadow: 0 0 0 2px #05060a;
+}
+
+.kp-slot-del:hover {
+  border-color: var(--kp-crimson);
+  color: var(--kp-crimson);
+}
+
+.kp-prog-offline {
+  opacity: 0.35;
+  filter: saturate(0.3);
+}
+
+.kp-prog-offline .kp-ability-meta {
+  color: var(--kp-crimson);
+  letter-spacing: 0.16em;
+}

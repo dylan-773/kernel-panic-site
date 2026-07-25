@@ -165,10 +165,11 @@ export function createDuel(
       fx: [],
       fxNext: 1,
       notice: null,
-      oppTurn: { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null },
+      oppTurn: { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, ramAtStart: 0, aim: null },
       oppDominantUsed: false,
       lastPlayerHitRound: 0,
-      tutorialSealRound: 3,
+      tutFlags: { scanned: false, purged: false, attacked: false },
+      tutorialLessonRound: 0,
     };
 
     // Opening floods: whatever happens to align claims a toehold.
@@ -184,25 +185,22 @@ export function createDuel(
 
     const shorter = Math.min(pd, od);
     const score = Math.abs(shorter - cfg.minCost);
-    // Tutorial boards should be unwinnable inside two player turns (cascade
-    // RAM included) even when the strict tier fails; short boards fall to
-    // the last-resort tier and get sealed a round earlier instead.
-    const looseOk = !cfg.tutorial || pd > playerRamPerTurn * 2 + 4;
+    // Tutorial boards want the longest player route the little grid can
+    // deal, purely for pacing: the seal-on-contact rule handles winnability,
+    // these tiers just keep the lesson from ending in one lucky turn.
+    const looseOk = !cfg.tutorial || pd > playerRamPerTurn * 2 + 1;
     if (looseOk && score < looseScore) {
       looseScore = score;
       loose = s;
-    } else if (!looseOk && pd > playerRamPerTurn + 2 && score < lastResortScore) {
-      // Sealed before the player's second turn, and never winnable in one.
+    } else if (!looseOk && pd > playerRamPerTurn + 3 && score < lastResortScore) {
       lastResortScore = score;
       lastResort = s;
-      lastResort.tutorialSealRound = 2;
     }
 
     if (cfg.tutorial) {
-      // The machine must finish inside two turn cycles (one RAM spent on
-      // the scripted trap), but not the first; the player gets two turns
-      // to learn Scan and Defend and still cannot make the distance.
-      if (od <= cfg.oppRam || od > cfg.oppRam * 2 - 1 || pd <= playerRamPerTurn * 2 + 5) continue;
+      // The machine could finish inside two unthrottled turns, but never
+      // its first; the player's route takes several turns to close.
+      if (od <= cfg.oppRam || od > cfg.oppRam * 2 || pd <= playerRamPerTurn * 2 + 3) continue;
     } else {
       // Nobody may be able to win on their opening turn.
       if (pd <= playerRamPerTurn || od <= cfg.oppRam) continue;

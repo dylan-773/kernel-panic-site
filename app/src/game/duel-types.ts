@@ -169,6 +169,8 @@ export interface DuelState {
     replans: number;
     /** Route cost at the last replan; the next needs strict progress. */
     lastReplanCost: number;
+    /** RAM at the start of this turn (tutorial throttle bookkeeping). */
+    ramAtStart: number;
     /**
      * Telegraph beat: the move the machine has locked in but not yet made.
      * The UI highlights it for one tick before it lands.
@@ -181,8 +183,14 @@ export interface DuelState {
   oppDominantUsed: boolean;
   /** Round when the player last hit the opponent (arm/redirect/lock). */
   lastPlayerHitRound: number;
-  /** Tutorial only: the machine force-seals when this round begins. */
-  tutorialSealRound: number;
+  /**
+   * Tutorial script state: which programs the player has demonstrated.
+   * Programs stay offline until the script flags them; the machine holds
+   * back until all three are shown, then stops pretending.
+   */
+  tutFlags: { scanned: boolean; purged: boolean; attacked: boolean };
+  /** Round the tutorial lesson completed on (0 = not yet). */
+  tutorialLessonRound: number;
 }
 
 export const ROUND_CAP = 25;

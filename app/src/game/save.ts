@@ -192,6 +192,17 @@ export function loadSlotRun(slot: number): RunState | null {
   }
 }
 
+/** Wipe a slot completely: meta, run, everything. There is no undo. */
+export function deleteSlot(slot: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(slotMetaKey(slot));
+    window.localStorage.removeItem(slotRunKey(slot));
+  } catch {
+    // Storage unavailable; nothing to delete.
+  }
+}
+
 export function saveSlotRun(slot: number, r: RunState | null): void {
   if (typeof window === "undefined") return;
   try {

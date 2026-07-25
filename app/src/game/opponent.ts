@@ -11,6 +11,7 @@ import {
   redirectTargetLegal,
   roll,
   say,
+  tutorialLessonDone,
   wardTargetLegal,
 } from "./duel-actions";
 import { canRotate, isFrontier, routeCost, routePlan } from "./duel-power";
@@ -45,10 +46,13 @@ function decideProgram(s: DuelState): void {
   const atk = s.cfg.oppAttackModes;
   const def = s.cfg.oppDefendModes;
 
-  // Tutorial: one scripted trap on the player's lane, first turn, always.
-  // It lands shallow so a tier-1 Scan can find it - that is the lesson.
+  // Tutorial: keep exactly one scripted trap on the player's lane while
+  // the lesson runs. It lands shallow so a tier-1 Scan can find it - and
+  // if the player springs or purges it early, another gets planted, so
+  // the scan-purge lesson always has a subject.
   if (s.cfg.tutorial) {
-    if (s.round === 1 && !econ.used.attack && atk.length > 0) {
+    const hasTrap = s.cells.some((c) => c.trap && c.trap.by === "opp");
+    if (!tutorialLessonDone(s) && !hasTrap && !econ.used.attack && atk.length > 0) {
       s.oppTurn.pendingCast = { prog: "attack", mode: atk[0] };
     }
     return;
@@ -377,6 +381,7 @@ export function oppStep(s: DuelState): void {
 
   // The tutorial machine never lets the dive drag: if the player somehow
   // walls it off, it stops playing fair and seals the duel on the spot.
+  // (An actual player win is impossible - the core seals on contact.)
   if (s.cfg.tutorial && !isFinite(routeCost(s, "opp"))) {
     say(s, "The machine stops pretending. The door was never really open.");
     finishDuel(s, "opp", "core");
@@ -415,6 +420,18 @@ export function oppStep(s: DuelState): void {
       emit(s, `oppCast:${prepared.mode}`);
       return;
     }
+  }
+
+  // Through the lesson (and the round it completes on), the tutorial
+  // machine plays at quarter speed: at most 4 RAM a turn, banking the
+  // rest. The player gets one full-kit turn before it stops pretending.
+  if (
+    s.cfg.tutorial &&
+    (!tutorialLessonDone(s) || s.round <= s.tutorialLessonRound) &&
+    ot.ramAtStart - s.econ.opp.ram >= 4
+  ) {
+    endOppTurn(s);
+    return;
   }
 
   const mem: ReplanMem = { n: ot.replans, lastCost: ot.lastReplanCost };

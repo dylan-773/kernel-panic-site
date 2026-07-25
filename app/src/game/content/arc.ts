@@ -120,19 +120,19 @@ export function finaleConfig(): DuelConfig {
 }
 
 /**
- * The scripted, unwinnable opening dive: the machine plants one visible
- * lesson of a trap, then finishes the route inside two turn cycles against
- * a board the player cannot cross in two. Losing it is the tutorial's
- * final lesson.
+ * The scripted, unwinnable opening dive. The machine plays at quarter
+ * speed while the bench walks the player through all three programs -
+ * scan the trap it planted, purge it, twist its line back - then it stops
+ * pretending and seals. Losing it is the tutorial's final lesson.
  */
 export function tutorialConfig(): DuelConfig {
   return {
-    w: 9,
+    w: 13,
     h: 7,
     oppRam: 12,
     greed: 1,
     abilityFreq: 0,
-    minCost: 16,
+    minCost: 14,
     headStart: 0,
     oppAttackModes: ["armHalt"],
     oppDefendModes: [],

@@ -46,6 +46,25 @@ export function tierOf(s: DuelState, side: Side, prog: Program): Tier {
   return s.kit.defendTier;
 }
 
+/** Has the tutorial player demonstrated all three programs? */
+export function tutorialLessonDone(s: DuelState): boolean {
+  return s.tutFlags.scanned && s.tutFlags.purged && s.tutFlags.attacked;
+}
+
+/**
+ * Tutorial gating: programs come online one at a time as the script flags
+ * them. Scan wakes when the machine has planted; Defend after the first
+ * scan; Attack after the first purge. Outside the tutorial, always on.
+ */
+export function programUnlocked(s: DuelState, prog: Program): boolean {
+  if (!s.cfg.tutorial) return true;
+  if (prog === "scan") {
+    return s.tutFlags.scanned || s.cells.some((c) => c.trap && c.trap.by === "opp");
+  }
+  if (prog === "defend") return s.tutFlags.scanned;
+  return s.tutFlags.purged;
+}
+
 /** ATTACK is 1 RAM, except a Cheap Shot diver's first cast of the dive. */
 export function attackCost(s: DuelState, side: Side): number {
   if (side === "player" && s.econ.player.attacksCast === 0 && kitHas(s, "cheapShot")) return 0;
@@ -133,10 +152,11 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
       }
     }
     if (f.reachedCore) {
-      // The tutorial machine never hands the player an accidental win: a
-      // cascade IT caused cannot complete the player's route.
-      if (s.cfg.tutorial && side === "player" && acting === "opp") {
-        say(s, "Your line surges toward the core. The machine pinches it off.");
+      // The tutorial is unwinnable by definition: the moment the player's
+      // flood actually touches the core, every port slams shut at once.
+      if (s.cfg.tutorial && side === "player") {
+        say(s, "Your flood touches the core... and every port on the machine slams shut at once.");
+        finishDuel(s, "opp", "core");
       } else {
         finishDuel(s, side, "core");
       }
@@ -241,6 +261,14 @@ export function applyCast(
   econ.ram -= programCost(s, side, prog);
   econ.used[prog] = true;
   if (prog === "attack") econ.attacksCast++;
+  if (s.cfg.tutorial && side === "player") {
+    if (prog === "scan") s.tutFlags.scanned = true;
+    if (prog === "defend") s.tutFlags.purged = true;
+    if (prog === "attack") s.tutFlags.attacked = true;
+    if (s.tutorialLessonRound === 0 && tutorialLessonDone(s)) {
+      s.tutorialLessonRound = s.round;
+    }
+  }
   const enemy = otherSide(side);
 
   if (prog === "scan") {
@@ -404,8 +432,9 @@ function beginTurnEconomy(s: DuelState, side: Side): boolean {
 
 export function startOppTurn(s: DuelState): void {
   s.turn = "opp";
-  s.oppTurn = { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null };
+  s.oppTurn = { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, ramAtStart: 0, aim: null };
   const acts = beginTurnEconomy(s, "opp");
+  s.oppTurn.ramAtStart = s.econ.opp.ram;
   if (!acts) {
     endOppTurn(s);
   }
@@ -417,12 +446,16 @@ export function endOppTurn(s: DuelState): void {
   econ.carry = Math.min(econ.carryCap, Math.max(0, econ.ram));
   s.round++;
   if (s.routeTrace && s.routeTrace.round < s.round) s.routeTrace = null;
-  // The tutorial never drags: if the machine has not already won by now,
-  // it stops playing fair and seals itself.
-  if (s.cfg.tutorial && s.round >= s.tutorialSealRound) {
-    say(s, "The machine stops pretending. The door was never really open.");
-    finishDuel(s, "opp", "core");
-    return;
+  // The tutorial ends on the machine's terms: one victory-lap round after
+  // the lesson completes, or round 7 if the player dawdles, it stops
+  // playing fair and seals itself.
+  if (s.cfg.tutorial) {
+    const lessonOver = tutorialLessonDone(s) && s.round > s.tutorialLessonRound + 1;
+    if (lessonOver || s.round >= 7) {
+      say(s, "The machine stops pretending. The door was never really open.");
+      finishDuel(s, "opp", "core");
+      return;
+    }
   }
   if (s.round > ROUND_CAP) {
     const pd = routeCost(s, "player");

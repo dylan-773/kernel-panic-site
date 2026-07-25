@@ -24,6 +24,7 @@ import {
   attackTargetLegal,
   defendTargetLegal,
   programCost,
+  programUnlocked,
   tierOf,
 } from "../../game/duel-actions";
 import { canRotate, routeCost } from "../../game/duel-power";
@@ -85,27 +86,32 @@ export interface DuelScreenProps {
 function coachLine(s: DuelState): string | null {
   if (!s.cfg.tutorial || s.phase !== "playing") return null;
   const owned = s.cells.filter((c) => c.kind === "node" && c.owner === "player").length;
-  if (s.turn === "player" && s.round === 1 && owned <= 2) {
-    return "The grid is live. Click a glowing junction to rotate it (1 RAM). Line the pipes up and your signal floods forward on its own.";
+  const f = s.tutFlags;
+  if (s.turn === "opp") {
+    if (s.round === 1) return "Now watch it move. Watch what it plants.";
+    if (!f.attacked) return "It is holding back. It wants to see what you learned.";
+    return "It has stopped holding back.";
   }
-  if (s.turn === "player" && s.round === 1) {
+  if (s.round === 1) {
+    if (owned <= 2) {
+      return "The grid is live. Your programs are still indexing; for now, click a glowing junction to rotate it (1 RAM). Line the pipes up and your signal floods forward on its own.";
+    }
     return "Chain rotations toward the CORE. When a junction clicks into line, everything connected claims at once. Spend your RAM, then END TURN.";
   }
-  if (s.turn === "opp" && s.round === 1) {
-    return "Now watch it move. Watch what it plants.";
+  if (!f.scanned) {
+    return "It armed something on your lane last cycle. SCAN.EXE just came online: cast it (1 RAM) and it sweeps everything near your line. Always scan before you walk.";
   }
-  const hiddenTrap = s.cells.some((c) => c.trap && c.trap.by === "opp" && !c.trap.revealed);
   const shownTrap = s.cells.some((c) => c.trap && c.trap.by === "opp" && c.trap.revealed);
-  if (s.turn === "player" && hiddenTrap) {
-    return "It armed something on your lane last cycle. SCAN (1 RAM) sweeps everything near your line. Always scan before you walk.";
+  if (!f.purged && shownTrap) {
+    return "There it is. DEFEND.EXE is online, set to PURGE: cast it, click the exposed trap, and defuse the thing before your flood walks in.";
   }
-  if (s.turn === "player" && shownTrap) {
-    return "There it is. DEFEND runs PURGE: cast it, click the exposed trap, and defuse the thing before your flood walks in.";
+  if (!f.purged) {
+    return "The trap is gone but it WILL plant another. When one shows, DEFEND purges it. Keep pushing meanwhile.";
   }
-  if (s.turn === "player") {
-    return "Good hands. Scan, defuse, push. Remember the order. It will not save you today, but it will save you.";
+  if (!f.attacked) {
+    return "Last program: ATTACK.EXE, set to REDIRECT. Cast it and click one of ITS junctions to twist its line off true. Make it hurt.";
   }
-  return "Reach the core first. That is the whole game. It is just faster than you, today.";
+  return "That is the whole toolbox: scan, defend, attack, rotate. Push for the core with everything you have.";
 }
 
 /** fx → screen shake magnitude, impact label, and sound. */
@@ -518,7 +524,8 @@ export function DuelScreen(props: DuelScreenProps) {
         <div className="kp-dock-abilities">
           {(["scan", "attack", "defend"] as Program[]).map((prog) => {
             const cost = programCost(state, "player", prog);
-            const disabled = !playerTurn || econ.used[prog] || econ.ram < cost;
+            const offline = !programUnlocked(state, prog);
+            const disabled = !playerTurn || offline || econ.used[prog] || econ.ram < cost;
             const sub =
               prog === "scan"
                 ? `R${SCAN_RANGE[tierOf(state, "player", "scan")] >= 99 ? "∞" : SCAN_RANGE[tierOf(state, "player", "scan")]}`
@@ -530,7 +537,7 @@ export function DuelScreen(props: DuelScreenProps) {
               <button
                 key={prog}
                 type="button"
-                className={`kp-ability kp-prog-${prog} ${targeting?.prog === prog ? "kp-ability-arming" : ""}`}
+                className={`kp-ability kp-prog-${prog} ${targeting?.prog === prog ? "kp-ability-arming" : ""} ${offline ? "kp-prog-offline" : ""}`}
                 disabled={disabled}
                 onClick={() => onProgram(prog)}
                 onMouseEnter={() => setInfoProg(prog)}
@@ -543,7 +550,7 @@ export function DuelScreen(props: DuelScreenProps) {
                   <i className="kp-prog-tier">{"▪".repeat(tier)}</i>
                 </span>
                 <span className="kp-ability-meta">
-                  {sub} - {cost}R{econ.used[prog] ? " USED" : ""}
+                  {offline ? "OFFLINE" : `${sub} - ${cost}R${econ.used[prog] ? " USED" : ""}`}
                 </span>
               </button>
             );

@@ -7,6 +7,7 @@ import {
   emit,
   endPlayerTurn,
   programCost,
+  programUnlocked,
   say,
   tierOf,
 } from "./duel-actions";
@@ -36,6 +37,7 @@ function cloneState(s: DuelState): DuelState {
       opp: { ...s.econ.opp, used: { ...s.econ.opp.used } },
     },
     kit: { ...s.kit, augments: [...s.kit.augments] },
+    tutFlags: { ...s.tutFlags },
     oppTurn: { ...s.oppTurn },
     fx: [...s.fx],
   };
@@ -81,6 +83,7 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       const s = cloneState(state);
       const econ = s.econ.player;
       const prog = action.prog;
+      if (!programUnlocked(s, prog)) return deny(s, "That program is still offline. Follow the bench notes.");
       if (econ.used[prog]) return deny(s, "Each program runs once per turn.");
       if (econ.ram < programCost(s, "player", prog)) return deny(s, "Not enough RAM.");
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { audioDebug, playUiPress, playUiTick, sfx, testBeep } from "../../game/audio";
-import { SlotSummary, slotSummaries } from "../../game/save";
+import { SlotSummary, deleteSlot, slotSummaries } from "../../game/save";
 
 /**
  * KP/OS user login: three save slots, picked from a CRT login prompt. The
@@ -75,40 +75,62 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
       {!login && (
         <div className="kp-login-slots">
           {(slots ?? []).map((s, i) => (
-            <button
-              key={s.slot}
-              type="button"
-              className={s.empty ? "kp-slot kp-slot-empty" : "kp-slot"}
-              style={{ animationDelay: `${i * 120}ms` }}
-              onClick={() => pick(s.slot)}
-            >
-              {s.empty ? (
-                <>
-                  <span className="kp-slot-plus" aria-hidden="true">
-                    +
-                  </span>
-                  <strong>NEW USER</strong>
-                  <span className="kp-slot-line">empty slot</span>
-                </>
-              ) : (
-                <>
-                  <span className="kp-slot-avatar" aria-hidden="true">
-                    {s.machineOpened ? ":)" : ">_"}
-                  </span>
-                  <strong>USER 0{s.slot}</strong>
-                  <span className="kp-slot-line">
-                    {s.machineOpened
-                      ? "machine opened"
-                      : s.day !== null
-                        ? `attempt ${s.runCount} - day ${s.day} - strain ${s.strain}`
-                        : `${s.runCount} attempt${s.runCount === 1 ? "" : "s"} logged`}
-                  </span>
-                  <span className="kp-slot-line kp-slot-dim">
-                    {s.machineOpened ? "the door is open" : "back room sealed"}
-                  </span>
-                </>
+            <div key={s.slot} className="kp-slotwrap" style={{ animationDelay: `${i * 120}ms` }}>
+              <button
+                type="button"
+                className={s.empty ? "kp-slot kp-slot-empty" : "kp-slot"}
+                onClick={() => pick(s.slot)}
+              >
+                {s.empty ? (
+                  <>
+                    <span className="kp-slot-plus" aria-hidden="true">
+                      +
+                    </span>
+                    <strong>NEW USER</strong>
+                    <span className="kp-slot-line">empty slot</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="kp-slot-avatar" aria-hidden="true">
+                      {s.machineOpened ? ":)" : ">_"}
+                    </span>
+                    <strong>USER 0{s.slot}</strong>
+                    <span className="kp-slot-line">
+                      {s.machineOpened
+                        ? "machine opened"
+                        : s.day !== null
+                          ? `attempt ${s.runCount} - day ${s.day} - strain ${s.strain}`
+                          : `${s.runCount} attempt${s.runCount === 1 ? "" : "s"} logged`}
+                    </span>
+                    <span className="kp-slot-line kp-slot-dim">
+                      {s.machineOpened ? "the door is open" : "back room sealed"}
+                    </span>
+                  </>
+                )}
+              </button>
+              {!s.empty && (
+                <button
+                  type="button"
+                  className="kp-slot-del"
+                  aria-label={`Delete USER 0${s.slot}`}
+                  title={`Delete USER 0${s.slot}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (
+                      window.confirm(
+                        `Delete USER 0${s.slot}? Every attempt and journal entry on this slot is gone for good.`,
+                      )
+                    ) {
+                      sfx("stamp", { bus: "ui" });
+                      deleteSlot(s.slot);
+                      setSlots(slotSummaries());
+                    }
+                  }}
+                >
+                  DEL
+                </button>
               )}
-            </button>
+            </div>
           ))}
         </div>
       )}
