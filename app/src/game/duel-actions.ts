@@ -463,6 +463,22 @@ export function endOppTurn(s: DuelState): void {
     finishDuel(s, pd <= od ? "player" : "opp", "cap");
     return;
   }
+  // A severed route never heals (enemy territory only grows), so a walled
+  // player is already beaten: call it instead of a dead march to the cap.
+  {
+    const pd = routeCost(s, "player");
+    if (!isFinite(pd)) {
+      const od = routeCost(s, "opp");
+      if (isFinite(od)) {
+        say(s, "SEVERED. Its territory walls your port off from the core. No route remains.");
+        finishDuel(s, "opp", "core");
+      } else {
+        say(s, "Total gridlock. Neither signal can reach the core. The link collapses in your favor.");
+        finishDuel(s, "player", "cap");
+      }
+      return;
+    }
+  }
   s.turn = "player";
   const acts = beginTurnEconomy(s, "player");
   if (!acts) {

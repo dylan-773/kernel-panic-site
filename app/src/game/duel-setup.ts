@@ -219,8 +219,13 @@ export function createDuel(
     return createDuel(cfg, (seed + 0x9e37) >>> 0, kit, playerRamPerTurn, retry + 1);
   }
 
-  // Head start: the intrusion is already inside, pre-aligned along its route.
+  // Head start: the intrusion is already inside, pre-aligned along its
+  // route. Enemy territory is impassable to the player and the fairness
+  // checks ran BEFORE these claims, so every step re-verifies the player
+  // still has a route; a claim that walls them off gets peeled back, and
+  // if the settling flood walls them off, the whole head start is undone.
   if (cfg.headStart > 0) {
+    const applied: Array<{ idx: number; rot: number; spin: number }> = [];
     for (let k = 0; k < cfg.headStart; k++) {
       const plan = routePlan(s, "opp");
       if (!plan) break;
@@ -230,14 +235,38 @@ export function createDuel(
       // Never hand the machine the core-adjacent cell as a freebie.
       const core = s.cells[s.coreIdx];
       if (Math.abs(c.x - core.x) + Math.abs(c.y - core.y) <= 1) break;
+      const prev = { idx: next.idx, rot: c.rot, spin: c.spin };
       const turns = (next.targetRot - c.rot + 4) % 4;
       c.rot = next.targetRot;
       c.spin += turns;
       c.owner = "opp";
       c.claimSeq = ++s.claimCounter;
       c.claimWave = 0;
+      if (!isFinite(routeCost(s, "player"))) {
+        c.rot = prev.rot;
+        c.spin = prev.spin;
+        c.owner = "none";
+        c.claimSeq = 0;
+        break;
+      }
+      applied.push(prev);
     }
-    runFlood(s, "opp");
+    const flood = runFlood(s, "opp");
+    if (!isFinite(routeCost(s, "player"))) {
+      // The opening cascade sealed the player's corridor: revert to the
+      // validated pre-head-start board (claims AND alignments).
+      for (const i of flood.claimed) {
+        s.cells[i].owner = "none";
+        s.cells[i].claimSeq = 0;
+      }
+      for (const u of [...applied].reverse()) {
+        const c = s.cells[u.idx];
+        c.rot = u.rot;
+        c.spin = u.spin;
+        c.owner = "none";
+        c.claimSeq = 0;
+      }
+    }
   }
 
   {
