@@ -103,7 +103,9 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
                         ? `attempt ${s.runCount} - day ${s.day} - strain ${s.strain}`
                         : `${s.runCount} attempt${s.runCount === 1 ? "" : "s"} logged`}
                   </span>
-                  <span className="kp-slot-line kp-slot-dim">{s.unlocked}/24 routines</span>
+                  <span className="kp-slot-line kp-slot-dim">
+                    {s.machineOpened ? "the door is open" : "back room sealed"}
+                  </span>
                 </>
               )}
             </button>

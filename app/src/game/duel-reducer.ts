@@ -1,17 +1,17 @@
-import { ABILITY_BY_ID } from "./content/abilities";
+import { ATTACK_WIDTH, DEFEND_WIDTH, Program } from "./content/kit";
 import {
-  applyCast,
-  applyOverloadLock,
   applyRotate,
-  armTargetLegal,
+  applyCast,
+  attackTargetLegal,
+  defendTargetLegal,
   emit,
   endPlayerTurn,
-  redirectTargetLegal,
+  programCost,
   say,
-  shieldTargetLegal,
+  tierOf,
 } from "./duel-actions";
 import { canRotate } from "./duel-power";
-import { AbilityId, DuelState } from "./duel-types";
+import { DuelState } from "./duel-types";
 import { oppStep } from "./opponent";
 
 /**
@@ -22,7 +22,7 @@ import { oppStep } from "./opponent";
 
 export type DuelAction =
   | { type: "rotate"; idx: number }
-  | { type: "ability"; id: AbilityId; targets: number[]; abilityTarget?: AbilityId }
+  | { type: "cast"; prog: Program; targets: number[] }
   | { type: "endTurn" }
   | { type: "oppStep" }
   | { type: "fxDrain"; upTo: number };
@@ -32,10 +32,10 @@ function cloneState(s: DuelState): DuelState {
     ...s,
     cells: s.cells.map((c) => ({ ...c, trap: c.trap ? { ...c.trap } : null })),
     econ: {
-      player: { ...s.econ.player, disabled: { ...s.econ.player.disabled } },
-      opp: { ...s.econ.opp, disabled: { ...s.econ.opp.disabled } },
+      player: { ...s.econ.player, used: { ...s.econ.player.used } },
+      opp: { ...s.econ.opp, used: { ...s.econ.opp.used } },
     },
-    equipped: s.equipped.map((e) => ({ ...e })),
+    kit: { ...s.kit, augments: [...s.kit.augments] },
     oppTurn: { ...s.oppTurn },
     fx: [...s.fx],
   };
@@ -65,70 +65,41 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       if (!canRotate(s, "player", action.idx)) {
         const c = s.cells[action.idx];
         if (c && c.lockedThroughRound >= s.round && c.lockedBy === "opp") {
-          return deny(s, "That junction is shield-locked.");
+          return deny(s, "That junction is clamped frozen.");
         }
         if (c && c.kind === "node" && c.owner === "opp") {
-          return deny(s, "Enemy territory. Redirect can reach it.");
+          return deny(s, "Enemy territory. ATTACK: REDIRECT can reach it.");
         }
-        return deny(s, "Out of reach. Rotate from your frontier outward.");
+        return deny(s, "Out of reach. Work outward from your territory.");
       }
       applyRotate(s, "player", action.idx);
       return s;
     }
 
-    case "ability": {
+    case "cast": {
       if (!playerCanAct(state)) return state;
       const s = cloneState(state);
       const econ = s.econ.player;
-      const def = ABILITY_BY_ID[action.id];
-      const slot = s.equipped.find((e) => e.id === action.id);
-      if (!def || !slot || slot.copies < 1) return deny(s);
-      if (econ.abilityUsed) return deny(s, "One ability per turn.");
-      if (action.id in econ.disabled) return deny(s, `${def.name} is jammed by Overload.`);
-      if (econ.ram < def.ramCost) return deny(s, "Not enough RAM.");
+      const prog = action.prog;
+      if (econ.used[prog]) return deny(s, "Each program runs once per turn.");
+      if (econ.ram < programCost(s, "player", prog)) return deny(s, "Not enough RAM.");
 
       const t = action.targets;
-      switch (def.verb) {
-        case "arm": {
-          const want = def.p.traps ?? 1;
-          if (t.length < 1 || t.length > want) return deny(s);
-          if (!t.every((i) => armTargetLegal(s, "player", i))) return deny(s);
-          break;
-        }
-        case "redirect": {
-          const want = def.p.targets ?? 1;
-          if (t.length < 1 || t.length > want) return deny(s);
-          if (!t.every((i) => redirectTargetLegal(s, "player", i))) return deny(s);
-          break;
-        }
-        case "shield": {
-          const want = def.p.targets ?? 1;
-          if (t.length < 1 || t.length > want) return deny(s);
-          if (!t.every((i) => shieldTargetLegal(s, "player", i))) return deny(s);
-          break;
-        }
-        case "backdoor": {
-          if (def.p.shieldRounds) {
-            if (t.length !== 1 || !shieldTargetLegal(s, "player", t[0])) return deny(s);
-          }
-          break;
-        }
-        case "overload": {
-          if (def.p.lockTurns && !action.abilityTarget) return deny(s);
-          break;
-        }
-        case "scan":
-        case "overclock":
-        case "firewall":
-          break;
+      if (prog === "scan") {
+        applyCast(s, "player", "scan", null, []);
+        return s;
       }
-
-      applyCast(s, "player", def, t);
-      if (def.verb === "overload" && def.p.lockTurns && action.abilityTarget) {
-        applyOverloadLock(s, "player", def, action.abilityTarget);
-        say(s, `OVERLOAD. Their ${ABILITY_BY_ID[action.abilityTarget]?.name ?? "routine"} is jammed.`);
+      if (prog === "attack") {
+        const want = ATTACK_WIDTH[tierOf(s, "player", "attack")];
+        if (t.length < 1 || t.length > want) return deny(s);
+        if (!t.every((i) => attackTargetLegal(s, "player", s.kit.attackMode, i))) return deny(s);
+        applyCast(s, "player", "attack", s.kit.attackMode, t);
+        return s;
       }
-      slot.copies -= 1;
+      const want = s.kit.defendMode === "ward" ? 1 : DEFEND_WIDTH[tierOf(s, "player", "defend")];
+      if (t.length < 1 || t.length > want) return deny(s);
+      if (!t.every((i) => defendTargetLegal(s, "player", s.kit.defendMode, i))) return deny(s);
+      applyCast(s, "player", "defend", s.kit.defendMode, t);
       return s;
     }
 

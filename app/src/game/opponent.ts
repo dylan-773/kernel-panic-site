@@ -1,27 +1,29 @@
-import { ABILITY_BY_ID } from "./content/abilities";
+import { ATTACK_WIDTH, DEFEND_WIDTH, OppMode } from "./content/kit";
 import {
   applyCast,
-  applyOverloadLock,
   applyRotate,
   armTargetLegal,
   emit,
   endOppTurn,
   finishDuel,
+  lockTargetLegal,
+  purgeTargetLegal,
   redirectTargetLegal,
   roll,
   say,
-  shieldTargetLegal,
+  wardTargetLegal,
 } from "./duel-actions";
 import { canRotate, isFrontier, routeCost, routePlan } from "./duel-power";
-import { AbilityDef, DuelState, Side } from "./duel-types";
+import { DuelState, Side } from "./duel-types";
 
 /**
- * The scripted opponent, v2: it plans with the same rotation-cost Dijkstra
- * the board generator uses, aligns junctions frontier-outward along the
- * cheapest route, and spends its one ability per turn where it hurts —
- * blocking the player's route when they close on the core, hardening its
- * own chokepoints, purging interference. Tier scales RAM, mistake rate and
- * cast frequency, never the rules. One visible move per oppStep.
+ * The scripted opponent, v3: it plans with the same rotation-cost Dijkstra
+ * the board generator uses, aligns junctions reach-outward along the
+ * cheapest route, and runs the same three programs the player does - one
+ * cast per turn, spent where it hurts: trapping or twisting the player's
+ * route when they close on the core, purging their traps off its lane,
+ * clamping chokepoints. Tier scales RAM, mistake rate and cast width,
+ * never the rules. One visible move per oppStep.
  */
 
 function coreDist(s: DuelState, idx: number): number {
@@ -30,78 +32,97 @@ function coreDist(s: DuelState, idx: number): number {
   return Math.abs(c.x - core.x) + Math.abs(c.y - core.y);
 }
 
-function kitDefs(s: DuelState): AbilityDef[] {
-  return s.cfg.oppKit
-    .filter((id) => !(id in s.econ.opp.disabled))
-    .map((id) => ABILITY_BY_ID[id])
-    .filter(Boolean);
+const ATTACK_MODES: OppMode[] = ["redirect", "armHalt", "armSiphon"];
+
+function progOf(mode: OppMode): "attack" | "defend" {
+  return ATTACK_MODES.includes(mode) ? "attack" : "defend";
 }
 
 /** Decide this turn's cast by priority; targets resolve at cast time. */
-function decideAbility(s: DuelState): void {
+function decideProgram(s: DuelState): void {
   const econ = s.econ.opp;
-  if (econ.abilityUsed) return;
-  const kit = kitDefs(s).filter((d) => d.ramCost <= econ.ram);
-  if (kit.length === 0) return;
+  if (econ.ram < 1) return;
+  const atk = s.cfg.oppAttackModes;
+  const def = s.cfg.oppDefendModes;
+
+  // Tutorial: one scripted trap on the player's lane, first turn, always.
+  // It lands shallow so a tier-1 Scan can find it - that is the lesson.
+  if (s.cfg.tutorial) {
+    if (s.round === 1 && !econ.used.attack && atk.length > 0) {
+      s.oppTurn.pendingCast = { prog: "attack", mode: atk[0] };
+    }
+    return;
+  }
 
   const playerCost = routeCost(s, "player");
   const ownCost = routeCost(s, "opp");
 
   // 1. The player is closing on the core: block their route.
-  if (isFinite(playerCost) && playerCost <= 4 && playerCost <= ownCost) {
-    const blocker =
-      kit.find((d) => d.verb === "arm") ??
-      kit.find((d) => d.verb === "redirect") ??
-      kit.find((d) => d.verb === "shield");
-    if (blocker) {
-      s.oppTurn.pendingAbility = blocker.id;
+  if (isFinite(playerCost) && playerCost <= 4 && playerCost <= ownCost && !econ.used.attack) {
+    const armMode = atk.find((m) => m !== "redirect");
+    if (armMode && roll(s) < 0.55) {
+      s.oppTurn.pendingCast = { prog: "attack", mode: armMode };
+      return;
+    }
+    if (atk.includes("redirect")) {
+      s.oppTurn.pendingCast = { prog: "attack", mode: "redirect" };
+      return;
+    }
+    if (def.includes("lock") && !econ.used.defend) {
+      s.oppTurn.pendingCast = { prog: "defend", mode: "lock" };
       return;
     }
   }
 
-  // 2. The player interfered recently: clean up or harden.
-  if (s.lastPlayerHitRound >= s.round - 1 && s.lastPlayerHitRound > 0 && roll(s) < 0.6) {
-    const guard =
-      kit.find((d) => d.verb === "backdoor") ??
-      kit.find((d) => d.verb === "firewall") ??
-      kit.find((d) => d.verb === "shield");
-    if (guard) {
-      s.oppTurn.pendingAbility = guard.id;
+  // 2. Player traps sit on its planned route: sweep them.
+  if (def.includes("purge") && !econ.used.defend) {
+    const plan = routePlan(s, "opp");
+    const trapped = plan?.path.some((p) => {
+      const c = s.cells[p.idx];
+      return c.trap && c.trap.by === "player";
+    });
+    if (trapped && roll(s) < 0.7) {
+      s.oppTurn.pendingCast = { prog: "defend", mode: "purge" };
       return;
     }
   }
 
-  // 3. The Analyze readout must come true early.
+  // 3. The player interfered recently: harden or fence them out.
+  if (s.lastPlayerHitRound >= s.round - 1 && s.lastPlayerHitRound > 0 && roll(s) < 0.5) {
+    const guard = def.find((m) => m === "lock") ?? def.find((m) => m === "ward");
+    if (guard && !econ.used.defend) {
+      s.oppTurn.pendingCast = { prog: "defend", mode: guard };
+      return;
+    }
+  }
+
+  // 4. The Analyze readout must come true early.
   if (!s.oppDominantUsed && s.round >= 2) {
-    const dom = kit.find((d) => d.verb === s.cfg.dominant);
-    if (dom) {
-      s.oppTurn.pendingAbility = dom.id;
+    const dom = s.cfg.dominant;
+    const prog = progOf(dom);
+    const available =
+      prog === "attack" ? (atk as OppMode[]).includes(dom) : (def as OppMode[]).includes(dom);
+    if (available && !econ.used[prog]) {
+      s.oppTurn.pendingCast = { prog, mode: dom };
       return;
     }
   }
 
-  // 4. Proactive: tempo when the route is long, dominant double-weighted.
+  // 5. Proactive roll, dominant double-weighted.
   if (roll(s) < s.cfg.abilityFreq) {
-    if (isFinite(ownCost) && ownCost > econ.ramPerTurn * 2) {
-      const clock = kit.find((d) => d.verb === "overclock");
-      if (clock && roll(s) < 0.5) {
-        s.oppTurn.pendingAbility = clock.id;
-        return;
-      }
+    const pool: Array<{ prog: "attack" | "defend"; mode: OppMode }> = [];
+    for (const m of atk) if (!econ.used.attack) pool.push({ prog: "attack", mode: m });
+    for (const m of def) if (!econ.used.defend) pool.push({ prog: "defend", mode: m });
+    for (const entry of [...pool]) if (entry.mode === s.cfg.dominant) pool.push(entry);
+    if (pool.length > 0) {
+      s.oppTurn.pendingCast = pool[Math.floor(roll(s) * pool.length)];
     }
-    const weighted: AbilityDef[] = [];
-    for (const d of kit) {
-      weighted.push(d);
-      if (d.verb === s.cfg.dominant) weighted.push(d);
-    }
-    s.oppTurn.pendingAbility = weighted[Math.floor(roll(s) * weighted.length)].id;
   }
 }
 
 function computeIntent(s: DuelState): void {
-  if (s.oppTurn.pendingAbility) {
-    const def = ABILITY_BY_ID[s.oppTurn.pendingAbility];
-    s.oppNextIntent = def ? `Charging ${def.name}` : "Charging a routine";
+  if (s.oppTurn.pendingCast) {
+    s.oppNextIntent = `Charging ${s.oppTurn.pendingCast.mode.toUpperCase()}`;
     return;
   }
   const cost = routeCost(s, "opp");
@@ -110,35 +131,37 @@ function computeIntent(s: DuelState): void {
   else s.oppNextIntent = "Aligning junctions toward the core";
 }
 
-type CastAim = { kind: "cast"; id: string; targets: number[]; abilityTarget?: string };
+type CastAim = { kind: "cast"; prog: "attack" | "defend"; mode: OppMode; targets: number[] };
 
 /**
- * Resolve the pending ability into a telegraphed cast: targets chosen now,
+ * Resolve the pending program into a telegraphed cast: targets chosen now,
  * shown to the player for one beat, applied on the next step.
  */
 function prepareCast(s: DuelState): CastAim | null {
-  const id = s.oppTurn.pendingAbility;
-  if (!id) return null;
-  const def = ABILITY_BY_ID[id];
+  const pc = s.oppTurn.pendingCast;
+  if (!pc) return null;
+  s.oppTurn.pendingCast = null;
   const econ = s.econ.opp;
-  s.oppTurn.pendingAbility = null;
-  if (!def || econ.abilityUsed || def.ramCost > econ.ram) return null;
-
+  if (econ.used[pc.prog] || econ.ram < 1) return null;
+  const width = pc.prog === "attack" ? ATTACK_WIDTH[s.cfg.oppTier] : DEFEND_WIDTH[s.cfg.oppTier];
   const targets: number[] = [];
-  switch (def.verb) {
-    case "arm": {
-      // Trap the player's predicted route, deep enough that they commit.
+
+  switch (pc.mode) {
+    case "armHalt":
+    case "armSiphon": {
+      // Trap the player's predicted route. Normally deep, so they commit
+      // before it fires; in the tutorial shallow, so Scan can catch it.
       const plan = routePlan(s, "player");
-      const pool = (plan ? plan.path.map((p) => p.idx) : [])
-        .filter((i) => armTargetLegal(s, "opp", i))
-        .reverse();
+      let pool = (plan ? plan.path.map((p) => p.idx) : []).filter((i) =>
+        armTargetLegal(s, "opp", i),
+      );
+      if (!s.cfg.tutorial) pool = pool.reverse();
       if (pool.length === 0) {
-        const any = s.cells
+        pool = s.cells
           .map((_, i) => i)
           .filter((i) => armTargetLegal(s, "opp", i) && isFrontier(s, "player", i));
-        pool.push(...any);
       }
-      targets.push(...pool.slice(0, def.p.traps ?? 1));
+      targets.push(...pool.slice(0, width));
       if (targets.length === 0) return null;
       break;
     }
@@ -149,15 +172,14 @@ function prepareCast(s: DuelState): CastAim | null {
         .filter((i) => redirectTargetLegal(s, "opp", i) && s.cells[i].owner === "player")
         .sort((a, b) => coreDist(s, a) - coreDist(s, b))
         .slice(0, 6);
-      const steps = def.p.rotSteps ?? 1;
       let best = -1;
       let bestGain = -1;
       const before = routeCost(s, "player");
       for (const i of candidates) {
         const c = s.cells[i];
-        c.rot = (c.rot + steps) % 4;
+        c.rot = (c.rot + 1) % 4;
         const after = routeCost(s, "player");
-        c.rot = (c.rot - steps + 4) % 4;
+        c.rot = (c.rot + 3) % 4;
         const gain = (isFinite(after) ? after : 99) - (isFinite(before) ? before : 99);
         if (gain > bestGain) {
           bestGain = gain;
@@ -166,71 +188,64 @@ function prepareCast(s: DuelState): CastAim | null {
       }
       if (best === -1) return null;
       targets.push(best);
-      const want = def.p.targets ?? 1;
-      if (want > 1) {
-        const extra = candidates.filter((i) => i !== best).slice(0, want - 1);
-        targets.push(...extra);
-      }
+      targets.push(...candidates.filter((i) => i !== best).slice(0, width - 1));
       break;
     }
-    case "shield": {
-      const playerCost = routeCost(s, "player");
-      if (isFinite(playerCost) && playerCost <= 4) {
-        // Freeze the player's next junction: they cannot rotate it while locked.
-        const plan = routePlan(s, "player");
-        const choke = plan?.path.find(
-          (p) => s.cells[p.idx].owner === "none" && shieldTargetLegal(s, "opp", p.idx),
-        );
-        if (choke) {
-          targets.push(choke.idx);
-          break;
-        }
-      }
-      const own = s.cells
-        .map((_, i) => i)
-        .filter((i) => s.cells[i].owner === "opp" && shieldTargetLegal(s, "opp", i))
-        .sort((a, b) => coreDist(s, a) - coreDist(s, b));
-      targets.push(...own.slice(0, def.p.targets ?? 1));
+    case "purge": {
+      const plan = routePlan(s, "opp");
+      const onRoute = (plan ? plan.path.map((p) => p.idx) : []).filter((i) =>
+        purgeTargetLegal(s, "opp", i),
+      );
+      const anywhere = s.cells.map((_, i) => i).filter((i) => purgeTargetLegal(s, "opp", i));
+      const pool = [...new Set([...onRoute, ...anywhere])];
+      targets.push(...pool.slice(0, width));
       if (targets.length === 0) return null;
       break;
     }
-    case "backdoor": {
-      if (def.p.shieldRounds) {
-        const tip = s.cells
-          .map((_, i) => i)
-          .filter((i) => s.cells[i].owner === "opp" && s.cells[i].kind === "node")
-          .sort((a, b) => coreDist(s, a) - coreDist(s, b))[0];
-        if (tip !== undefined) targets.push(tip);
+    case "lock": {
+      // Freeze the player's next junctions when they threaten, else armor
+      // its own chain nearest the core.
+      const playerCost = routeCost(s, "player");
+      if (isFinite(playerCost) && playerCost <= 4) {
+        const plan = routePlan(s, "player");
+        const chokes = (plan?.path ?? [])
+          .filter((p) => s.cells[p.idx].owner === "none" && lockTargetLegal(s, "opp", p.idx))
+          .map((p) => p.idx);
+        targets.push(...chokes.slice(0, width));
       }
+      if (targets.length < width) {
+        const own = s.cells
+          .map((_, i) => i)
+          .filter(
+            (i) =>
+              s.cells[i].owner === "opp" && lockTargetLegal(s, "opp", i) && !targets.includes(i),
+          )
+          .sort((a, b) => coreDist(s, a) - coreDist(s, b));
+        targets.push(...own.slice(0, width - targets.length));
+      }
+      if (targets.length === 0) return null;
       break;
     }
-    case "overload":
-    case "overclock":
-    case "firewall":
+    case "ward": {
+      // Ward the unclaimed lane ahead of it - the nodes a trapper wants.
+      const plan = routePlan(s, "opp");
+      const ahead = plan?.path.find(
+        (p) => s.cells[p.idx].owner === "none" && wardTargetLegal(s, "opp", p.idx),
+      );
+      if (!ahead) return null;
+      targets.push(ahead.idx);
       break;
-  }
-
-  let abilityTarget: string | undefined;
-  if (def.verb === "overload" && def.p.lockTurns) {
-    const options = s.equipped.filter((e) => e.copies > 0);
-    if (options.length > 0) {
-      options.sort((a, b) => (ABILITY_BY_ID[b.id]?.tier ?? 0) - (ABILITY_BY_ID[a.id]?.tier ?? 0));
-      abilityTarget = options[0].id;
     }
   }
-  return { kind: "cast", id: def.id, targets, abilityTarget };
+  return { kind: "cast", prog: pc.prog, mode: pc.mode, targets };
 }
 
 /** Land a telegraphed cast. Conditions cannot change between the beats. */
 function executeCast(s: DuelState, aim: CastAim): void {
-  const def = ABILITY_BY_ID[aim.id];
   const econ = s.econ.opp;
-  if (!def || econ.abilityUsed || def.ramCost > econ.ram) return;
-  applyCast(s, "opp", def, aim.targets);
-  if (def.verb === "overload" && def.p.lockTurns && aim.abilityTarget) {
-    applyOverloadLock(s, "opp", def, aim.abilityTarget);
-  }
-  if (def.verb === s.cfg.dominant) s.oppDominantUsed = true;
+  if (econ.used[aim.prog] || econ.ram < 1) return;
+  applyCast(s, "opp", aim.prog, aim.mode, aim.targets);
+  if (aim.mode === s.cfg.dominant) s.oppDominantUsed = true;
 }
 
 type QueueEntry = { idx: number; targetRot: number };
@@ -250,7 +265,7 @@ function buildQueue(s: DuelState, side: Side): QueueEntry[] {
       (p) => s.cells[p.idx].lockedThroughRound >= s.round && s.cells[p.idx].lockedBy !== side,
     )
   ) {
-    // A shield sits on the route: try to route around every locked junction.
+    // A lock sits on the route: try to route around every frozen junction.
     const avoid = new Set(
       plan.steps
         .filter((p) => s.cells[p.idx].lockedThroughRound >= s.round && s.cells[p.idx].lockedBy !== side)
@@ -287,7 +302,7 @@ function pickFromQueue(
     if (!head) return -1;
   }
   if (!canRotate(s, side, head.idx)) {
-    // Claimed out from under us or shield-locked: rebuild from scratch.
+    // Claimed out from under us or lock-frozen: rebuild from scratch.
     queue.length = 0;
     replan();
     while (queue.length > 0 && s.cells[queue[0].idx].rot === queue[0].targetRot) queue.shift();
@@ -296,7 +311,7 @@ function pickFromQueue(
   }
 
   if (roll(s) >= greed) {
-    // Fumble: twist a random frontier node instead; the queue stands.
+    // Fumble: twist a random reachable node instead; the queue stands.
     const pool = s.cells
       .map((_, i) => i)
       .filter((i) => i !== head.idx && canRotate(s, side, i) && s.cells[i].owner === "none");
@@ -370,7 +385,7 @@ export function oppStep(s: DuelState): void {
 
   if (!ot.started) {
     ot.started = true;
-    decideAbility(s);
+    decideProgram(s);
     computeIntent(s);
     ot.queue = buildQueue(s, "opp");
     return; // one visible "thinking" beat
@@ -382,7 +397,7 @@ export function oppStep(s: DuelState): void {
     ot.aim = null;
     if (aim.kind === "cast") {
       executeCast(s, aim);
-      // Abilities can reshape the board; recommit the movement plan.
+      // Casts can reshape the board; recommit the movement plan.
       ot.queue = buildQueue(s, "opp");
       return;
     }
@@ -393,12 +408,11 @@ export function oppStep(s: DuelState): void {
     // The aimed junction was stolen between beats; fall through and replan.
   }
 
-  if (ot.pendingAbility) {
+  if (ot.pendingCast) {
     const prepared = prepareCast(s);
     if (prepared) {
       ot.aim = prepared;
-      const def = ABILITY_BY_ID[prepared.id];
-      emit(s, `oppCast:${def?.verb ?? "arm"}`);
+      emit(s, `oppCast:${prepared.mode}`);
       return;
     }
   }

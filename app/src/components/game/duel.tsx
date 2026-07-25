@@ -2,37 +2,42 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   playBoom,
   playCascade,
-  playFx,
   playStinger,
   playUiPress,
   sfx,
   startDrone,
   stopDrone,
 } from "../../game/audio";
-import { ABILITY_BY_ID, VERB_LABEL } from "../../game/content/abilities";
 import {
-  armTargetLegal,
-  redirectTargetLegal,
-  shieldTargetLegal,
+  ATTACK_MODE_LABEL,
+  ATTACK_WIDTH,
+  DEFEND_MODE_LABEL,
+  DEFEND_WIDTH,
+  OppMode,
+  Program,
+  SCAN_RANGE,
+  attackModeDesc,
+  defendModeDesc,
+  scanDesc,
+} from "../../game/content/kit";
+import {
+  attackTargetLegal,
+  defendTargetLegal,
+  programCost,
+  tierOf,
 } from "../../game/duel-actions";
 import { canRotate, routeCost } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
-import {
-  AbilityDef,
-  AbilityId,
-  DuelConfig,
-  DuelState,
-  EquippedAbility,
-  ROUND_CAP,
-} from "../../game/duel-types";
+import { DuelConfig, DuelKit, DuelState, ROUND_CAP } from "../../game/duel-types";
 import { DuelBoard } from "./duel-board";
 
 interface Targeting {
-  def: AbilityDef;
-  mode: "arm" | "redirect" | "shield";
+  prog: "attack" | "defend";
+  mode: OppMode;
   picked: number[];
   want: number;
+  label: string;
 }
 
 interface Pulse {
@@ -41,16 +46,14 @@ interface Pulse {
   cls: string;
 }
 
-/** Center-screen virus-speak when the machine charges a routine. */
+/** Center-screen virus-speak when the machine charges a program. */
 const VIRUS_LINES: Record<string, string[]> = {
-  arm: ["DA3M0N R3L3AS3D. H4PPY HUNT1NG >:)", "M1N3S 1N TH3 W1R3S. ST3P L1GHTLY", "S0M3TH1NG SL33PS WH3R3 Y0U W4LK"],
+  armHalt: ["DA3M0N R3L3AS3D. H4PPY HUNT1NG >:)", "M1N3S 1N TH3 W1R3S. ST3P L1GHTLY", "S0M3TH1NG SL33PS WH3R3 Y0U W4LK"],
+  armSiphon: ["Y0UR R4M T4ST3S B3TT3R TH4N M1N3", "L1TTL3 L33CH, B1G 4PP3T1T3 >:)", "F33D M3"],
   redirect: ["R3R0UT1NG Y0UR L1F3 >:)", "Y0UR W0RK. MY RUL3S", "TW1ST. SN4P. S0RRY N0T S0RRY"],
-  shield: ["TH1S 0N3 1S M1N3 N0W", "FR0Z3N S0L1D. TRY 4G41N L4T3R"],
-  overload: ["T00LS D0WN, K1DD0 >:)", "N0 T0YS F0R Y0U TH1S TURN"],
-  overclock: ["F33D1NG CYCL3S. GR0W1NG STR0NG", "MMM. R4M"],
-  firewall: ["W4LLS UP. KN0CK 4LL Y0U W4NT", "N0 3NTRY. N0 3XC3PT10NS"],
-  backdoor: ["SW3PT CL34N. N1C3 TRY", "F0UND Y0UR L1TTL3 G1FTS >:)"],
-  scan: ["1 S33 3V3RYTH1NG Y0U H1D", "P33K4B00"],
+  lock: ["TH1S 0N3 1S M1N3 N0W", "FR0Z3N S0L1D. TRY 4G41N L4T3R"],
+  ward: ["N0 G1FTS 4LL0W3D 1N MY H0US3", "W4RD3D. K33P Y0UR T0YS"],
+  purge: ["SW3PT CL34N. N1C3 TRY", "F0UND Y0UR L1TTL3 G1FTS >:)"],
 };
 
 interface VirusMsg {
@@ -62,13 +65,12 @@ export interface DuelFinish {
   won: boolean;
   chip: number;
   capWin: boolean;
-  copiesLeft: Record<AbilityId, number>;
 }
 
 export interface DuelScreenProps {
   cfg: DuelConfig;
   seed: number;
-  equipped: EquippedAbility[];
+  kit: DuelKit;
   ramPerTurn: number;
   jobTitle: string;
   jobSub: string;
@@ -90,7 +92,18 @@ function coachLine(s: DuelState): string | null {
     return "Chain rotations toward the CORE. When a junction clicks into line, everything connected claims at once. Spend your RAM, then END TURN.";
   }
   if (s.turn === "opp" && s.round === 1) {
-    return "Now watch how much it can afford per turn.";
+    return "Now watch it move. Watch what it plants.";
+  }
+  const hiddenTrap = s.cells.some((c) => c.trap && c.trap.by === "opp" && !c.trap.revealed);
+  const shownTrap = s.cells.some((c) => c.trap && c.trap.by === "opp" && c.trap.revealed);
+  if (s.turn === "player" && hiddenTrap) {
+    return "It armed something on your lane last cycle. SCAN (1 RAM) sweeps everything near your line. Always scan before you walk.";
+  }
+  if (s.turn === "player" && shownTrap) {
+    return "There it is. DEFEND runs PURGE: cast it, click the exposed trap, and defuse the thing before your flood walks in.";
+  }
+  if (s.turn === "player") {
+    return "Good hands. Scan, defuse, push. Remember the order. It will not save you today, but it will save you.";
   }
   return "Reach the core first. That is the whole game. It is just faster than you, today.";
 }
@@ -109,10 +122,19 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
     case "claim":
       if (soundOn) playCascade(1);
       break;
+    case "cascadeRam":
+      pulse = mk(`+${n ?? 1} RAM BANKED`, "kp-pulse-good");
+      if (soundOn) sfx("overclockCast", { vol: 0.8 });
+      break;
     case "trapFire":
       shake = 3;
       pulse = mk("TRAP SPRUNG", "kp-pulse-bad");
       if (soundOn) playBoom();
+      break;
+    case "siphonFire":
+      shake = 2;
+      pulse = mk(`SIPHONED ${n ?? 2} RAM`, "kp-pulse-bad");
+      if (soundOn) sfx("overloadCast");
       break;
     case "turnLost":
       shake = 2;
@@ -147,22 +169,19 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
       if (soundOn) sfx("scanCast");
       pulse = mk("SCANNED", "kp-pulse-info");
       break;
-    case "shield":
+    case "trace":
+      pulse = mk("ROUTE TRACED", "kp-pulse-info");
+      break;
+    case "purge":
+      if (soundOn) sfx("backdoorCast");
+      pulse = mk("DEFUSED", "kp-pulse-info");
+      break;
+    case "lock":
       if (soundOn) sfx("shieldCast");
       break;
-    case "overload":
-      if (soundOn) sfx("overloadCast");
-      pulse = mk("JAMMED", "kp-pulse-info");
-      break;
-    case "overclock":
-      if (soundOn) sfx("overclockCast");
-      break;
-    case "firewall":
+    case "ward":
       if (soundOn) sfx("firewallCast");
-      pulse = mk("FIREWALL UP", "kp-pulse-info");
-      break;
-    case "backdoor":
-      if (soundOn) sfx("backdoorCast");
+      pulse = mk("WARDED", "kp-pulse-info");
       break;
     default:
       break;
@@ -171,15 +190,14 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
 }
 
 export function DuelScreen(props: DuelScreenProps) {
-  const { cfg, seed, equipped, ramPerTurn, onFinish, soundOn } = props;
+  const { cfg, seed, kit, ramPerTurn, onFinish, soundOn } = props;
   const [state, dispatch] = useReducer(
     duelReducer,
     undefined,
-    () => createDuel(cfg, seed, equipped, ramPerTurn),
+    () => createDuel(cfg, seed, kit, ramPerTurn),
   );
   const [targeting, setTargeting] = useState<Targeting | null>(null);
-  const [overloadPick, setOverloadPick] = useState<AbilityDef | null>(null);
-  const [infoDef, setInfoDef] = useState<AbilityDef | null>(null);
+  const [infoProg, setInfoProg] = useState<Program | null>(null);
   const [shake, setShake] = useState<{ mag: number; key: number }>({ mag: 0, key: 0 });
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [virus, setVirus] = useState<VirusMsg | null>(null);
@@ -226,10 +244,10 @@ export function DuelScreen(props: DuelScreenProps) {
         continue;
       }
       if (e.kind.startsWith("oppCast:")) {
-        const verb = e.kind.slice(8);
-        const lines = VIRUS_LINES[verb] ?? VIRUS_LINES.arm;
+        const mode = e.kind.slice(8);
+        const lines = VIRUS_LINES[mode] ?? VIRUS_LINES.armHalt;
         setVirus({ key: e.id, text: lines[Math.floor(Math.random() * lines.length)] });
-        if (verb === "arm") setSweep((n) => n + 1);
+        if (mode === "armHalt" || mode === "armSiphon") setSweep((n) => n + 1);
         if (soundOn) sfx("virusSting");
         maxShake = Math.max(maxShake, 1);
         continue;
@@ -257,7 +275,6 @@ export function DuelScreen(props: DuelScreenProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Escape") {
         setTargeting(null);
-        setOverloadPick(null);
       } else if (e.code === "KeyE" && playerTurn && !targeting) {
         dispatch({ type: "endTurn" });
       }
@@ -273,9 +290,12 @@ export function DuelScreen(props: DuelScreenProps) {
     if (targeting) {
       for (let i = 0; i < state.cells.length; i++) {
         if (targeting.picked.includes(i)) continue;
-        if (targeting.mode === "arm" && armTargetLegal(state, "player", i)) out.add(i);
-        if (targeting.mode === "redirect" && redirectTargetLegal(state, "player", i)) out.add(i);
-        if (targeting.mode === "shield" && shieldTargetLegal(state, "player", i)) out.add(i);
+        if (targeting.prog === "attack" && attackTargetLegal(state, "player", targeting.mode, i)) out.add(i);
+        if (
+          targeting.prog === "defend" &&
+          defendTargetLegal(state, "player", state.kit.defendMode, i)
+        )
+          out.add(i);
       }
       return out;
     }
@@ -292,6 +312,11 @@ export function DuelScreen(props: DuelScreenProps) {
     return new Set(a.kind === "rotate" ? [a.idx] : a.targets);
   }, [state.oppTurn.aim, state.phase]);
 
+  const traced = useMemo(
+    () => new Set(state.routeTrace?.cells ?? []),
+    [state.routeTrace],
+  );
+
   const armedCount = useMemo(
     () => state.cells.filter((c) => c.trap && c.trap.by === "opp").length,
     [state.cells],
@@ -306,7 +331,7 @@ export function DuelScreen(props: DuelScreenProps) {
     if (targeting) {
       const picked = [...targeting.picked, idx];
       if (picked.length >= targeting.want) {
-        dispatch({ type: "ability", id: targeting.def.id, targets: picked });
+        dispatch({ type: "cast", prog: targeting.prog, targets: picked });
         setTargeting(null);
       } else {
         setTargeting({ ...targeting, picked });
@@ -316,34 +341,32 @@ export function DuelScreen(props: DuelScreenProps) {
     dispatch({ type: "rotate", idx });
   };
 
-  const onAbility = (def: AbilityDef) => {
-    if (!playerTurn || econ.abilityUsed) return;
+  const onProgram = (prog: Program) => {
+    if (!playerTurn || econ.used[prog]) return;
     if (soundOn) playUiPress();
-    setOverloadPick(null);
-    switch (def.verb) {
-      case "arm":
-        setTargeting({ def, mode: "arm", picked: [], want: def.p.traps ?? 1 });
-        break;
-      case "redirect":
-        setTargeting({ def, mode: "redirect", picked: [], want: def.p.targets ?? 1 });
-        break;
-      case "shield":
-        setTargeting({ def, mode: "shield", picked: [], want: def.p.targets ?? 1 });
-        break;
-      case "backdoor":
-        if (def.p.shieldRounds) setTargeting({ def, mode: "shield", picked: [], want: 1 });
-        else dispatch({ type: "ability", id: def.id, targets: [] });
-        break;
-      case "overload":
-        if (def.p.lockTurns) setOverloadPick(def);
-        else dispatch({ type: "ability", id: def.id, targets: [] });
-        break;
-      case "scan":
-      case "overclock":
-      case "firewall":
-        dispatch({ type: "ability", id: def.id, targets: [] });
-        break;
+    if (prog === "scan") {
+      dispatch({ type: "cast", prog: "scan", targets: [] });
+      return;
     }
+    if (prog === "attack") {
+      const mode = state.kit.attackMode;
+      setTargeting({
+        prog: "attack",
+        mode,
+        picked: [],
+        want: ATTACK_WIDTH[tierOf(state, "player", "attack")],
+        label: ATTACK_MODE_LABEL[mode],
+      });
+      return;
+    }
+    const mode = state.kit.defendMode;
+    setTargeting({
+      prog: "defend",
+      mode,
+      picked: [],
+      want: mode === "ward" ? 1 : DEFEND_WIDTH[tierOf(state, "player", "defend")],
+      label: DEFEND_MODE_LABEL[mode],
+    });
   };
 
   const finish = () => {
@@ -353,12 +376,31 @@ export function DuelScreen(props: DuelScreenProps) {
       won: state.phase === "won",
       chip: state.strainChip,
       capWin: state.winKind === "cap",
-      copiesLeft: Object.fromEntries(state.equipped.map((e) => [e.id, e.copies])),
     });
   };
 
   const coach = coachLine(state);
   const oppEcon = state.econ.opp;
+  const banked = econ.drainNext < 0 ? -econ.drainNext : 0;
+
+  const programInfo = (prog: Program): { title: string; desc: string } => {
+    if (prog === "scan") {
+      const t = tierOf(state, "player", "scan");
+      return { title: `SCAN.EXE T${t} - range ${SCAN_RANGE[t] >= 99 ? "FULL" : SCAN_RANGE[t]}`, desc: scanDesc(t) };
+    }
+    if (prog === "attack") {
+      const t = tierOf(state, "player", "attack");
+      return {
+        title: `ATTACK.EXE T${t} - ${ATTACK_MODE_LABEL[state.kit.attackMode]}`,
+        desc: attackModeDesc(state.kit.attackMode, t),
+      };
+    }
+    const t = tierOf(state, "player", "defend");
+    return {
+      title: `DEFEND.EXE T${t} - ${DEFEND_MODE_LABEL[state.kit.defendMode]}`,
+      desc: defendModeDesc(state.kit.defendMode, t),
+    };
+  };
 
   return (
     <div
@@ -394,6 +436,7 @@ export function DuelScreen(props: DuelScreenProps) {
             legal={legal}
             selected={new Set(targeting?.picked ?? [])}
             aimed={aimed}
+            traced={traced}
             onCell={onCell}
           />
           {sweep > 0 && <div key={`sw-${sweep}`} className="kp-sweep" aria-hidden="true" />}
@@ -418,14 +461,14 @@ export function DuelScreen(props: DuelScreenProps) {
           {targeting && (
             <div className="kp-targetbar">
               <span>
-                {targeting.def.name}: pick {targeting.want - targeting.picked.length} target
+                {targeting.label}: pick {targeting.want - targeting.picked.length} target
                 {targeting.want - targeting.picked.length === 1 ? "" : "s"}
               </span>
               {targeting.picked.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {
-                    dispatch({ type: "ability", id: targeting.def.id, targets: targeting.picked });
+                    dispatch({ type: "cast", prog: targeting.prog, targets: targeting.picked });
                     setTargeting(null);
                   }}
                 >
@@ -450,7 +493,7 @@ export function DuelScreen(props: DuelScreenProps) {
             <em>{armedCount > 0 ? `${armedCount}${revealedCount < armedCount ? " (hidden)" : ""}` : "0"}</em>
           </div>
           {props.dominantTell && <p className="kp-rail-tell">{props.dominantTell}</p>}
-          {state.intentRevealed && state.oppNextIntent && (
+          {state.oppNextIntent && state.turn === "opp" && (
             <p className="kp-rail-intent">INTENT: {state.oppNextIntent}</p>
           )}
           <div className={state.turn === "opp" ? "kp-turnlight kp-turnlight-on" : "kp-turnlight"}>
@@ -463,6 +506,7 @@ export function DuelScreen(props: DuelScreenProps) {
         <div className="kp-dock-ram">
           <span className="kp-dock-label">
             RAM <em>{playerTurn ? econ.ram : 0}</em>
+            {banked > 0 && <i className="kp-dock-banked">+{banked} NEXT</i>}
           </span>
           <div className="kp-ram-pips">
             {Array.from({ length: Math.max(econ.ramPerTurn + 3, econ.ram) }).map((_, i) => (
@@ -472,29 +516,34 @@ export function DuelScreen(props: DuelScreenProps) {
         </div>
 
         <div className="kp-dock-abilities">
-          {state.equipped.length === 0 && <span className="kp-rail-dim">No loadout</span>}
-          {state.equipped.map((slot) => {
-            const def = ABILITY_BY_ID[slot.id];
-            if (!def) return null;
-            const jammed = slot.id in econ.disabled;
-            const disabled =
-              !playerTurn || slot.copies < 1 || econ.abilityUsed || jammed || econ.ram < def.ramCost;
+          {(["scan", "attack", "defend"] as Program[]).map((prog) => {
+            const cost = programCost(state, "player", prog);
+            const disabled = !playerTurn || econ.used[prog] || econ.ram < cost;
+            const sub =
+              prog === "scan"
+                ? `R${SCAN_RANGE[tierOf(state, "player", "scan")] >= 99 ? "∞" : SCAN_RANGE[tierOf(state, "player", "scan")]}`
+                : prog === "attack"
+                  ? ATTACK_MODE_LABEL[state.kit.attackMode]
+                  : DEFEND_MODE_LABEL[state.kit.defendMode];
+            const tier = tierOf(state, "player", prog);
             return (
               <button
-                key={slot.id}
+                key={prog}
                 type="button"
-                className={`kp-ability ${targeting?.def.id === slot.id ? "kp-ability-arming" : ""}`}
+                className={`kp-ability kp-prog-${prog} ${targeting?.prog === prog ? "kp-ability-arming" : ""}`}
                 disabled={disabled}
-                onClick={() => onAbility(def)}
-                onMouseEnter={() => setInfoDef(def)}
-                onMouseLeave={() => setInfoDef(null)}
-                onFocus={() => setInfoDef(def)}
-                onBlur={() => setInfoDef(null)}
+                onClick={() => onProgram(prog)}
+                onMouseEnter={() => setInfoProg(prog)}
+                onMouseLeave={() => setInfoProg(null)}
+                onFocus={() => setInfoProg(prog)}
+                onBlur={() => setInfoProg(null)}
               >
-                <span className="kp-ability-name">{def.name}</span>
+                <span className="kp-ability-name">
+                  {prog.toUpperCase()}
+                  <i className="kp-prog-tier">{"▪".repeat(tier)}</i>
+                </span>
                 <span className="kp-ability-meta">
-                  {def.ramCost}R x{slot.copies}
-                  {jammed ? " JAM" : ""}
+                  {sub} - {cost}R{econ.used[prog] ? " USED" : ""}
                 </span>
               </button>
             );
@@ -514,39 +563,10 @@ export function DuelScreen(props: DuelScreenProps) {
         </button>
       </footer>
 
-      {infoDef && (
+      {infoProg && (
         <div className="kp-ability-info">
-          <strong>
-            {infoDef.name} <em>T{infoDef.tier} {VERB_LABEL[infoDef.verb]} - {infoDef.ramCost} RAM</em>
-          </strong>
-          <p>{infoDef.desc}</p>
-        </div>
-      )}
-
-      {overloadPick && (
-        <div className="kp-overlay kp-overlay-pick">
-          <div className="kp-pickbox">
-            <h3>OVERLOAD: jam which routine?</h3>
-            {cfg.oppKit.map((id) => {
-              const def = ABILITY_BY_ID[id];
-              if (!def) return null;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    dispatch({ type: "ability", id: overloadPick.id, targets: [], abilityTarget: id });
-                    setOverloadPick(null);
-                  }}
-                >
-                  {def.name} <em>{VERB_LABEL[def.verb]}</em>
-                </button>
-              );
-            })}
-            <button type="button" className="kp-pick-cancel" onClick={() => setOverloadPick(null)}>
-              CANCEL
-            </button>
-          </div>
+          <strong>{programInfo(infoProg).title}</strong>
+          <p>{programInfo(infoProg).desc}</p>
         </div>
       )}
 

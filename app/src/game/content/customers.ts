@@ -1,4 +1,4 @@
-import { AbilityVerb } from "../duel-types";
+import { OppMode } from "./kit";
 
 /**
  * The duel-era customer roster. Twelve regulars, six shared pixel portraits,
@@ -18,7 +18,7 @@ export interface CustomerProfile {
   lossLine: string;
   /** Difficulty tiers (1..5) this customer's jobs appear at. */
   tiers: number[];
-  dominant: AbilityVerb;
+  dominant: OppMode;
 }
 
 export const CUSTOMERS: CustomerProfile[] = [
@@ -34,7 +34,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "The records are mine again. First try. Tell nobody how long that actually took me.",
     lossLine: "The ghost keeps the high score. And the handheld.",
     tiers: [1, 2],
-    dominant: "overclock",
+    dominant: "armSiphon",
   },
   {
     id: "sable-okonkwo",
@@ -62,7 +62,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "The books balance. First time since spring. You do honest work, son.",
     lossLine: "Forty years of accounts, and it kept every one.",
     tiers: [1, 2, 3],
-    dominant: "arm",
+    dominant: "armHalt",
   },
   {
     id: "wren-tallis",
@@ -76,7 +76,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "Every track is back. Even the ones I forgot I wrote. You beautiful person.",
     lossLine: "The album belongs to whatever is in there now.",
     tiers: [1, 2],
-    dominant: "scan",
+    dominant: "ward",
   },
   {
     id: "bram-hollander",
@@ -90,7 +90,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "The till opens for its rightful owner. I could kiss you. I will not.",
     lossLine: "Eleven years of loyalty, and the register picked the intruder.",
     tiers: [2, 3],
-    dominant: "shield",
+    dominant: "lock",
   },
   {
     id: "dex-marlowe",
@@ -118,7 +118,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "Charts are open and the wards are talking to each other. I owe you a coffee and my silence.",
     lossLine: "The clinic gateway stayed shut. So did she, on the way out.",
     tiers: [3, 4],
-    dominant: "firewall",
+    dominant: "ward",
   },
   {
     id: "ines-calloway",
@@ -132,7 +132,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "Servos held through a full lift. No drops. I might even sleep tonight.",
     lossLine: "The suit dropped one crate too many. So did you.",
     tiers: [3, 4],
-    dominant: "overload",
+    dominant: "armHalt",
   },
   {
     id: "emeric-snow",
@@ -146,7 +146,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "It plays fair again. Lost to it twice this morning. Felt wonderful.",
     lossLine: "The cabinet is still playing. You resigned for both of us.",
     tiers: [4, 5],
-    dominant: "backdoor",
+    dominant: "purge",
   },
   {
     id: "vera-stanek",
@@ -160,7 +160,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "Lights stay on and the safe stays honest. Night shift thanks you. Loudly, for once.",
     lossLine: "The dispensary went dark. It is still dark.",
     tiers: [4, 5],
-    dominant: "overload",
+    dominant: "armSiphon",
   },
   {
     id: "casimir-bell",
@@ -174,7 +174,7 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "The vault opens on my word again. Take something off the shelf. Within reason.",
     lossLine: "The vault kept his customers' things. And his word.",
     tiers: [4, 5],
-    dominant: "firewall",
+    dominant: "lock",
   },
   {
     id: "noor-behzadi",
@@ -188,6 +188,6 @@ export const CUSTOMERS: CustomerProfile[] = [
     winLine: "The rig plays what I play and nothing else. The imposter era is over.",
     lossLine: "The rig plays on without her. Cold, perfect, not hers.",
     tiers: [4, 5],
-    dominant: "backdoor",
+    dominant: "purge",
   },
 ];

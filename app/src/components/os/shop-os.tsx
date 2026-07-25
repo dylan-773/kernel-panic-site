@@ -1,6 +1,14 @@
 import { useEffect, useReducer, useState, type ReactNode } from "react";
 import { playMusic, playUiPress, setMuted, setMusicOn, sfx, testBeep, unlockAudio } from "../../game/audio";
-import { ABILITIES, VERB_LABEL, VERB_TELL } from "../../game/content/abilities";
+import {
+  ATTACK_MODE_LABEL,
+  AUGMENTS,
+  DEFEND_MODE_LABEL,
+  MODE_TELL,
+  attackModeDesc,
+  defendModeDesc,
+  scanDesc,
+} from "../../game/content/kit";
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../../game/content/arc";
 import { finaleWinScene, runEndScene, runOpenerScene } from "../../game/content/story";
 import { mixSeed } from "../../game/duel-setup";
@@ -18,10 +26,10 @@ import {
 import { DuelScreen } from "../game/duel";
 import {
   AnalyzeScreen,
-  BuildScreen,
   DesktopIdle,
   FinalePre,
   JobBoard,
+  KitScreen,
   ResultScreen,
   StoryScene,
   UpgradeScreen,
@@ -74,27 +82,56 @@ function ManualContent() {
         One good rotation can cascade a whole chain. First flood to touch the CORE wins the job.
       </p>
       <p>
-        You can rotate your own claimed junctions and any open junction next to your territory.
-        The intrusion floods from the far port under the same rules, on its own RAM. Losing a duel
-        zeroes Neural Strain and ends the run. Sloppy wins chip it. Zero, by any means, is the end.
+        You can rotate your own claimed junctions and any open junction within TWO steps of your
+        territory: set up a chain, then trip it. Cascades of four or more claims BANK bonus RAM for
+        your next turn. The intrusion floods from the far port under the same rules, on its own
+        RAM. Losing a duel zeroes Neural Strain and ends the run. Sloppy wins chip it.
       </p>
-      <h3>ROUTINES (one cast per turn)</h3>
+      <h3>THE KIT: three programs, 1 RAM, once per turn each</h3>
       <div className="kp-manual-abilities">
-        {ABILITIES.map((a) => (
+        <div className="kp-manual-ability">
+          <strong>
+            SCAN.EXE<em>always 1 RAM</em>
+          </strong>
+          <p>{scanDesc(1)} Upgrades widen the sweep. Scan before you walk; every trap it finds stays found.</p>
+        </div>
+        <div className="kp-manual-ability">
+          <strong>
+            ATTACK.EXE<em>configurable</em>
+          </strong>
+          <p>
+            {ATTACK_MODE_LABEL.redirect}: {attackModeDesc("redirect", 1)}{" "}
+            {ATTACK_MODE_LABEL.armHalt}: {attackModeDesc("armHalt", 1)}{" "}
+            {ATTACK_MODE_LABEL.armSiphon}: {attackModeDesc("armSiphon", 1)} Upgrades hit more nodes
+            per cast.
+          </p>
+        </div>
+        <div className="kp-manual-ability">
+          <strong>
+            DEFEND.EXE<em>configurable</em>
+          </strong>
+          <p>
+            {DEFEND_MODE_LABEL.purge}: {defendModeDesc("purge", 1)} {DEFEND_MODE_LABEL.lock}:{" "}
+            {defendModeDesc("lock", 1)} {DEFEND_MODE_LABEL.ward}: {defendModeDesc("ward", 1)}{" "}
+            Upgrades cover more nodes per cast.
+          </p>
+        </div>
+      </div>
+      <h3>AUGMENTS</h3>
+      <div className="kp-manual-abilities">
+        {AUGMENTS.map((a) => (
           <div key={a.id} className="kp-manual-ability">
             <strong>
               {a.name}
-              <em>
-                T{a.tier} {VERB_LABEL[a.verb]} - {a.ramCost} RAM{a.variant ? " - variant" : ""}
-              </em>
+              <em>{a.kind === "config" ? "config" : "boost"}</em>
             </strong>
             <p>{a.desc}</p>
           </div>
         ))}
       </div>
       <p className="kp-rail-dim">
-        Every cleared job teaches one routine at random. Copies burn on use; buy more before a
-        dive. Only the routines themselves survive between runs.
+        Every cleared job offers a draft of augments; every closed day offers +1 RAM or a program
+        tier. Everything resets when the run ends. Only you remember.
       </p>
     </div>
   );
@@ -220,17 +257,24 @@ export function ShopOS() {
       ? tutorialConfig()
       : isFinale
         ? finaleConfig()
-        : dayDuelConfig(run.day, job?.dominant ?? "redirect", job?.kitSeed ?? run.runSeed);
-    const equipped = isTutorial
-      ? []
-      : run.equipped.map((id) => ({ id, copies: run.copies[id] ?? 0 }));
+        : dayDuelConfig(run.day, job?.dominant ?? "redirect", job?.tier ?? 1, job?.kitSeed ?? run.runSeed);
+    const duelKit = isTutorial
+      ? { scanTier: 1 as const, attackTier: 1 as const, defendTier: 1 as const, attackMode: "redirect" as const, defendMode: "purge" as const, augments: [] }
+      : {
+          scanTier: run.kit.scanTier,
+          attackTier: run.kit.attackTier,
+          defendTier: run.kit.defendTier,
+          attackMode: run.kit.attackMode,
+          defendMode: run.kit.defendMode,
+          augments: run.kit.augments,
+        };
     return (
       <div className="kp-os">
         <DuelScreen
           key={`dive-${run.runSeed}-${run.day}-${run.activeJob ?? "x"}-${screen}`}
           cfg={cfg}
           seed={isTutorial ? mixSeed(run.runSeed, 0, 0) : mixSeed(run.runSeed, run.day, run.activeJob ?? 9)}
-          equipped={equipped}
+          kit={duelKit}
           ramPerTurn={run.ramPerTurn}
           jobTitle={isTutorial || isFinale ? "THE MACHINE" : customer ? customer.device : "UNKNOWN DEVICE"}
           jobSub={
@@ -246,9 +290,9 @@ export function ShopOS() {
             isTutorial
               ? null
               : isFinale
-                ? "It runs every routine you have ever seen. All eight."
+                ? "It runs every config you have ever seen, at full width."
                 : job
-                  ? VERB_TELL[job.dominant]
+                  ? MODE_TELL[job.dominant]
                   : null
           }
           strain={run.strain}
@@ -257,14 +301,7 @@ export function ShopOS() {
           onToggleSound={() => dispatch({ type: "toggleSound" })}
           onFinish={(r) => {
             if (isTutorial) dispatch({ type: "tutorialDone" });
-            else
-              dispatch({
-                type: "duelFinished",
-                won: r.won,
-                chip: r.chip,
-                capWin: r.capWin,
-                copiesLeft: r.copiesLeft,
-              });
+            else dispatch({ type: "duelFinished", won: r.won, chip: r.chip, capWin: r.capWin });
           }}
         />
         <div className="kp-crt" aria-hidden="true" />
@@ -289,7 +326,7 @@ export function ShopOS() {
         content = <AnalyzeScreen run={run} dispatch={dispatch} />;
         break;
       case "build":
-        content = <BuildScreen state={state} dispatch={dispatch} />;
+        content = <KitScreen state={state} dispatch={dispatch} />;
         break;
       case "result":
         content = <ResultScreen run={run} dispatch={dispatch} />;
@@ -372,7 +409,7 @@ export function ShopOS() {
               {def.id === "journal" && <JournalContent meta={meta} />}
               {def.id === "loadout" &&
                 (run ? (
-                  <BuildScreen state={state} dispatch={dispatch} floating />
+                  <KitScreen state={state} dispatch={dispatch} floating />
                 ) : (
                   <p className="kp-rail-dim kp-float-pad">No active run. Open the shop first.</p>
                 ))}
@@ -384,8 +421,8 @@ export function ShopOS() {
                     <div><span>NEURAL STRAIN</span><em>{run.strain}/100</em></div>
                     <div><span>CREDITS</span><em>{run.credits} cr</em></div>
                     <div><span>RAM / TURN</span><em>{run.ramPerTurn}</em></div>
-                    <div><span>NEURAL CAPACITY</span><em>{run.capacity}</em></div>
-                    <div><span>ROUTINES ARCHIVED</span><em>{meta.unlocked.length}/24</em></div>
+                    <div><span>KIT TIERS</span><em>S{run.kit.scanTier} A{run.kit.attackTier} D{run.kit.defendTier}</em></div>
+                    <div><span>AUGMENTS</span><em>{run.kit.augments.length}/{AUGMENTS.filter((a) => a.kind === "boost").length}</em></div>
                   </div>
                 ) : (
                   <p className="kp-rail-dim kp-float-pad">No active run.</p>

@@ -1,3 +1,4 @@
+import { AttackMode, AugmentId, DefendMode, OppMode, Program, Tier } from "./content/kit";
 import { RngState } from "./rng";
 
 /**
@@ -6,7 +7,10 @@ import { RngState } from "./rng";
  * floods live from its port through aligned arms, auto-claiming every
  * neutral node it touches — one rotation can cascade-claim a chain. Claimed
  * territory persists (the enemy flood can never pass through it) even when
- * a later twist cuts its power. First flood to touch the center core wins.
+ * a later twist cuts its power. First flood to touch the core wins.
+ *
+ * Every combatant runs the same three programs — SCAN / ATTACK / DEFEND —
+ * at 1 RAM each, once per turn each. Tiers widen them, modes reshape them.
  *
  * Arm masks and rotation semantics live in ./types
  * (0 north, 1 east, 2 south, 3 west; bit = 1 << dir).
@@ -26,6 +30,8 @@ export const PIECE_X = 0b1111;
 
 export type CellKind = "node" | "entryP" | "entryO" | "core" | "block";
 
+export type TrapKind = "halt" | "siphon";
+
 export interface DuelCell {
   x: number;
   y: number;
@@ -42,10 +48,13 @@ export interface DuelCell {
   /** Position within the cascade that claimed it, for staggered animation. */
   claimWave: number;
   /** Enemy trap armed on this node. Hidden from the victim until revealed. */
-  trap: { by: Side; revealed: boolean; drain: number } | null;
-  /** Shield: round through which the lock holds, and who cast it. */
+  trap: { by: Side; revealed: boolean; kind: TrapKind; drain: number } | null;
+  /** Lock: round through which the rotation freeze holds, and who cast it. */
   lockedThroughRound: number;
   lockedBy: Side | null;
+  /** Ward: round through which no new trap can land here, and who cast it. */
+  wardThroughRound: number;
+  wardBy: Side | null;
 }
 
 export interface DuelPower {
@@ -53,55 +62,24 @@ export interface DuelPower {
   opp: boolean[];
 }
 
-export type AbilityVerb =
-  | "arm"
-  | "scan"
-  | "redirect"
-  | "shield"
-  | "overload"
-  | "overclock"
-  | "firewall"
-  | "backdoor";
-
-export type AbilityId = string;
-
-export interface AbilityDef {
-  id: AbilityId;
-  verb: AbilityVerb;
-  name: string;
-  tier: 1 | 2 | 3;
-  variant: boolean;
-  ramCost: number;
-  desc: string;
-  p: {
-    /** arm: number of nodes trapped per cast. */
-    traps?: number;
-    /** arm: RAM the victim loses on the turn after the trap fires. */
-    drain?: number;
-    /** scan/backdoor: also reveal the opponent's next intent. */
-    intent?: boolean;
-    /** scan: revealed traps immediately disarmed, up to this many. */
-    disarm?: number;
-    /** redirect: quarter turns applied to each target. */
-    rotSteps?: number;
-    /** redirect/shield: number of target nodes. */
-    targets?: number;
-    /** shield: rounds the rotation lock holds. */
-    shieldRounds?: number;
-    /** overload: enemy turns the chosen ability stays disabled. */
-    lockTurns?: number;
-    /** overload/firewall variants: RAM removed from the enemy's next turn. */
-    enemyRamDrain?: number;
-    /** overclock: bonus RAM per boosted turn. */
-    ramBoost?: number;
-    /** overclock: number of boosted turns. */
-    boostTurns?: number;
-    /** firewall: rounds of whole-territory immunity. */
-    wallRounds?: number;
-    /** backdoor: purge every enemy trap on the board. */
-    purge?: boolean;
-  };
+/** The player's resolved kit for one dive. */
+export interface DuelKit {
+  scanTier: Tier;
+  attackTier: Tier;
+  defendTier: Tier;
+  attackMode: AttackMode;
+  defendMode: DefendMode;
+  augments: AugmentId[];
 }
+
+export const BASE_KIT: DuelKit = {
+  scanTier: 1,
+  attackTier: 1,
+  defendTier: 1,
+  attackMode: "redirect",
+  defendMode: "purge",
+  augments: [],
+};
 
 export interface DuelConfig {
   w: number;
@@ -109,21 +87,19 @@ export interface DuelConfig {
   oppRam: number;
   /** 0..1 chance per rotation that the opponent plays optimally. */
   greed: number;
-  /** 0..1 chance per turn of a non-forced ability cast. */
+  /** 0..1 chance per turn of a non-forced program cast. */
   abilityFreq: number;
   /** Target route cost (rotation RAM) the board generator aims both sides at. */
   minCost: number;
   /** Neutral nodes pre-claimed along the intrusion's route at dive start. */
   headStart: number;
-  oppKit: AbilityId[];
-  /** The verb Analyze reports; prioritized and guaranteed early. */
-  dominant: AbilityVerb;
+  /** Attack/defend modes the machine may run, and how wide it casts. */
+  oppAttackModes: AttackMode[];
+  oppDefendModes: DefendMode[];
+  oppTier: Tier;
+  /** The mode Analyze reports; prioritized and guaranteed early. */
+  dominant: OppMode;
   tutorial?: boolean;
-}
-
-export interface EquippedAbility {
-  id: AbilityId;
-  copies: number;
 }
 
 export type DuelPhase = "playing" | "won" | "lost";
@@ -140,17 +116,16 @@ export interface SideEcon {
   ramPerTurn: number;
   ram: number;
   carry: number;
-  boostAmount: number;
-  boostTurns: number;
-  /** RAM subtracted from the next turn's generation (traps, brownouts). */
+  /** Max RAM carried between turns. */
+  carryCap: number;
+  /** RAM subtracted from the next turn's generation. Negative = a gain. */
   drainNext: number;
-  /** This side's NEXT turn is skipped outright (a trap fired). */
+  /** This side's NEXT turn is skipped outright (a halt trap fired). */
   loseNextTurn: boolean;
-  abilityUsed: boolean;
-  /** Ability id → own turns it remains disabled (enemy Overload). */
-  disabled: Record<AbilityId, number>;
-  /** Round through which the whole territory ignores Arm/Redirect/Shield. */
-  wallThrough: number;
+  /** Programs already cast this turn. */
+  used: Record<Program, boolean>;
+  /** ATTACK casts this dive (for first-cast discounts). */
+  attacksCast: number;
   /** Enemy traps that have fired on this side (feeds the strain formula). */
   trapsFired: number;
 }
@@ -171,13 +146,12 @@ export interface DuelState {
   round: number;
   turn: Side;
   econ: Record<Side, SideEcon>;
-  /** Player loadout with remaining copies; opponent kit casts are free. */
-  equipped: EquippedAbility[];
+  /** The player's programs for this dive. */
+  kit: DuelKit;
   /** Human-readable line describing the opponent's likely next move. */
   oppNextIntent: string | null;
-  intentRevealed: boolean;
-  /** True once Scan has run: enemy traps stay revealed for the duel. */
-  trapsRevealed: boolean;
+  /** TAP LINE augment: the intrusion's traced route, cleared each round. */
+  routeTrace: { round: number; cells: number[] } | null;
   /** Opponent route cost measured at duel start (strain formula baseline). */
   oppStartCost: number;
   strainChip: number;
@@ -189,7 +163,7 @@ export interface DuelState {
   /** Opponent turn bookkeeping, reset each opponent turn. */
   oppTurn: {
     started: boolean;
-    pendingAbility: AbilityId | null;
+    pendingCast: { prog: "attack" | "defend"; mode: OppMode } | null;
     /** Committed rotation queue for this turn, absolute target rotations. */
     queue: Array<{ idx: number; targetRot: number }>;
     replans: number;
@@ -201,11 +175,11 @@ export interface DuelState {
      */
     aim:
       | { kind: "rotate"; idx: number }
-      | { kind: "cast"; id: AbilityId; targets: number[]; abilityTarget?: AbilityId }
+      | { kind: "cast"; prog: "attack" | "defend"; mode: OppMode; targets: number[] }
       | null;
   };
   oppDominantUsed: boolean;
-  /** Round when the player last hit the opponent (Arm/Redirect/Shield-lock). */
+  /** Round when the player last hit the opponent (arm/redirect/lock). */
   lastPlayerHitRound: number;
   /** Tutorial only: the machine force-seals when this round begins. */
   tutorialSealRound: number;

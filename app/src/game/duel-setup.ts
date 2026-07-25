@@ -2,8 +2,8 @@ import { routeCost, routePlan, runFlood, computeDuelPower } from "./duel-power";
 import {
   DuelCell,
   DuelConfig,
+  DuelKit,
   DuelState,
-  EquippedAbility,
   PIECE_I,
   PIECE_L,
   PIECE_T,
@@ -41,18 +41,16 @@ function drawMask(rng: Rng): number {
   return PIECE_X;
 }
 
-function initialEcon(ramPerTurn: number): SideEcon {
+function initialEcon(ramPerTurn: number, carryCap: number): SideEcon {
   return {
     ramPerTurn,
     ram: 0,
     carry: 0,
-    boostAmount: 0,
-    boostTurns: 0,
+    carryCap,
     drainNext: 0,
     loseNextTurn: false,
-    abilityUsed: false,
-    disabled: {},
-    wallThrough: 0,
+    used: { scan: false, attack: false, defend: false },
+    attacksCast: 0,
     trapsFired: 0,
   };
 }
@@ -97,6 +95,8 @@ function buildCells(cfg: DuelConfig, rng: Rng): {
         trap: null,
         lockedThroughRound: 0,
         lockedBy: null,
+        wardThroughRound: 0,
+        wardBy: null,
       });
     }
   }
@@ -125,11 +125,12 @@ function buildCells(cfg: DuelConfig, rng: Rng): {
 export function createDuel(
   cfg: DuelConfig,
   seed: number,
-  equipped: EquippedAbility[],
+  kit: DuelKit,
   playerRamPerTurn: number,
   retry = 0,
 ): DuelState {
   const rng = new Rng(seed ^ 0x2545f491);
+  const carryCap = kit.augments.includes("carryCache") ? 4 : 2;
   let best: DuelState | null = null;
   let bestScore = Infinity;
   let loose: DuelState | null = null;
@@ -153,11 +154,10 @@ export function createDuel(
       winKind: null,
       round: 1,
       turn: "player",
-      econ: { player: initialEcon(playerRamPerTurn), opp: initialEcon(cfg.oppRam) },
-      equipped: equipped.map((e) => ({ ...e })),
+      econ: { player: initialEcon(playerRamPerTurn, carryCap), opp: initialEcon(cfg.oppRam, 2) },
+      kit: { ...kit, augments: [...kit.augments] },
       oppNextIntent: null,
-      intentRevealed: false,
-      trapsRevealed: false,
+      routeTrace: null,
       oppStartCost: 0,
       strainChip: 0,
       rngState: seedRng(seed ^ 0x5f3759df),
@@ -165,7 +165,7 @@ export function createDuel(
       fx: [],
       fxNext: 1,
       notice: null,
-      oppTurn: { started: false, pendingAbility: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null },
+      oppTurn: { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null },
       oppDominantUsed: false,
       lastPlayerHitRound: 0,
       tutorialSealRound: 3,
@@ -184,14 +184,14 @@ export function createDuel(
 
     const shorter = Math.min(pd, od);
     const score = Math.abs(shorter - cfg.minCost);
-    // Tutorial boards should be unwinnable inside two player turns even
-    // when the strict tier fails; short boards fall to the last-resort tier
-    // and get sealed a round earlier instead.
-    const looseOk = !cfg.tutorial || pd > playerRamPerTurn * 2 + 2;
+    // Tutorial boards should be unwinnable inside two player turns (cascade
+    // RAM included) even when the strict tier fails; short boards fall to
+    // the last-resort tier and get sealed a round earlier instead.
+    const looseOk = !cfg.tutorial || pd > playerRamPerTurn * 2 + 4;
     if (looseOk && score < looseScore) {
       looseScore = score;
       loose = s;
-    } else if (!looseOk && pd > playerRamPerTurn && score < lastResortScore) {
+    } else if (!looseOk && pd > playerRamPerTurn + 2 && score < lastResortScore) {
       // Sealed before the player's second turn, and never winnable in one.
       lastResortScore = score;
       lastResort = s;
@@ -199,8 +199,10 @@ export function createDuel(
     }
 
     if (cfg.tutorial) {
-      // The machine must finish on its first turn cycle; the player must not.
-      if (od > cfg.oppRam || pd <= playerRamPerTurn * 2 + 3) continue;
+      // The machine must finish inside two turn cycles (one RAM spent on
+      // the scripted trap), but not the first; the player gets two turns
+      // to learn Scan and Defend and still cannot make the distance.
+      if (od <= cfg.oppRam || od > cfg.oppRam * 2 - 1 || pd <= playerRamPerTurn * 2 + 5) continue;
     } else {
       // Nobody may be able to win on their opening turn.
       if (pd <= playerRamPerTurn || od <= cfg.oppRam) continue;
@@ -216,7 +218,7 @@ export function createDuel(
   let s = best ?? loose ?? lastResort;
   if (!s) {
     if (retry >= 5) throw new Error("duel generator could not produce a fair board");
-    return createDuel(cfg, (seed + 0x9e37) >>> 0, equipped, playerRamPerTurn, retry + 1);
+    return createDuel(cfg, (seed + 0x9e37) >>> 0, kit, playerRamPerTurn, retry + 1);
   }
 
   // Head start: the intrusion is already inside, pre-aligned along its route.
@@ -245,6 +247,6 @@ export function createDuel(
     s.oppStartCost = Math.max(1, isFinite(rc) ? rc : cfg.minCost);
   }
   s.power = computeDuelPower(s);
-  s.econ.player.ram = playerRamPerTurn;
+  s.econ.player.ram = playerRamPerTurn + (kit.augments.includes("hotBoot") ? 2 : 0);
   return s;
 }

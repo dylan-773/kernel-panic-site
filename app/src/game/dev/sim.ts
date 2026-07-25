@@ -3,28 +3,20 @@
  * Run from app/: bun run src/game/dev/sim.ts
  *
  * A proxy player using the same Dijkstra routing bot as the opponent (high
- * greed, no abilities) plays every day config across many seeds — a lower
- * bound on real player strength, since humans also get the ability kit.
+ * greed, no program casts) plays every day config across many seeds — a
+ * lower bound on real player strength, since humans also get the kit.
  */
 
-import { dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
+import { DAY_CONFIGS, dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
+import { OppMode } from "../content/kit";
 import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
-import { AbilityVerb, DuelState } from "../duel-types";
+import { BASE_KIT, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
 
 const PROXY_GREED = 0.95;
 const SEEDS = 200;
-const VERBS: AbilityVerb[] = [
-  "arm",
-  "scan",
-  "redirect",
-  "shield",
-  "overload",
-  "overclock",
-  "firewall",
-  "backdoor",
-];
+const MODES: OppMode[] = ["redirect", "armHalt", "armSiphon", "purge", "lock", "ward"];
 
 function playPlayerTurn(s: DuelState): void {
   botPlayTurn(s, "player", PROXY_GREED);
@@ -81,7 +73,7 @@ if (import.meta.main) {
   {
     let playerWins = 0;
     for (let i = 0; i < SEEDS; i++) {
-      const s = createDuel(tutorialConfig(), mixSeed(999, i), [], 5);
+      const s = createDuel(tutorialConfig(), mixSeed(999, i), BASE_KIT, 5);
       const r = playDuel(s);
       if (r.won) playerWins++;
     }
@@ -90,10 +82,16 @@ if (import.meta.main) {
 
   for (let day = 1; day <= 9; day++) {
     const ram = 5 + Math.floor((day - 1) / 2);
+    const tiers = DAY_CONFIGS[day].jobTiers;
     runDay(`day ${day} r${ram}`, (seed) =>
-      createDuel(dayDuelConfig(day, VERBS[seed % VERBS.length], seed), seed, [], ram),
+      createDuel(
+        dayDuelConfig(day, MODES[seed % MODES.length], tiers[seed % 3], seed),
+        seed,
+        BASE_KIT,
+        ram,
+      ),
     );
   }
 
-  runDay("finale r9", (seed) => createDuel(finaleConfig(), seed, [], 9));
+  runDay("finale r9", (seed) => createDuel(finaleConfig(), seed, BASE_KIT, 9));
 }

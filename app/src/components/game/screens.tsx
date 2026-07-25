@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
 import { sfx } from "../../game/audio";
-import { ABILITY_BY_ID, VERB_LABEL, VERB_TELL, copyPrice } from "../../game/content/abilities";
 import { DAY_CONFIGS, FINAL_DAY } from "../../game/content/arc";
 import { CUSTOMERS, CustomerProfile } from "../../game/content/customers";
+import {
+  ATTACK_MODE_LABEL,
+  AUGMENT_BY_ID,
+  AttackMode,
+  DEFEND_MODE_LABEL,
+  DefendMode,
+  MODE_LABEL,
+  MODE_TELL,
+  attackModeDesc,
+  defendModeDesc,
+  scanDesc,
+} from "../../game/content/kit";
 import { Scene } from "../../game/content/story";
-import { AbilityId } from "../../game/duel-types";
-import { GameState, RunAction } from "../../game/run-reducer";
+import { GameState, PATCH_COST, PATCH_HEAL, RunAction } from "../../game/run-reducer";
 import { MetaState, RunState } from "../../game/save";
 
 export function customerById(id: string): CustomerProfile {
@@ -107,7 +117,9 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
         <span>STRAIN {run.strain}</span>
         <span>{run.credits} cr</span>
         <span>RAM {run.ramPerTurn}/turn</span>
-        <span>CAPACITY {run.capacity}</span>
+        <span>
+          KIT S{run.kit.scanTier}/A{run.kit.attackTier}/D{run.kit.defendTier}
+        </span>
       </footer>
     </div>
   );
@@ -137,11 +149,11 @@ export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         </div>
         <div className="kp-analyze-block kp-analyze-threat">
           <h3>READOUT</h3>
-          <p className="kp-analyze-tell">{VERB_TELL[job.dominant]}</p>
+          <p className="kp-analyze-tell">{MODE_TELL[job.dominant]}</p>
           <div className="kp-analyze-rows">
             <div>
               <span>DOMINANT ROUTINE</span>
-              <em>{VERB_LABEL[job.dominant]}</em>
+              <em>{MODE_LABEL[job.dominant]}</em>
             </div>
             <div>
               <span>THREAT TIER</span>
@@ -171,7 +183,7 @@ export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
           BACK
         </button>
         <button type="button" className="kp-btn" onClick={() => dispatch({ type: "toBuild" })}>
-          ADJUST BUILD
+          CONFIGURE KIT
         </button>
       </div>
     </div>
@@ -179,10 +191,13 @@ export function AnalyzeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
 }
 
 /* ------------------------------------------------------------------ */
-/* Build (loadout + copies)                                            */
+/* Kit configuration (pre-dive and loadout window)                     */
 /* ------------------------------------------------------------------ */
 
-export function BuildScreen({
+const ATTACK_MODES_ALL: AttackMode[] = ["redirect", "armHalt", "armSiphon"];
+const DEFEND_MODES_ALL: DefendMode[] = ["purge", "lock", "ward"];
+
+export function KitScreen({
   state,
   dispatch,
   floating = false,
@@ -192,88 +207,100 @@ export function BuildScreen({
   floating?: boolean;
 }) {
   const run = state.run as RunState;
-  const meta = state.meta;
+  const kit = run.kit;
   const isFinale = run.day === FINAL_DAY;
   return (
     <div className="kp-screen kp-build">
       <header className="kp-screen-head">
-        <h2>ADJUST BUILD</h2>
+        <h2>KIT CONFIG</h2>
         <p>
-          Neural Capacity {run.equipped.length}/{run.capacity} - {run.credits} cr - abilities burn a
-          copy per cast
+          Three programs, 1 RAM each, once per turn each. Tiers come from closed days; configs come
+          from cleared jobs.
         </p>
       </header>
-      <div className="kp-build-grid">
-        <div className="kp-build-col">
-          <h3>EQUIPPED</h3>
-          {run.equipped.length === 0 && <p className="kp-rail-dim">Empty slots. Dive bare if you dare.</p>}
-          {run.equipped.map((id) => {
-            const def = ABILITY_BY_ID[id];
-            return (
-              <button
-                key={id}
-                type="button"
-                className="kp-loadout-item kp-loadout-on"
-                onClick={() => dispatch({ type: "unequip", id })}
-                title={def.desc}
-              >
-                <strong>{def.name}</strong>
-                <span>
-                  T{def.tier} - {def.ramCost} RAM - x{run.copies[id] ?? 0}
-                </span>
-                <em>UNEQUIP</em>
-              </button>
-            );
-          })}
+      <div className="kp-kit-grid">
+        <div className="kp-kit-card kp-kit-scan">
+          <header>
+            <strong>SCAN.EXE</strong>
+            <em>TIER {"▪".repeat(kit.scanTier)}</em>
+          </header>
+          <p>{scanDesc(kit.scanTier)}</p>
         </div>
-        <div className="kp-build-col">
-          <h3>ARCHIVE ({meta.unlocked.length}/24)</h3>
-          {meta.unlocked.length === 0 && (
-            <p className="kp-rail-dim">Nothing unlocked yet. Every cleared job teaches you one new trick.</p>
-          )}
-          <div className="kp-archive">
-            {meta.unlocked.map((id) => {
-              const def = ABILITY_BY_ID[id];
-              if (!def) return null;
-              const equipped = run.equipped.includes(id);
-              const copies = run.copies[id] ?? 0;
-              const price = copyPrice(def);
+
+        <div className="kp-kit-card kp-kit-attack">
+          <header>
+            <strong>ATTACK.EXE</strong>
+            <em>TIER {"▪".repeat(kit.attackTier)}</em>
+          </header>
+          <div className="kp-kit-modes">
+            {ATTACK_MODES_ALL.map((m) => {
+              const owned = kit.attackModes.includes(m);
+              const active = kit.attackMode === m;
               return (
-                <div key={id} className={equipped ? "kp-arch-item kp-arch-eq" : "kp-arch-item"}>
-                  <div className="kp-arch-info">
-                    <strong>{def.name}</strong>
-                    <span>
-                      {VERB_LABEL[def.verb]} - T{def.tier} - {def.ramCost} RAM - x{copies}
-                    </span>
-                    <p className="kp-arch-desc">{def.desc}</p>
-                  </div>
-                  <div className="kp-arch-actions">
-                    <button
-                      type="button"
-                      disabled={run.credits < price}
-                      onClick={() => dispatch({ type: "buyCopy", id })}
-                      title={`Buy one copy for ${price} cr`}
-                    >
-                      +1 ({price})
-                    </button>
-                    {equipped ? (
-                      <button type="button" onClick={() => dispatch({ type: "unequip", id })}>
-                        DROP
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={run.equipped.length >= run.capacity || copies < 1}
-                        onClick={() => dispatch({ type: "equip", id })}
-                      >
-                        EQUIP
-                      </button>
-                    )}
-                  </div>
-                </div>
+                <button
+                  key={m}
+                  type="button"
+                  className={`kp-mode ${active ? "kp-mode-on" : ""} ${owned ? "" : "kp-mode-locked"}`}
+                  disabled={!owned}
+                  onClick={() => dispatch({ type: "setAttackMode", mode: m })}
+                  title={owned ? attackModeDesc(m, kit.attackTier) : "Config not installed. Win jobs to draft it."}
+                >
+                  {ATTACK_MODE_LABEL[m]}
+                  {!owned && <i> ?</i>}
+                </button>
               );
             })}
           </div>
+          <p>{attackModeDesc(kit.attackMode, kit.attackTier)}</p>
+        </div>
+
+        <div className="kp-kit-card kp-kit-defend">
+          <header>
+            <strong>DEFEND.EXE</strong>
+            <em>TIER {"▪".repeat(kit.defendTier)}</em>
+          </header>
+          <div className="kp-kit-modes">
+            {DEFEND_MODES_ALL.map((m) => {
+              const owned = kit.defendModes.includes(m);
+              const active = kit.defendMode === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  className={`kp-mode ${active ? "kp-mode-on" : ""} ${owned ? "" : "kp-mode-locked"}`}
+                  disabled={!owned}
+                  onClick={() => dispatch({ type: "setDefendMode", mode: m })}
+                  title={owned ? defendModeDesc(m, kit.defendTier) : "Config not installed. Win jobs to draft it."}
+                >
+                  {DEFEND_MODE_LABEL[m]}
+                  {!owned && <i> ?</i>}
+                </button>
+              );
+            })}
+          </div>
+          <p>{defendModeDesc(kit.defendMode, kit.defendTier)}</p>
+        </div>
+
+        <div className="kp-kit-card kp-kit-augs">
+          <header>
+            <strong>AUGMENTS</strong>
+            <em>{kit.augments.length} installed</em>
+          </header>
+          {kit.augments.length === 0 ? (
+            <p className="kp-rail-dim">Nothing yet. Every cleared job offers a draft.</p>
+          ) : (
+            <ul className="kp-aug-list">
+              {kit.augments.map((id) => {
+                const a = AUGMENT_BY_ID[id];
+                return (
+                  <li key={id}>
+                    <strong>{a?.name ?? id}</strong>
+                    <span>{a?.desc}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       </div>
       {!floating && (
@@ -293,18 +320,17 @@ export function BuildScreen({
 }
 
 /* ------------------------------------------------------------------ */
-/* Result                                                              */
+/* Result + augment draft                                              */
 /* ------------------------------------------------------------------ */
 
 export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
   const r = run.lastResult;
   useEffect(() => {
-    if (r?.unlocked) sfx("unlock", { at: 0.3 });
-  }, [r?.unlocked]);
+    if (r && r.draft.length > 0) sfx("unlock", { at: 0.3 });
+  }, [r]);
   if (!r) return null;
   const job = run.jobs[r.jobIndex];
   const c = job ? customerById(job.customerId) : null;
-  const unlockedDef = r.unlocked ? ABILITY_BY_ID[r.unlocked] : null;
   return (
     <div className="kp-screen kp-resultscreen">
       <header className="kp-screen-head">
@@ -324,18 +350,48 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
             {r.chip > 0 ? `-${r.chip}` : "clean"} ({run.strain} left)
           </em>
         </div>
-        {unlockedDef && (
-          <div className="kp-unlock">
-            <span>NEW ROUTINE LEARNED</span>
-            <em>
-              {unlockedDef.name} <i>T{unlockedDef.tier} {VERB_LABEL[unlockedDef.verb]}</i>
-            </em>
-          </div>
-        )}
       </div>
+
+      {r.draft.length > 0 ? (
+        <div className="kp-draft">
+          <h3>{r.picked ? "AUGMENT INSTALLED" : "AUGMENT DRAFT - PICK ONE"}</h3>
+          <div className="kp-draft-grid">
+            {r.draft.map((id) => {
+              const a = AUGMENT_BY_ID[id];
+              if (!a) return null;
+              const picked = r.picked === id;
+              const dimmed = r.picked !== null && !picked;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`kp-draft-card ${picked ? "kp-draft-picked" : ""} ${dimmed ? "kp-draft-dim" : ""} ${a.kind === "config" ? "kp-draft-config" : ""}`}
+                  disabled={r.picked !== null}
+                  onClick={() => {
+                    sfx("granted", { bus: "ui" });
+                    dispatch({ type: "pickAugment", id });
+                  }}
+                >
+                  <span className="kp-draft-kind">{a.kind === "config" ? "CONFIG" : "BOOST"}</span>
+                  <strong>{a.name}</strong>
+                  <p>{a.desc}</p>
+                  {picked && <em className="kp-draft-stamp">INSTALLED</em>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="kp-rail-dim">Augment cache is dry. Salvage credited instead.</p>
+      )}
+
       <div className="kp-screen-actions">
         <button type="button" className="kp-btn" onClick={() => dispatch({ type: "resultNext" })}>
-          {run.jobsDone.every(Boolean) ? "CLOSE THE DAY" : "NEXT TICKET"}
+          {r.picked || r.draft.length === 0
+            ? run.jobsDone.every(Boolean)
+              ? "CLOSE THE DAY"
+              : "NEXT TICKET"
+            : "SKIP THE DRAFT"}
         </button>
       </div>
     </div>
@@ -343,10 +399,29 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
 }
 
 /* ------------------------------------------------------------------ */
-/* Upgrade                                                             */
+/* Upgrade (day close)                                                 */
 /* ------------------------------------------------------------------ */
 
 export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
+  const kit = run.kit;
+  const tierBtn = (
+    pick: "scan" | "attack" | "defend",
+    tier: number,
+    label: string,
+    detail: string,
+  ) => (
+    <button
+      type="button"
+      className="kp-upg"
+      disabled={tier >= 3}
+      onClick={() => dispatch({ type: "chooseUpgrade", pick })}
+    >
+      <strong>
+        {label} {tier >= 3 ? "MAXED" : `T${tier} > T${tier + 1}`}
+      </strong>
+      <span>{detail}</span>
+    </button>
+  );
   return (
     <div className="kp-screen kp-upgrade">
       <header className="kp-screen-head">
@@ -357,16 +432,26 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         <button type="button" className="kp-upg" onClick={() => dispatch({ type: "chooseUpgrade", pick: "ram" })}>
           <strong>+1 RAM / TURN</strong>
           <span>
-            {run.ramPerTurn} to {Math.min(9, run.ramPerTurn + 1)}. More moves, more abilities, every
+            {run.ramPerTurn} to {Math.min(9, run.ramPerTurn + 1)}. More moves, more programs, every
             single turn.
           </span>
         </button>
-        <button type="button" className="kp-upg" onClick={() => dispatch({ type: "chooseUpgrade", pick: "cap" })}>
-          <strong>+1 NEURAL CAPACITY</strong>
-          <span>
-            {run.capacity} to {Math.min(8, run.capacity + 1)}. One more equipped ability per dive.
-          </span>
+        {tierBtn("scan", kit.scanTier, "SCAN.EXE", "Wider sweep radius. Still always 1 RAM.")}
+        {tierBtn("attack", kit.attackTier, "ATTACK.EXE", "One more node per cast: redirect or trap in bulk.")}
+        {tierBtn("defend", kit.defendTier, "DEFEND.EXE", "One more node per cast: purge, lock, or a wider ward.")}
+      </div>
+      <div className="kp-patchrow">
+        <button
+          type="button"
+          className="kp-btn-ghost"
+          disabled={run.credits < PATCH_COST || run.strain >= 100}
+          onClick={() => dispatch({ type: "buyPatch" })}
+        >
+          NIGHT PATCH: +{PATCH_HEAL} STRAIN ({PATCH_COST} cr)
         </button>
+        <span className="kp-rail-dim">
+          STRAIN {run.strain}/100 - {run.credits} cr
+        </span>
       </div>
     </div>
   );
@@ -427,8 +512,8 @@ export function DesktopIdle({
         </p>
       )}
       <div className="kp-idle-stats">
-        <span>{meta.unlocked.length}/24 routines archived</span>
         <span>{meta.runCount} attempts</span>
+        <span>{meta.machineOpened ? "back room open" : "back room sealed"}</span>
       </div>
       <button type="button" className="kp-btn kp-btn-dive" onClick={startSeed}>
         {meta.runCount === 0 ? "OPEN THE SHOP" : "START ATTEMPT " + (meta.runCount + 1)}

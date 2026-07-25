@@ -1,15 +1,17 @@
-import { ABILITIES, ABILITY_BY_ID, copyPrice } from "./content/abilities";
-import { DAY_CONFIGS, FINAL_DAY } from "./content/arc";
+import { DAY_CONFIGS, FINAL_DAY, jobPay } from "./content/arc";
 import { CUSTOMERS } from "./content/customers";
+import { AUGMENTS, AttackMode, AugmentId, DefendMode } from "./content/kit";
 import { mixSeed } from "./duel-setup";
-import { AbilityId } from "./duel-types";
 import { Rng } from "./rng";
-import { JobInstance, MetaState, RunState } from "./save";
+import { JobInstance, MetaState, RunKit, RunState, baseRunKit } from "./save";
 
 /**
  * Run-level state machine: meta (cross-run) plus the current run. Pure
  * reducer; the ShopOS provider owns it and persists both layers in an
  * effect. Duels live in their own reducer; this one receives their verdicts.
+ *
+ * Progression, v5: every cleared job offers an augment draft (configs and
+ * boosts); every closed day offers +1 RAM or a program tier of your choice.
  */
 
 export interface GameState {
@@ -25,27 +27,24 @@ export type RunAction =
   | { type: "pickJob"; index: number }
   | { type: "backToDay" }
   | { type: "toBuild" }
-  | { type: "equip"; id: AbilityId }
-  | { type: "unequip"; id: AbilityId }
-  | { type: "buyCopy"; id: AbilityId }
+  | { type: "setAttackMode"; mode: AttackMode }
+  | { type: "setDefendMode"; mode: DefendMode }
   | { type: "startDuel" }
-  | {
-      type: "duelFinished";
-      won: boolean;
-      chip: number;
-      capWin: boolean;
-      copiesLeft: Record<AbilityId, number>;
-    }
+  | { type: "duelFinished"; won: boolean; chip: number; capWin: boolean }
+  | { type: "pickAugment"; id: AugmentId }
   | { type: "resultNext" }
-  | { type: "chooseUpgrade"; pick: "ram" | "cap" }
+  | { type: "chooseUpgrade"; pick: "ram" | "scan" | "attack" | "defend" }
+  | { type: "buyPatch" }
   | { type: "startFinale" }
   | { type: "endRunAck" }
   | { type: "toggleSound" }
   | { type: "toggleMusic" };
 
 export const BASE_RAM = 5;
-export const BASE_CAPACITY = 2;
 export const START_STRAIN = 100;
+export const PATCH_COST = 60;
+export const PATCH_HEAL = 12;
+export const MAX_RAM = 9;
 
 function genDayJobs(runSeed: number, day: number): JobInstance[] {
   const cfg = DAY_CONFIGS[day];
@@ -66,17 +65,35 @@ function genDayJobs(runSeed: number, day: number): JobInstance[] {
   });
 }
 
-function rollUnlock(state: GameState, run: RunState): AbilityId | null {
-  const locked = ABILITIES.filter((a) => !state.meta.unlocked.includes(a.id));
-  if (locked.length === 0) return null;
+/** Which augments the run already owns (configs count via the mode lists). */
+export function ownsAugment(kit: RunKit, id: AugmentId): boolean {
+  const def = AUGMENTS.find((a) => a.id === id);
+  if (!def) return true;
+  if (def.attackMode) return kit.attackModes.includes(def.attackMode);
+  if (def.defendMode) return kit.defendModes.includes(def.defendMode);
+  return kit.augments.includes(id);
+}
+
+/**
+ * Draft three augments the run does not own yet, configs guaranteed a slot
+ * while any remain. Deterministic per (run, day, job).
+ */
+export function rollDraft(run: RunState): AugmentId[] {
+  const remaining = AUGMENTS.filter((a) => !ownsAugment(run.kit, a.id));
+  if (remaining.length === 0) return [];
   const rng = new Rng(mixSeed(run.runSeed, run.day, run.activeJob ?? 0, 0x991));
-  return locked[rng.int(locked.length)].id;
+  const picks = rng.shuffle(remaining.map((a) => a.id)).slice(0, 3);
+  const configs = remaining.filter((a) => a.kind === "config").map((a) => a.id);
+  if (configs.length > 0 && !picks.some((id) => configs.includes(id))) {
+    picks[0] = configs[rng.int(configs.length)];
+  }
+  return picks;
 }
 
 export function jobPayFor(run: RunState, capWin: boolean): number {
   const job = run.activeJob !== null ? run.jobs[run.activeJob] : null;
   if (!job) return 0;
-  const pay = 40 + 25 * job.tier;
+  const pay = jobPay(job.tier);
   return capWin ? Math.floor(pay / 2) : pay;
 }
 
@@ -100,10 +117,8 @@ export function runReducer(state: GameState, action: RunAction): GameState {
         day: 1,
         strain: START_STRAIN,
         ramPerTurn: BASE_RAM,
-        capacity: BASE_CAPACITY,
         credits: 0,
-        copies: Object.fromEntries(meta.unlocked.map((id) => [id, 1])),
-        equipped: meta.unlocked.slice(0, BASE_CAPACITY),
+        kit: baseRunKit(),
         jobs: genDayJobs(action.seed, 1),
         jobsDone: [false, false, false],
         screen: "opener",
@@ -151,37 +166,16 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       return { ...state, run: { ...run, screen: "build" } };
     }
 
-    case "equip": {
+    case "setAttackMode": {
       if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
-      if (run.equipped.includes(action.id)) return state;
-      if (run.equipped.length >= run.capacity) return state;
-      if (!meta.unlocked.includes(action.id)) return state;
-      if ((run.copies[action.id] ?? 0) < 1) return state;
-      return { ...state, run: { ...run, equipped: [...run.equipped, action.id] } };
+      if (!run.kit.attackModes.includes(action.mode)) return state;
+      return { ...state, run: { ...run, kit: { ...run.kit, attackMode: action.mode } } };
     }
 
-    case "unequip": {
+    case "setDefendMode": {
       if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
-      return {
-        ...state,
-        run: { ...run, equipped: run.equipped.filter((id) => id !== action.id) },
-      };
-    }
-
-    case "buyCopy": {
-      if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
-      const def = ABILITY_BY_ID[action.id];
-      if (!def || !meta.unlocked.includes(action.id)) return state;
-      const price = copyPrice(def);
-      if (run.credits < price) return state;
-      return {
-        ...state,
-        run: {
-          ...run,
-          credits: run.credits - price,
-          copies: { ...run.copies, [action.id]: (run.copies[action.id] ?? 0) + 1 },
-        },
-      };
+      if (!run.kit.defendModes.includes(action.mode)) return state;
+      return { ...state, run: { ...run, kit: { ...run.kit, defendMode: action.mode } } };
     }
 
     case "startDuel": {
@@ -197,38 +191,33 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     case "duelFinished": {
       if (!run || run.screen !== "duel") return state;
       const isFinale = run.day === FINAL_DAY;
-      const copies = { ...run.copies, ...action.copiesLeft };
 
       if (!action.won) {
         return {
           ...state,
-          run: { ...run, copies, strain: 0, screen: "runEnd", lastResult: null },
+          run: { ...run, strain: 0, screen: "runEnd", lastResult: null },
         };
       }
 
       if (isFinale) {
         return {
           meta: { ...meta, machineOpened: true },
-          run: { ...run, copies, screen: "finaleWin", lastResult: null },
+          run: { ...run, screen: "finaleWin", lastResult: null },
         };
       }
 
       const strain = Math.max(0, run.strain - action.chip);
-      const pay = jobPayFor(run, action.capWin);
-      const unlocked = rollUnlock(state, run);
+      const draft = rollDraft(run);
+      // A dry augment cache pays out as salvage instead.
+      const pay = jobPayFor(run, action.capWin) + (draft.length === 0 ? 25 : 0);
       const jobsDone = run.jobsDone.map((d, i) => (i === run.activeJob ? true : d));
-      const newMeta = unlocked
-        ? { ...meta, unlocked: [...meta.unlocked, unlocked] }
-        : meta;
-      const newCopies = unlocked ? { ...copies, [unlocked]: (copies[unlocked] ?? 0) + 1 } : copies;
 
       // Zero by any means ends the run, a bled-out win included.
       const screen = strain <= 0 ? "runEnd" : "result";
       return {
-        meta: newMeta,
+        ...state,
         run: {
           ...run,
-          copies: newCopies,
           credits: run.credits + pay,
           strain,
           jobsDone,
@@ -238,10 +227,33 @@ export function runReducer(state: GameState, action: RunAction): GameState {
             chip: action.chip,
             pay,
             capWin: action.capWin,
-            unlocked,
             jobIndex: run.activeJob ?? 0,
+            draft,
+            picked: null,
           },
         },
+      };
+    }
+
+    case "pickAugment": {
+      if (!run || run.screen !== "result" || !run.lastResult) return state;
+      if (run.lastResult.picked) return state;
+      if (!run.lastResult.draft.includes(action.id)) return state;
+      const def = AUGMENTS.find((a) => a.id === action.id);
+      if (!def || ownsAugment(run.kit, action.id)) return state;
+      const kit = { ...run.kit };
+      if (def.attackMode) {
+        kit.attackModes = [...kit.attackModes, def.attackMode];
+        kit.attackMode = def.attackMode;
+      } else if (def.defendMode) {
+        kit.defendModes = [...kit.defendModes, def.defendMode];
+        kit.defendMode = def.defendMode;
+      } else {
+        kit.augments = [...kit.augments, action.id];
+      }
+      return {
+        ...state,
+        run: { ...run, kit, lastResult: { ...run.lastResult, picked: action.id } },
       };
     }
 
@@ -256,13 +268,17 @@ export function runReducer(state: GameState, action: RunAction): GameState {
 
     case "chooseUpgrade": {
       if (!run || run.screen !== "upgrade") return state;
-      const ramPerTurn = action.pick === "ram" ? Math.min(9, run.ramPerTurn + 1) : run.ramPerTurn;
-      const capacity = action.pick === "cap" ? Math.min(8, run.capacity + 1) : run.capacity;
+      let ramPerTurn = run.ramPerTurn;
+      const kit = { ...run.kit };
+      if (action.pick === "ram") ramPerTurn = Math.min(MAX_RAM, ramPerTurn + 1);
+      else if (action.pick === "scan") kit.scanTier = Math.min(3, kit.scanTier + 1) as RunKit["scanTier"];
+      else if (action.pick === "attack") kit.attackTier = Math.min(3, kit.attackTier + 1) as RunKit["attackTier"];
+      else kit.defendTier = Math.min(3, kit.defendTier + 1) as RunKit["defendTier"];
       const day = run.day + 1;
       if (day === FINAL_DAY) {
         return {
           ...state,
-          run: { ...run, ramPerTurn, capacity, day, jobs: [], jobsDone: [], screen: "finalePre" },
+          run: { ...run, ramPerTurn, kit, day, jobs: [], jobsDone: [], screen: "finalePre" },
         };
       }
       return {
@@ -270,11 +286,24 @@ export function runReducer(state: GameState, action: RunAction): GameState {
         run: {
           ...run,
           ramPerTurn,
-          capacity,
+          kit,
           day,
           jobs: genDayJobs(run.runSeed, day),
           jobsDone: [false, false, false],
           screen: "day",
+        },
+      };
+    }
+
+    case "buyPatch": {
+      if (!run || run.screen !== "upgrade") return state;
+      if (run.credits < PATCH_COST || run.strain >= 100) return state;
+      return {
+        ...state,
+        run: {
+          ...run,
+          credits: run.credits - PATCH_COST,
+          strain: Math.min(100, run.strain + PATCH_HEAL),
         },
       };
     }

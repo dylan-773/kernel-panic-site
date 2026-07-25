@@ -1,6 +1,18 @@
-import { ABILITY_BY_ID } from "./content/abilities";
-import { computeDuelPower, isFrontier, routeCost, runFlood } from "./duel-power";
-import { AbilityDef, DuelState, ROUND_CAP, Side, otherSide } from "./duel-types";
+import {
+  DefendMode,
+  LOCK_ROUNDS,
+  OppMode,
+  PROGRAM_COST,
+  Program,
+  SCAN_RANGE,
+  SIPHON_STEAL,
+  Tier,
+  WARD_RADIUS,
+  WARD_ROUNDS,
+  cascadeRam,
+} from "./content/kit";
+import { computeDuelPower, routeCost, routePlan, runFlood } from "./duel-power";
+import { DuelState, ROUND_CAP, Side, TrapKind, otherSide } from "./duel-types";
 import { nextU32 } from "./rng";
 
 /**
@@ -23,6 +35,27 @@ export function roll(s: DuelState): number {
   return v;
 }
 
+export function kitHas(s: DuelState, aug: string): boolean {
+  return s.kit.augments.includes(aug);
+}
+
+export function tierOf(s: DuelState, side: Side, prog: Program): Tier {
+  if (side === "opp") return s.cfg.oppTier;
+  if (prog === "scan") return s.kit.scanTier;
+  if (prog === "attack") return s.kit.attackTier;
+  return s.kit.defendTier;
+}
+
+/** ATTACK is 1 RAM, except a Cheap Shot diver's first cast of the dive. */
+export function attackCost(s: DuelState, side: Side): number {
+  if (side === "player" && s.econ.player.attacksCast === 0 && kitHas(s, "cheapShot")) return 0;
+  return PROGRAM_COST;
+}
+
+export function programCost(s: DuelState, side: Side, prog: Program): number {
+  return prog === "attack" ? attackCost(s, side) : PROGRAM_COST;
+}
+
 export function finishDuel(s: DuelState, winner: Side, kind: "core" | "cap"): void {
   s.phase = winner === "player" ? "won" : "lost";
   s.winKind = kind;
@@ -43,8 +76,8 @@ export function finishDuel(s: DuelState, winner: Side, kind: "core" | "cap"): vo
 
 /**
  * Re-run both floods after a board change, acting side first (its claims
- * and win take priority). Returns true when a trap fired on the acting
- * side — their turn is forfeit.
+ * and win take priority). Cascades pay RAM; a halt trap on the acting side
+ * forfeits their turn (returns true).
  */
 export function settleFloods(s: DuelState, acting: Side): boolean {
   let actingTrapped = false;
@@ -56,22 +89,48 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
     } else if (f.claimed.length > 0) {
       emit(s, "claim", f.claimed.length);
     }
+
+    // Cascades bank RAM for the next turn: the chain you set up buys the
+    // tempo to keep pushing, without compounding inside one turn.
+    let bonus = cascadeRam(f.claimed.length);
+    if (bonus > 0 && side === "player" && kitHas(s, "surge")) bonus += 1;
+    if (bonus > 0) {
+      s.econ[side].drainNext -= bonus;
+      emit(s, side === "player" ? "cascadeRam" : "cascadeRamOpp", bonus);
+    }
+
     if (f.trapFired) {
       const econ = s.econ[side];
+      const enemyEcon = s.econ[otherSide(side)];
       econ.trapsFired++;
-      econ.drainNext += f.trapFired.drain;
-      if (side === acting) {
-        actingTrapped = true;
+      if (f.trapFired.kind === "halt") {
+        econ.drainNext += f.trapFired.drain;
+        if (side === acting) {
+          actingTrapped = true;
+        } else {
+          econ.loseNextTurn = true;
+        }
+        emit(s, "trapFire", 1);
+        say(
+          s,
+          side === "player"
+            ? "HALT TRAP. Your signal hit an armed node. Turn lost."
+            : "Your halt trap fired. The intrusion chokes on it.",
+        );
       } else {
-        econ.loseNextTurn = true;
+        econ.drainNext += f.trapFired.drain;
+        enemyEcon.drainNext -= f.trapFired.drain;
+        emit(s, "siphonFire", f.trapFired.drain);
+        say(
+          s,
+          side === "player"
+            ? `SIPHON TRAP. It bleeds ${f.trapFired.drain} RAM out of your next turn.`
+            : `Your siphon fired. ${f.trapFired.drain} RAM drains out of its next turn, into yours.`,
+        );
       }
-      emit(s, "trapFire", 1);
-      say(
-        s,
-        side === "player"
-          ? "TRAP. Your signal hit an armed node. Turn lost."
-          : "Your trap fired. The intrusion chokes on it.",
-      );
+      if (otherSide(side) === "player" && kitHas(s, "echoTap")) {
+        s.econ.player.drainNext -= 2;
+      }
     }
     if (f.reachedCore) {
       // The tutorial machine never hands the player an accidental win: a
@@ -104,204 +163,248 @@ export function applyRotate(s: DuelState, side: Side, idx: number): boolean {
   return true;
 }
 
-/** Firewall / shield protection against enemy Arm, Redirect and Shield-lock. */
-export function isProtectedFromCast(s: DuelState, caster: Side, idx: number): boolean {
-  const victim = otherSide(caster);
-  const c = s.cells[idx];
-  if (c.lockedThroughRound >= s.round && c.lockedBy === victim) return true;
-  const wall = s.econ[victim].wallThrough >= s.round;
-  if (wall && (c.owner === victim || isFrontier(s, victim, idx))) return true;
-  return false;
-}
+/* ------------------------------------------------------------------ */
+/* Target legality                                                     */
+/* ------------------------------------------------------------------ */
 
 export function armTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.cells[idx];
   if (!c || c.kind !== "node" || c.owner !== "none") return false;
   if (c.trap) return false;
-  return !isProtectedFromCast(s, caster, idx);
+  // A ward the victim raised refuses new traps.
+  if (c.wardThroughRound >= s.round && c.wardBy === otherSide(caster)) return false;
+  return true;
 }
 
 export function redirectTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.cells[idx];
   if (!c || c.kind !== "node") return false;
   if (c.owner === caster) return false; // own nodes rotate for 1 RAM instead
-  return !isProtectedFromCast(s, caster, idx);
+  if (c.lockedThroughRound >= s.round && c.lockedBy === otherSide(caster)) return false;
+  return true;
 }
 
-export function shieldTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
+export function purgeTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
+  const c = s.cells[idx];
+  if (!c || c.kind !== "node" || !c.trap) return false;
+  if (c.trap.by !== otherSide(caster)) return false;
+  // The player defuses only what Scan exposed; the machine sees everything.
+  if (caster === "player" && !c.trap.revealed) return false;
+  return true;
+}
+
+export function lockTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.cells[idx];
   if (!c || c.kind !== "node") return false;
   if (c.owner === otherSide(caster)) return false;
   if (c.lockedThroughRound >= s.round) return false;
-  return !(c.owner === "none" && isProtectedFromCast(s, caster, idx));
+  return true;
 }
 
-export function applyCast(s: DuelState, side: Side, def: AbilityDef, targets: number[]): void {
-  const econ = s.econ[side];
-  const enemy = otherSide(side);
-  const enemyEcon = s.econ[enemy];
-  econ.ram -= def.ramCost;
-  econ.abilityUsed = true;
+export function wardTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
+  const c = s.cells[idx];
+  if (!c || c.kind !== "node") return false;
+  if (c.owner === otherSide(caster)) return false;
+  return true;
+}
 
-  switch (def.verb) {
-    case "arm": {
-      for (const idx of targets) {
-        s.cells[idx].trap = {
-          by: side,
-          revealed: side === "player" ? true : s.trapsRevealed,
-          drain: def.p.drain ?? 0,
-        };
+export function attackTargetLegal(s: DuelState, caster: Side, mode: OppMode, idx: number): boolean {
+  return mode === "redirect" ? redirectTargetLegal(s, caster, idx) : armTargetLegal(s, caster, idx);
+}
+
+export function defendTargetLegal(s: DuelState, caster: Side, mode: DefendMode, idx: number): boolean {
+  if (mode === "purge") return purgeTargetLegal(s, caster, idx);
+  if (mode === "lock") return lockTargetLegal(s, caster, idx);
+  return wardTargetLegal(s, caster, idx);
+}
+
+/* ------------------------------------------------------------------ */
+/* Program resolution                                                  */
+/* ------------------------------------------------------------------ */
+
+function entryKindOf(side: Side): "entryP" | "entryO" {
+  return side === "player" ? "entryP" : "entryO";
+}
+
+/**
+ * Resolve one program cast. `mode` is ignored for scan. Targets must be
+ * validated by the caller (reducer or planner) before this runs.
+ */
+export function applyCast(
+  s: DuelState,
+  side: Side,
+  prog: Program,
+  mode: OppMode | null,
+  targets: number[],
+): void {
+  const econ = s.econ[side];
+  econ.ram -= programCost(s, side, prog);
+  econ.used[prog] = true;
+  if (prog === "attack") econ.attacksCast++;
+  const enemy = otherSide(side);
+
+  if (prog === "scan") {
+    const range = SCAN_RANGE[tierOf(s, side, "scan")];
+    const owned = s.cells.filter(
+      (c) => (c.kind === "node" && c.owner === side) || c.kind === entryKindOf(side),
+    );
+    let found = 0;
+    for (const c of s.cells) {
+      if (!c.trap || c.trap.by !== enemy || c.trap.revealed) continue;
+      if (owned.some((o) => Math.abs(o.x - c.x) + Math.abs(o.y - c.y) <= range)) {
+        c.trap.revealed = true;
+        found++;
       }
-      if (side === "player") s.lastPlayerHitRound = s.round;
-      emit(s, "trapSet");
-      say(s, side === "player" ? "Trap armed. Let it walk into it." : "It planted a trap on an open junction nearby. Tread carefully.");
-      break;
     }
-    case "scan": {
-      s.trapsRevealed = true;
-      let found = 0;
-      for (const c of s.cells) {
-        if (c.trap && c.trap.by === enemy) {
-          c.trap.revealed = true;
-          found++;
-        }
+    if (side === "player" && kitHas(s, "tapLine")) {
+      const plan = routePlan(s, "opp");
+      if (plan) {
+        s.routeTrace = { round: s.round, cells: plan.path.map((p) => p.idx) };
+        emit(s, "trace");
       }
-      let disarmLeft = def.p.disarm ?? 0;
-      if (disarmLeft > 0) {
-        const mine = s.cells
-          .map((c, i) => ({ c, i }))
-          .filter(({ c }) => c.trap && c.trap.by === enemy)
-          .sort((a, b) => a.c.claimSeq - b.c.claimSeq);
-        for (const { c } of mine) {
-          if (disarmLeft <= 0) break;
-          c.trap = null;
-          disarmLeft--;
-          found--;
-        }
-      }
-      if (def.p.intent && side === "player") s.intentRevealed = true;
-      emit(s, "scan");
-      if (side === "player") {
-        say(s, found > 0 ? `SCAN: ${found} armed node${found === 1 ? "" : "s"} exposed, permanently` : "SCAN: the board is clean");
-      }
-      break;
     }
-    case "redirect": {
-      const steps = def.p.rotSteps ?? 1;
+    emit(s, "scan");
+    if (side === "player") {
+      say(
+        s,
+        found > 0
+          ? `SCAN: ${found} armed node${found === 1 ? "" : "s"} exposed, permanently.`
+          : "SCAN: nothing armed in range.",
+      );
+    }
+    return;
+  }
+
+  if (prog === "attack") {
+    if (mode === "redirect") {
       for (const idx of targets) {
         const c = s.cells[idx];
-        c.rot = (c.rot + steps) % 4;
-        c.spin += steps;
+        c.rot = (c.rot + 1) % 4;
+        c.spin += 1;
       }
       if (side === "player") s.lastPlayerHitRound = s.round;
       emit(s, "redirect", targets.length);
-      say(s, side === "player" ? "REDIRECT. Their line twists off true." : "It twisted one of your junctions off true. Power is down past the break.");
+      say(
+        s,
+        side === "player"
+          ? "REDIRECT. Their line twists off true."
+          : "It twisted one of your junctions off true. Power is down past the break.",
+      );
       settleFloods(s, side);
-      break;
-    }
-    case "shield": {
-      const rounds = def.p.shieldRounds ?? 1;
-      const through = side === "player" ? s.round + rounds - 1 : s.round + rounds;
+    } else {
+      const kind: TrapKind = mode === "armSiphon" ? "siphon" : "halt";
+      let drain = 0;
+      if (kind === "siphon") {
+        drain = SIPHON_STEAL + (side === "player" && kitHas(s, "siphonPlus") ? 1 : 0);
+      } else if (side === "player" && kitHas(s, "tripwire")) {
+        drain = 2;
+      }
       for (const idx of targets) {
-        const c = s.cells[idx];
-        c.lockedThroughRound = Math.max(c.lockedThroughRound, through);
-        c.lockedBy = side;
+        s.cells[idx].trap = { by: side, revealed: side === "player", kind, drain };
       }
-      if (side === "player" && targets.some((i) => s.cells[i].owner === "none")) {
-        s.lastPlayerHitRound = s.round;
+      if (side === "player") s.lastPlayerHitRound = s.round;
+      emit(s, "trapSet");
+      say(
+        s,
+        side === "player"
+          ? kind === "siphon"
+            ? "Siphon armed. Let it walk into your meter."
+            : "Halt trap armed. Let it walk into it."
+          : "It planted a trap on an open junction nearby. Tread carefully.",
+      );
+    }
+    return;
+  }
+
+  // DEFEND.
+  if (mode === "purge") {
+    let n = 0;
+    for (const idx of targets) {
+      if (s.cells[idx].trap) {
+        s.cells[idx].trap = null;
+        n++;
       }
-      emit(s, "shield");
-      say(s, side === "player" ? "SHIELD. That junction is frozen solid." : "It froze a junction solid. You cannot turn that one for now.");
-      break;
     }
-    case "overload": {
-      if (def.p.enemyRamDrain) enemyEcon.drainNext += def.p.enemyRamDrain;
-      emit(s, "overload");
-      break;
+    emit(s, "purge", n);
+    say(
+      s,
+      side === "player"
+        ? `PURGE. ${n} trap${n === 1 ? "" : "s"} defused.`
+        : "It swept your traps off its lane.",
+    );
+  } else if (mode === "lock") {
+    const through = side === "player" ? s.round + LOCK_ROUNDS - 1 : s.round + LOCK_ROUNDS;
+    for (const idx of targets) {
+      const c = s.cells[idx];
+      c.lockedThroughRound = Math.max(c.lockedThroughRound, through);
+      c.lockedBy = side;
     }
-    case "overclock": {
-      econ.boostAmount = def.p.ramBoost ?? 2;
-      econ.boostTurns = def.p.boostTurns ?? 1;
-      emit(s, "overclock");
-      if (side === "player") say(s, "OVERCLOCK primed. Next turn runs hot.");
-      break;
+    if (side === "player" && targets.some((i) => s.cells[i].owner === "none")) {
+      s.lastPlayerHitRound = s.round;
     }
-    case "firewall": {
-      const rounds = def.p.wallRounds ?? 1;
-      econ.wallThrough = Math.max(econ.wallThrough, side === "player" ? s.round + rounds - 1 : s.round + rounds);
-      if (def.p.enemyRamDrain) enemyEcon.drainNext += def.p.enemyRamDrain;
-      emit(s, "firewall");
-      if (side === "player") say(s, "FIREWALL up. Your grid ignores their tricks.");
-      break;
+    emit(s, "lock");
+    say(
+      s,
+      side === "player"
+        ? "LOCK. That junction is frozen solid."
+        : "It clamped a junction solid. You cannot turn that one for now.",
+    );
+  } else if (mode === "ward") {
+    const radius = WARD_RADIUS[tierOf(s, side, "defend")];
+    const through = side === "player" ? s.round + WARD_ROUNDS - 1 : s.round + WARD_ROUNDS;
+    const center = s.cells[targets[0]];
+    for (const c of s.cells) {
+      if (c.kind !== "node" || c.owner === enemy) continue;
+      if (Math.abs(c.x - center.x) + Math.abs(c.y - center.y) > radius) continue;
+      c.wardThroughRound = Math.max(c.wardThroughRound, through);
+      c.wardBy = side;
     }
-    case "backdoor": {
-      if (def.p.purge) {
-        let purged = 0;
-        for (const c of s.cells) {
-          if (c.trap && c.trap.by === enemy) {
-            c.trap = null;
-            purged++;
-          }
-        }
-        if (side === "player") {
-          say(s, purged > 0 ? `BACKDOOR. ${purged} trap${purged === 1 ? "" : "s"} wiped off the board.` : "BACKDOOR. Nothing was waiting after all.");
-        }
-      }
-      if (def.p.shieldRounds && targets.length > 0) {
-        const through = side === "player" ? s.round + def.p.shieldRounds - 1 : s.round + def.p.shieldRounds;
-        const c = s.cells[targets[0]];
-        c.lockedThroughRound = Math.max(c.lockedThroughRound, through);
-        c.lockedBy = side;
-      }
-      if (def.p.intent && side === "player") s.intentRevealed = true;
-      emit(s, "backdoor");
-      break;
+    emit(s, "ward");
+    say(
+      s,
+      side === "player"
+        ? "WARD up. Nothing gets planted in that patch."
+        : "It warded a whole approach. Your traps will not land there.",
+    );
+  }
+
+  // Bulwark rider: any player DEFEND also bolts its targets for one round.
+  if (side === "player" && kitHas(s, "bulwark")) {
+    for (const idx of targets) {
+      const c = s.cells[idx];
+      if (c.kind !== "node" || c.owner === "opp") continue;
+      if (c.lockedThroughRound >= s.round && c.lockedBy === "opp") continue;
+      c.lockedThroughRound = Math.max(c.lockedThroughRound, s.round);
+      c.lockedBy = "player";
     }
   }
 }
 
-export function applyOverloadLock(s: DuelState, side: Side, def: AbilityDef, abilityId: string): void {
-  const enemy = otherSide(side);
-  const lockTurns = def.p.lockTurns ?? 1;
-  s.econ[enemy].disabled[abilityId] = Math.max(s.econ[enemy].disabled[abilityId] ?? 0, lockTurns);
-  if (side === "opp") {
-    const name = ABILITY_BY_ID[abilityId]?.name ?? "an ability";
-    say(s, `OVERLOAD. Your ${name} is jammed.`);
-  }
-}
+/* ------------------------------------------------------------------ */
+/* Turn transitions                                                    */
+/* ------------------------------------------------------------------ */
 
 function beginTurnEconomy(s: DuelState, side: Side): boolean {
   const econ = s.econ[side];
-  for (const id of Object.keys(econ.disabled)) {
-    econ.disabled[id]--;
-    if (econ.disabled[id] <= 0) delete econ.disabled[id];
-  }
+  econ.used = { scan: false, attack: false, defend: false };
   if (econ.loseNextTurn) {
     econ.loseNextTurn = false;
     econ.ram = 0;
     econ.carry = 0;
-    econ.abilityUsed = true;
     emit(s, "turnLost");
     say(s, side === "player" ? "Your turn burns away in the trap's wake." : "The intrusion stalls a full cycle.");
     return false;
   }
-  let ram = econ.ramPerTurn + econ.carry;
-  if (econ.boostTurns > 0) {
-    ram += econ.boostAmount;
-    econ.boostTurns--;
-    if (econ.boostTurns === 0) econ.boostAmount = 0;
-  }
-  ram -= econ.drainNext;
+  const ram = econ.ramPerTurn + econ.carry - econ.drainNext;
   econ.drainNext = 0;
   econ.ram = Math.max(0, ram);
   econ.carry = 0;
-  econ.abilityUsed = false;
   return true;
 }
 
 export function startOppTurn(s: DuelState): void {
   s.turn = "opp";
-  s.oppTurn = { started: false, pendingAbility: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null };
+  s.oppTurn = { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, aim: null };
   const acts = beginTurnEconomy(s, "opp");
   if (!acts) {
     endOppTurn(s);
@@ -311,10 +414,11 @@ export function startOppTurn(s: DuelState): void {
 export function endOppTurn(s: DuelState): void {
   if (s.phase !== "playing") return;
   const econ = s.econ.opp;
-  econ.carry = Math.min(2, Math.max(0, econ.ram));
+  econ.carry = Math.min(econ.carryCap, Math.max(0, econ.ram));
   s.round++;
-  // The tutorial never reaches a third player turn: if the machine has not
-  // already won by now, it stops playing fair and seals itself.
+  if (s.routeTrace && s.routeTrace.round < s.round) s.routeTrace = null;
+  // The tutorial never drags: if the machine has not already won by now,
+  // it stops playing fair and seals itself.
   if (s.cfg.tutorial && s.round >= s.tutorialSealRound) {
     say(s, "The machine stops pretending. The door was never really open.");
     finishDuel(s, "opp", "core");
@@ -336,7 +440,7 @@ export function endOppTurn(s: DuelState): void {
 export function endPlayerTurn(s: DuelState): void {
   if (s.phase !== "playing") return;
   const econ = s.econ.player;
-  econ.carry = Math.min(2, Math.max(0, econ.ram));
+  econ.carry = Math.min(econ.carryCap, Math.max(0, econ.ram));
   emit(s, "endTurn");
   startOppTurn(s);
 }

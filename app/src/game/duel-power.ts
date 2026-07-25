@@ -1,4 +1,5 @@
-import { DuelCell, DuelPower, DuelState, Side, otherSide } from "./duel-types";
+import { BASE_REACH } from "./content/kit";
+import { DuelCell, DuelPower, DuelState, Side, TrapKind, otherSide } from "./duel-types";
 import { DX, DY, cellIndex, oppositeDir, rotateArms } from "./types";
 
 /**
@@ -29,7 +30,7 @@ export interface FloodResult {
   /** Indexes claimed by this flood, in claim order. */
   claimed: number[];
   /** Trap that fired on the flooding side, if any. */
-  trapFired: { idx: number; drain: number } | null;
+  trapFired: { idx: number; kind: TrapKind; drain: number } | null;
   reachedCore: boolean;
 }
 
@@ -43,7 +44,7 @@ export function runFlood(s: DuelState, side: Side): FloodResult {
   const enemy = otherSide(side);
   const reached = new Array<boolean>(s.cells.length).fill(false);
   const claimed: number[] = [];
-  let trapFired: { idx: number; drain: number } | null = null;
+  let trapFired: { idx: number; kind: TrapKind; drain: number } | null = null;
   let reachedCore = false;
 
   reached[start] = true;
@@ -76,7 +77,7 @@ export function runFlood(s: DuelState, side: Side): FloodResult {
         if (nc.trap && nc.trap.by === enemy) {
           const trap = nc.trap;
           nc.trap = null;
-          trapFired = { idx: ni, drain: trap.drain };
+          trapFired = { idx: ni, kind: trap.kind, drain: trap.drain };
           continue; // the flood stops at a sprung trap
         }
       }
@@ -308,7 +309,48 @@ export function isFrontier(s: DuelState, side: Side, idx: number): boolean {
   return false;
 }
 
-/** May this side rotate the node right now (frontier rule + shield locks)? */
+/** How many steps out from its territory a side may rotate open junctions. */
+export function reachOf(s: DuelState, side: Side): number {
+  if (side === "player" && s.kit.augments.includes("longArms")) return BASE_REACH + 1;
+  return BASE_REACH;
+}
+
+/**
+ * Is this neutral node within `reach` steps of the side's territory,
+ * walking only through open junctions? Depth 1 is the classic frontier;
+ * the default reach of 2 lets a diver line up chains before flooding them.
+ */
+export function inReach(s: DuelState, side: Side, idx: number, reach: number): boolean {
+  const c0 = s.cells[idx];
+  if (c0.kind !== "node" || c0.owner !== "none") return false;
+  const seen = new Set<number>([idx]);
+  let frontier = [idx];
+  for (let step = 1; step <= reach; step++) {
+    const next: number[] = [];
+    for (const i of frontier) {
+      const c = s.cells[i];
+      for (let d = 0; d < 4; d++) {
+        const nx = c.x + DX[d];
+        const ny = c.y + DY[d];
+        if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
+        const ni = cellIndex(s.w, nx, ny);
+        if (seen.has(ni)) continue;
+        const nc = s.cells[ni];
+        if (nc.kind === entryOf(side)) return true;
+        if (nc.kind === "node" && nc.owner === side) return true;
+        if (nc.kind === "node" && nc.owner === "none" && step < reach) {
+          seen.add(ni);
+          next.push(ni);
+        }
+      }
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+  return false;
+}
+
+/** May this side rotate the node right now (reach rule + rotation locks)? */
 export function canRotate(s: DuelState, side: Side, idx: number): boolean {
   const c = s.cells[idx];
   if (!c || c.kind !== "node") return false;
@@ -316,5 +358,5 @@ export function canRotate(s: DuelState, side: Side, idx: number): boolean {
   if (c.lockedThroughRound >= s.round && c.lockedBy === enemy) return false;
   if (c.owner === side) return true;
   if (c.owner !== "none") return false;
-  return isFrontier(s, side, idx);
+  return inReach(s, side, idx, reachOf(s, side));
 }

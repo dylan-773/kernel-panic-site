@@ -1,15 +1,13 @@
-import { AbilityId, AbilityVerb } from "./duel-types";
+import { AttackMode, AugmentId, DefendMode, OppMode, Tier } from "./content/kit";
 
 /**
  * Two-layer persistence, both browser-local. Meta survives everything and
- * holds the only cross-run progression the design allows: unlocked ability
- * OPTIONS (never copies or stats). Run state exists so a refresh resumes
- * mid-run; it is wiped whenever a run ends.
+ * holds only identity: how many attempts, whether the machine ever opened,
+ * and the sound flags. All power - tiers, configs, augments - lives on the
+ * run and dies with it. Run state exists so a refresh resumes mid-run.
  */
 
 export interface MetaState {
-  /** Ability ids ever unlocked. Options accumulate; power does not. */
-  unlocked: AbilityId[];
   /** Runs started, 1-based key for every story beat. */
   runCount: number;
   machineOpened: boolean;
@@ -34,8 +32,33 @@ export interface JobInstance {
   customerId: string;
   quoteIndex: 0 | 1;
   tier: number;
-  dominant: AbilityVerb;
+  dominant: OppMode;
   kitSeed: number;
+}
+
+/** The run's whole build: three programs, their tiers, modes and augments. */
+export interface RunKit {
+  scanTier: Tier;
+  attackTier: Tier;
+  defendTier: Tier;
+  attackMode: AttackMode;
+  defendMode: DefendMode;
+  attackModes: AttackMode[];
+  defendModes: DefendMode[];
+  augments: AugmentId[];
+}
+
+export function baseRunKit(): RunKit {
+  return {
+    scanTier: 1,
+    attackTier: 1,
+    defendTier: 1,
+    attackMode: "redirect",
+    defendMode: "purge",
+    attackModes: ["redirect"],
+    defendModes: ["purge"],
+    augments: [],
+  };
 }
 
 export interface RunState {
@@ -44,10 +67,8 @@ export interface RunState {
   day: number;
   strain: number;
   ramPerTurn: number;
-  capacity: number;
   credits: number;
-  copies: Record<AbilityId, number>;
-  equipped: AbilityId[];
+  kit: RunKit;
   jobs: JobInstance[];
   jobsDone: boolean[];
   screen: RunScreen;
@@ -58,8 +79,10 @@ export interface RunState {
     chip: number;
     pay: number;
     capWin: boolean;
-    unlocked: AbilityId | null;
     jobIndex: number;
+    /** Augment draft offered for this win; empty when the pool ran dry. */
+    draft: AugmentId[];
+    picked: AugmentId | null;
   } | null;
 }
 
@@ -67,76 +90,45 @@ export const META_KEY = "kernel-panic-meta-v2";
 export const RUN_KEY = "kernel-panic-run-v2";
 
 export const EMPTY_META: MetaState = {
-  unlocked: [],
   runCount: 0,
   machineOpened: false,
   sound: true,
   music: true,
 };
 
-export function loadMeta(): MetaState {
-  if (typeof window === "undefined") return EMPTY_META;
-  try {
-    const raw = window.localStorage.getItem(META_KEY);
-    if (!raw) return EMPTY_META;
-    const p = JSON.parse(raw) as Partial<MetaState>;
-    return {
-      unlocked: Array.isArray(p.unlocked) ? p.unlocked.filter((x) => typeof x === "string") : [],
-      runCount: typeof p.runCount === "number" ? p.runCount : 0,
-      machineOpened: p.machineOpened === true,
-      sound: p.sound !== false,
-      music: p.music !== false,
-    };
-  } catch {
-    return EMPTY_META;
-  }
+function parseMeta(raw: string): MetaState {
+  const p = JSON.parse(raw) as Partial<MetaState>;
+  return {
+    runCount: typeof p.runCount === "number" ? p.runCount : 0,
+    machineOpened: p.machineOpened === true,
+    sound: p.sound !== false,
+    music: p.music !== false,
+  };
 }
 
-export function saveMeta(m: MetaState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(META_KEY, JSON.stringify(m));
-  } catch {
-    // Storage unavailable (private mode); the run still plays.
-  }
-}
-
-export function loadRun(): RunState | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(RUN_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as RunState;
-    // Light shape check; anything off means the run is not resumable.
-    if (
-      typeof p.runSeed !== "number" ||
-      typeof p.day !== "number" ||
-      typeof p.strain !== "number" ||
-      !Array.isArray(p.jobs) ||
-      typeof p.screen !== "string"
-    ) {
-      return null;
-    }
-    // Never resume into a transient screen; land on the day board.
-    if (p.screen === "duel" || p.screen === "analyze" || p.screen === "build") {
-      p.screen = "day";
-      p.activeJob = null;
-    }
-    if (p.screen === "tutorial" || p.screen === "opener") p.screen = "opener";
-    return p;
-  } catch {
+function parseRun(raw: string): RunState | null {
+  const p = JSON.parse(raw) as RunState;
+  // Light shape check; anything off (older kit-less saves included) means
+  // the run is not resumable. Meta survives regardless.
+  if (
+    typeof p.runSeed !== "number" ||
+    typeof p.day !== "number" ||
+    typeof p.strain !== "number" ||
+    !Array.isArray(p.jobs) ||
+    typeof p.screen !== "string" ||
+    !p.kit ||
+    typeof p.kit.scanTier !== "number" ||
+    !Array.isArray(p.kit.augments)
+  ) {
     return null;
   }
-}
-
-export function saveRun(r: RunState | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (r === null) window.localStorage.removeItem(RUN_KEY);
-    else window.localStorage.setItem(RUN_KEY, JSON.stringify(r));
-  } catch {
-    // Storage unavailable; play continues unpersisted.
+  // Never resume into a transient screen; land on the day board.
+  if (p.screen === "duel" || p.screen === "analyze" || p.screen === "build") {
+    p.screen = "day";
+    p.activeJob = null;
   }
+  if (p.screen === "tutorial" || p.screen === "opener") p.screen = "opener";
+  return p;
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,10 +142,10 @@ function slotMetaKey(slot: number): string {
 }
 
 function slotRunKey(slot: number): string {
-  return `kernel-panic-s${slot}-run-v2`;
+  return `kernel-panic-s${slot}-run-v3`;
 }
 
-/** Pre-slot saves become USER 01 so nobody loses a run to the update. */
+/** Pre-slot saves become USER 01 so nobody loses their attempts count. */
 export function migrateLegacySave(): void {
   if (typeof window === "undefined") return;
   try {
@@ -161,8 +153,6 @@ export function migrateLegacySave(): void {
     if (!legacyMeta) return;
     if (!window.localStorage.getItem(slotMetaKey(1))) {
       window.localStorage.setItem(slotMetaKey(1), legacyMeta);
-      const legacyRun = window.localStorage.getItem(RUN_KEY);
-      if (legacyRun) window.localStorage.setItem(slotRunKey(1), legacyRun);
     }
     window.localStorage.removeItem(META_KEY);
     window.localStorage.removeItem(RUN_KEY);
@@ -176,14 +166,7 @@ export function loadSlotMeta(slot: number): MetaState {
   try {
     const raw = window.localStorage.getItem(slotMetaKey(slot));
     if (!raw) return EMPTY_META;
-    const p = JSON.parse(raw) as Partial<MetaState>;
-    return {
-      unlocked: Array.isArray(p.unlocked) ? p.unlocked.filter((x) => typeof x === "string") : [],
-      runCount: typeof p.runCount === "number" ? p.runCount : 0,
-      machineOpened: p.machineOpened === true,
-      sound: p.sound !== false,
-      music: p.music !== false,
-    };
+    return parseMeta(raw);
   } catch {
     return EMPTY_META;
   }
@@ -203,22 +186,7 @@ export function loadSlotRun(slot: number): RunState | null {
   try {
     const raw = window.localStorage.getItem(slotRunKey(slot));
     if (!raw) return null;
-    const p = JSON.parse(raw) as RunState;
-    if (
-      typeof p.runSeed !== "number" ||
-      typeof p.day !== "number" ||
-      typeof p.strain !== "number" ||
-      !Array.isArray(p.jobs) ||
-      typeof p.screen !== "string"
-    ) {
-      return null;
-    }
-    if (p.screen === "duel" || p.screen === "analyze" || p.screen === "build") {
-      p.screen = "day";
-      p.activeJob = null;
-    }
-    if (p.screen === "tutorial" || p.screen === "opener") p.screen = "opener";
-    return p;
+    return parseRun(raw);
   } catch {
     return null;
   }
@@ -255,7 +223,6 @@ export interface SlotSummary {
   slot: number;
   empty: boolean;
   runCount: number;
-  unlocked: number;
   machineOpened: boolean;
   /** Mid-run snapshot, when one is waiting. */
   day: number | null;
@@ -266,7 +233,7 @@ export function slotSummaries(): SlotSummary[] {
   const out: SlotSummary[] = [];
   for (let slot = 1; slot <= SLOT_COUNT; slot++) {
     if (typeof window === "undefined" || !window.localStorage.getItem(slotMetaKey(slot))) {
-      out.push({ slot, empty: true, runCount: 0, unlocked: 0, machineOpened: false, day: null, strain: null });
+      out.push({ slot, empty: true, runCount: 0, machineOpened: false, day: null, strain: null });
       continue;
     }
     const meta = loadSlotMeta(slot);
@@ -275,7 +242,6 @@ export function slotSummaries(): SlotSummary[] {
       slot,
       empty: false,
       runCount: meta.runCount,
-      unlocked: meta.unlocked.length,
       machineOpened: meta.machineOpened,
       day: run ? run.day : null,
       strain: run ? run.strain : null,

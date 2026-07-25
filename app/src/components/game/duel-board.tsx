@@ -42,6 +42,7 @@ interface DuelCellViewProps {
   legal: boolean;
   selected: boolean;
   aimed: boolean;
+  traced: boolean;
   trapVisible: boolean;
   onCell: (idx: number) => void;
 }
@@ -55,6 +56,7 @@ const DuelCellView = memo(function DuelCellView({
   legal,
   selected,
   aimed,
+  traced,
   trapVisible,
   onCell,
 }: DuelCellViewProps) {
@@ -64,6 +66,7 @@ const DuelCellView = memo(function DuelCellView({
   const theirs = cell.owner === "opp";
   const lit = mine ? poweredP : theirs ? poweredO : false;
   const locked = cell.lockedThroughRound >= round;
+  const warded = cell.wardThroughRound >= round;
 
   const classes = ["kp-dcell"];
   if (cell.kind === "node") {
@@ -74,6 +77,7 @@ const DuelCellView = memo(function DuelCellView({
   }
   if (legal) classes.push("kp-dlegal", "kp-dlive");
   if (selected) classes.push("kp-dselected");
+  if (traced) classes.push("kp-dtraced");
 
   const armClass = mine ? "kp-darm-p" : theirs ? "kp-darm-o" : "kp-darm-n";
   const label =
@@ -119,6 +123,10 @@ const DuelCellView = memo(function DuelCellView({
         </g>
       )}
 
+      {traced && cell.kind === "node" && (
+        <rect x={-HALF + 7} y={-HALF + 7} width={CS - 14} height={CS - 14} className="kp-dtrace-ring" aria-hidden="true" />
+      )}
+
       {cell.kind === "block" && (
         <g className="kp-dblock">
           <polygon points="-14,-8 -4,-15 9,-12 15,-2 10,10 -2,14 -13,7" className="kp-dblock-body" />
@@ -149,8 +157,13 @@ const DuelCellView = memo(function DuelCellView({
               <rect x={-4} y={-3} width={8} height={6} className="kp-dshield-lock" />
             </g>
           )}
+          {warded && !locked && (
+            <circle r={16} className="kp-dward-ring" aria-hidden="true" />
+          )}
           {cell.trap && trapVisible && (
-            <g className={cell.trap.by === "player" ? "kp-dtrap kp-dtrap-p" : "kp-dtrap kp-dtrap-o"}>
+            <g
+              className={`kp-dtrap ${cell.trap.by === "player" ? "kp-dtrap-p" : "kp-dtrap-o"} ${cell.trap.kind === "siphon" ? "kp-dtrap-siphon" : ""}`}
+            >
               <path
                 d="M 0 -14 L 3 -8 L 9 -7 L 5 -2 L 6 4 L 0 1 L -6 4 L -5 -2 L -9 -7 L -3 -8 Z"
                 className="kp-dtrap-body"
@@ -206,10 +219,12 @@ export interface DuelBoardProps {
   selected: Set<number>;
   /** Cells the machine has locked onto this beat (telegraphed move). */
   aimed: Set<number>;
+  /** TAP LINE: the intrusion's traced route. */
+  traced: Set<number>;
   onCell: (idx: number) => void;
 }
 
-export function DuelBoard({ state, legal, selected, aimed, onCell }: DuelBoardProps) {
+export function DuelBoard({ state, legal, selected, aimed, traced, onCell }: DuelBoardProps) {
   const { w, h, cells } = state;
   const vw = w * CS;
   const vh = h * CS;
@@ -246,6 +261,7 @@ export function DuelBoard({ state, legal, selected, aimed, onCell }: DuelBoardPr
             legal={legal.has(idx)}
             selected={selected.has(idx)}
             aimed={aimed.has(idx)}
+            traced={traced.has(idx)}
             trapVisible={trapVisible}
             onCell={onCell}
           />
