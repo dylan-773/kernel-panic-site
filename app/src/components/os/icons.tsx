@@ -130,13 +130,15 @@ export interface DesktopIconProps {
   icon: IconName;
   onOpen: () => void;
   badge?: number;
+  /** Carries a teaching tip, for icons that stand for a whole reference. */
+  hint?: string;
 }
 
-export function DesktopIcon({ label, icon, onOpen, badge }: DesktopIconProps) {
+export function DesktopIcon({ label, icon, onOpen, badge, hint }: DesktopIconProps) {
   const Glyph = ICONS[icon];
   const showBadge = typeof badge === "number" && badge > 0;
   return (
-    <button type="button" className="kp-dicon" onClick={onOpen}>
+    <button type="button" className="kp-dicon" onClick={onOpen} title={hint}>
       <span className="kp-dicon-glyph">
         <Glyph />
         {showBadge && <span className="kp-dicon-badge">{badge > 99 ? "99+" : badge}</span>}

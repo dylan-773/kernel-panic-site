@@ -14,6 +14,14 @@ import {
 import { Rng, seedRng } from "./rng";
 import { cellIndex } from "./types";
 
+/**
+ * Most nodes either flood can be handed for free before anyone moves. The
+ * opening-dive teaching ladder is bounded by this same number, so it stays
+ * exported rather than inline: when the two drifted apart, a quarter of
+ * opening dives silently skipped the lesson that teaches rotation.
+ */
+export const MAX_OPENING_CLAIM = 3;
+
 /** Deterministic seed mixer for per-duel seeds. */
 export function mixSeed(...parts: number[]): number {
   let h = 0x811c9dc5;
@@ -181,7 +189,7 @@ export function createDuel(
     const fp = runFlood(s, "player");
     const fo = runFlood(s, "opp");
     if (fp.reachedCore || fo.reachedCore) continue;
-    if (fp.claimed.length > 3 || fo.claimed.length > 3) continue;
+    if (fp.claimed.length > MAX_OPENING_CLAIM || fo.claimed.length > MAX_OPENING_CLAIM) continue;
 
     const pd = routeCost(s, "player");
     const od = routeCost(s, "opp");

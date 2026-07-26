@@ -46,7 +46,13 @@ function d(state: GameState, action: RunAction): GameState {
   return runReducer(state, action);
 }
 
-function playDuelToEnd(duel: DuelState): { won: boolean; chip: number; capWin: boolean } {
+function playDuelToEnd(duel: DuelState): {
+  won: boolean;
+  chip: number;
+  capWin: boolean;
+  overRotations: number;
+  trapsFired: number;
+} {
   let guard = 0;
   while (duel.phase === "playing" && guard++ < 4000) {
     if (duel.turn === "player") {
@@ -57,7 +63,13 @@ function playDuelToEnd(duel: DuelState): { won: boolean; chip: number; capWin: b
     }
   }
   must(duel.phase !== "playing", "duel terminated");
-  return { won: duel.phase === "won", chip: duel.strainChip, capWin: duel.winKind === "cap" };
+  return {
+    won: duel.phase === "won",
+    chip: duel.strainChip,
+    capWin: duel.winKind === "cap",
+    overRotations: Math.max(0, duel.econ.player.rotations - duel.par),
+    trapsFired: duel.econ.player.trapsFired,
+  };
 }
 
 function duelKitOf(kit: RunKit, patchCells: number) {
@@ -125,7 +137,15 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       const strainBefore = s.run!.strain;
       const cellsBefore = s.run!.patchCells;
       const ownsCleanRun = s.run!.kit.augments.includes("cleanRun");
-      s = d(s, { type: "duelFinished", won: res.won, chip: res.chip, capWin: res.capWin, cellsUsed });
+      s = d(s, {
+        type: "duelFinished",
+        won: res.won,
+        chip: res.chip,
+        capWin: res.capWin,
+        cellsUsed,
+        overRotations: res.overRotations,
+        trapsFired: res.trapsFired,
+      });
       if (res.won && s.run) {
         const spent = cellsBefore - cellsUsed;
         const expected =
@@ -199,7 +219,15 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       );
       const res = playDuelToEnd(duel);
       const cellsUsed = s.run!.patchCells - duel.patchCells;
-      s = d(s, { type: "duelFinished", won: res.won, chip: res.chip, capWin: res.capWin, cellsUsed });
+      s = d(s, {
+        type: "duelFinished",
+        won: res.won,
+        chip: res.chip,
+        capWin: res.capWin,
+        cellsUsed,
+        overRotations: res.overRotations,
+        trapsFired: res.trapsFired,
+      });
       if (res.won) {
         must(s.run!.screen === "finaleWin", "finale win screen");
         must(s.meta.machineOpened, "machine opened");

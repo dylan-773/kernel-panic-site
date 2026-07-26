@@ -20,6 +20,7 @@ import {
 } from "../../game/content/story";
 import { mixSeed } from "../../game/duel-setup";
 import { visibleJournal } from "../../game/content/journal";
+import { tip } from "../../game/content/teaching";
 import { runReducer } from "../../game/run-reducer";
 import {
   EMPTY_META,
@@ -31,6 +32,7 @@ import {
   saveSlotRun,
 } from "../../game/save";
 import { DuelScreen } from "../game/duel";
+import { TeachProvider } from "../game/teach";
 import {
   AnalyzeScreen,
   DesktopIdle,
@@ -288,6 +290,11 @@ export function ShopOS() {
           patchCells: run.patchCells,
         };
     return (
+      <TeachProvider
+        taught={meta.taught}
+        day={isTutorial ? 0 : run.day}
+        onTaught={(id) => dispatch({ type: "taught", id })}
+      >
       <div className="kp-os">
         <DuelScreen
           key={`dive-${run.runSeed}-${run.day}-${run.activeJob ?? "x"}-${screen}`}
@@ -320,11 +327,21 @@ export function ShopOS() {
           onToggleSound={() => dispatch({ type: "toggleSound" })}
           onFinish={(r) => {
             if (isTutorial) dispatch({ type: "tutorialDone" });
-            else dispatch({ type: "duelFinished", won: r.won, chip: r.chip, capWin: r.capWin, cellsUsed: r.cellsUsed });
+            else
+              dispatch({
+                type: "duelFinished",
+                won: r.won,
+                chip: r.chip,
+                capWin: r.capWin,
+                cellsUsed: r.cellsUsed,
+                overRotations: r.overRotations,
+                trapsFired: r.trapsFired,
+              });
           }}
         />
         <div className="kp-crt" aria-hidden="true" />
       </div>
+      </TeachProvider>
     );
   }
 
@@ -422,6 +439,11 @@ export function ShopOS() {
   };
 
   return (
+    <TeachProvider
+      taught={meta.taught}
+      day={run ? run.day : 0}
+      onTaught={(id) => dispatch({ type: "taught", id })}
+    >
     <div className="kp-os">
       <div className="kp-wallpaper" aria-hidden="true" />
       <main className="kp-os-desk">
@@ -437,7 +459,7 @@ export function ShopOS() {
           />
           <DesktopIcon label="LOADOUT.CFG" icon="loadout" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("loadout"); }} />
           <DesktopIcon label="DAD.LOG" icon="journal" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("journal"); }} />
-          <DesktopIcon label="MANUAL.TXT" icon="manual" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("manual"); }} />
+          <DesktopIcon label="MANUAL.TXT" icon="manual" hint={tip("manualRef")} onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("manual"); }} />
           <DesktopIcon label="LEDGER.LOG" icon="ledger" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("ledger"); }} />
         </IconGrid>
 
@@ -527,7 +549,11 @@ export function ShopOS() {
             type="button"
             className="kp-task-btn kp-task-danger"
             onClick={() => {
-              if (window.confirm("Abandon this run? Unlocked routines are kept.")) {
+              if (
+                window.confirm(
+                  "Abandon this run? This ends it exactly like a loss: kit, credits, and patch cells all reset for the next attempt.",
+                )
+              ) {
                 dispatch({ type: "endRunAck" });
               }
             }}
@@ -541,5 +567,6 @@ export function ShopOS() {
       </footer>
       <div className="kp-crt" aria-hidden="true" />
     </div>
+    </TeachProvider>
   );
 }

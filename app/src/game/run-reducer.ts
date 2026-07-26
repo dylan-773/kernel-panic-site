@@ -29,7 +29,15 @@ export type RunAction =
   | { type: "setAttackMode"; mode: AttackMode }
   | { type: "setDefendMode"; mode: DefendMode }
   | { type: "startDuel" }
-  | { type: "duelFinished"; won: boolean; chip: number; capWin: boolean; cellsUsed: number }
+  | {
+      type: "duelFinished";
+      won: boolean;
+      chip: number;
+      capWin: boolean;
+      cellsUsed: number;
+      overRotations: number;
+      trapsFired: number;
+    }
   | { type: "pickAugment"; id: AugmentId }
   | { type: "resultNext" }
   | { type: "chooseUpgrade"; pick: "ram" | "scan" | "attack" | "defend" }
@@ -37,6 +45,7 @@ export type RunAction =
   | { type: "buyPatchCell" }
   | { type: "startFinale" }
   | { type: "endRunAck" }
+  | { type: "taught"; id: string }
   | { type: "toggleSound" }
   | { type: "toggleMusic" };
 
@@ -106,6 +115,13 @@ export function runReducer(state: GameState, action: RunAction): GameState {
   switch (action.type) {
     case "hydrate":
       return { meta: action.meta, run: action.run };
+
+    // Teaching is meta, not run state: a mechanic explained in attempt 3
+    // stays explained in attempt 4.
+    case "taught": {
+      if (meta.taught.includes(action.id)) return state;
+      return { ...state, meta: { ...meta, taught: [...meta.taught, action.id] } };
+    }
 
     case "toggleSound":
       return { ...state, meta: { ...meta, sound: !meta.sound } };
@@ -247,6 +263,8 @@ export function runReducer(state: GameState, action: RunAction): GameState {
             chip: action.chip,
             pay,
             capWin: action.capWin,
+            overRotations: action.overRotations,
+            trapsFired: action.trapsFired,
             jobIndex: run.activeJob ?? 0,
             draft,
             picked: null,

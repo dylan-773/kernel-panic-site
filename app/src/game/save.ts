@@ -13,6 +13,13 @@ export interface MetaState {
   machineOpened: boolean;
   sound: boolean;
   music: boolean;
+  /**
+   * Teaching moment ids this player has already been shown. Survives runs:
+   * a mechanic is explained once, ever, at the moment it first matters.
+   * Saves from before the teaching layer land here empty on purpose, so a
+   * returning player still gets the explanations nothing ever gave them.
+   */
+  taught: string[];
 }
 
 export type RunScreen =
@@ -86,6 +93,9 @@ export interface RunState {
     chip: number;
     pay: number;
     capWin: boolean;
+    /** Chip inputs, kept so the result row can show what actually billed. */
+    overRotations: number;
+    trapsFired: number;
     jobIndex: number;
     /** Augment draft offered for this win; empty when the pool ran dry. */
     draft: AugmentId[];
@@ -101,6 +111,7 @@ export const EMPTY_META: MetaState = {
   machineOpened: false,
   sound: true,
   music: true,
+  taught: [],
 };
 
 function parseMeta(raw: string): MetaState {
@@ -110,6 +121,7 @@ function parseMeta(raw: string): MetaState {
     machineOpened: p.machineOpened === true,
     sound: p.sound !== false,
     music: p.music !== false,
+    taught: Array.isArray(p.taught) ? p.taught.filter((t) => typeof t === "string") : [],
   };
 }
 

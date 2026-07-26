@@ -669,6 +669,7 @@ img {
 /* ---------- generic screens ---------- */
 
 .kp-screen {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -1080,6 +1081,38 @@ img {
 
 .kp-chip-bad {
   color: var(--kp-crimson);
+}
+
+/* Itemizes what actually billed strain, under the total on the result row. */
+.kp-chip-breakdown {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: var(--kp-bg1);
+  border: 1px dashed var(--kp-line);
+  max-width: 460px;
+}
+
+.kp-chip-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--kp-term);
+  font-size: 14px;
+  color: var(--kp-dim);
+}
+
+.kp-chip-breakdown li em {
+  font-style: normal;
+  color: var(--kp-crimson);
+}
+
+.kp-chip-capped,
+.kp-chip-capped em {
+  color: var(--kp-gold);
 }
 
 .kp-unlock {
@@ -1494,7 +1527,10 @@ img {
   border: 2px solid var(--kp-line);
   color: var(--kp-text);
   cursor: pointer;
-  text-align: left;
+  text-align: left;  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
 }
 
 .kp-ability:hover:not(:disabled) {
@@ -1800,6 +1836,81 @@ img {
   font-size: 18px;
   line-height: 1.3;
   z-index: 5;
+}
+
+/* ---------- teaching callouts ---------- */
+/* First sight explainers. Pale signal border keeps them visually distinct
+   from the gold bench coach of the opening dive: one is the tutorial
+   talking, the other is the interface explaining itself. */
+
+.kp-teach {
+  position: absolute;
+  z-index: 40;
+  width: min(430px, 90%);
+  padding: 12px 14px 40px;
+  background: rgba(10, 12, 16, 0.97);
+  border: 2px solid var(--kp-signal);
+  box-shadow: 0 0 0 2px rgba(16, 18, 24, 0.9), 0 6px 0 rgba(0, 0, 0, 0.35);
+  font-family: var(--kp-term);
+  animation: kp-teach-in 140ms steps(3, end);
+}
+
+.kp-teach-title {
+  display: block;
+  font-family: var(--kp-display);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--kp-signal);
+  margin-bottom: 6px;
+}
+
+.kp-teach p {
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--kp-text);
+}
+
+.kp-teach p + p {
+  margin-top: 5px;
+}
+
+.kp-teach-ok {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  padding: 4px 14px;
+  background: var(--kp-signal);
+  border: none;
+  color: var(--kp-bg0);
+  font-family: var(--kp-display);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.kp-teach-ok:hover {
+  background: var(--kp-rose-hot);
+  color: var(--kp-text);
+}
+
+/* Opacity only: the centered anchor owns its transform, so the entrance
+   animation must not touch it. */
+@keyframes kp-teach-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Anchors: each sits beside the control it explains. */
+.kp-teach-screen { bottom: 18px; left: 50%; transform: translateX(-50%); }
+.kp-teach-par { top: 10px; right: 12px; }
+.kp-teach-readout { top: 42%; right: 22px; }
+.kp-teach-rows { top: 92px; left: 26px; }
+.kp-teach-draft { bottom: 78px; left: 26px; }
+.kp-teach-grid { top: 128px; left: 26px; }
+.kp-teach-patch { bottom: 16px; right: 20px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kp-teach { animation: none; }
 }
 
 .kp-targetbar {
@@ -2173,6 +2284,41 @@ img {
   background: rgba(12, 14, 20, 0.96);
   border: 2px solid var(--kp-gold);
   pointer-events: none;
+}
+
+/* Hold to read: the touch path to every tip and the mid dive ability panel. */
+.kp-tapwrap {
+  position: relative;
+  display: inline-block;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.kp-tap-pop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  z-index: 45;
+  max-width: 220px;
+  padding: 8px 10px;
+  background: rgba(10, 12, 16, 0.97);
+  border: 2px solid var(--kp-signal);
+  color: var(--kp-text);
+  font-family: var(--kp-term);
+  font-size: 15px;
+  line-height: 1.3;
+  white-space: normal;
+  pointer-events: none;
+  animation: kp-teach-in 140ms steps(3, end);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kp-tap-pop {
+    animation: none;
+  }
 }
 
 .kp-ability-info strong {

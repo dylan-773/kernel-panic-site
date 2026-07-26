@@ -18,13 +18,17 @@ import { Scene } from "../../game/content/story";
 import {
   DAY_REST_REGEN,
   GameState,
+  MAX_RAM,
   PATCH_CELL_COST,
   PATCH_CELL_MAX,
   PATCH_COST,
   PATCH_HEAL,
   RunAction,
 } from "../../game/run-reducer";
+import { tip } from "../../game/content/teaching";
 import { MetaState, RunState } from "../../game/save";
+import { Teach } from "./teach";
+import { TapTip } from "./tap-tip";
 
 export function customerById(id: string): CustomerProfile {
   return CUSTOMERS.find((c) => c.id === id) ?? CUSTOMERS[0];
@@ -121,10 +125,12 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
               </div>
               <p className="kp-job-quote">"{c.quotes[job.quoteIndex]}"</p>
               <div className="kp-job-foot">
-                <span className="kp-job-tier">
-                  THREAT {"■".repeat(job.tier)}
-                  {"□".repeat(5 - job.tier)}
-                </span>
+                <TapTip text={tip("threatTier")}>
+                  <span className="kp-job-tier">
+                    THREAT {"■".repeat(job.tier)}
+                    {"□".repeat(5 - job.tier)}
+                  </span>
+                </TapTip>
                 <span className="kp-job-pay">{done ? "CLEARED" : `${40 + 25 * job.tier} cr`}</span>
               </div>
             </button>
@@ -132,9 +138,13 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
         })}
       </div>
       <footer className="kp-screen-foot">
-        <span>STRAIN {run.strain}</span>
+        <TapTip text={tip("strain")}>
+          <span>STRAIN {run.strain}</span>
+        </TapTip>
         <span>{run.credits} cr</span>
-        <span>RAM {run.ramPerTurn}/turn</span>
+        <TapTip text={tip("ram")}>
+          <span>RAM {run.ramPerTurn}/turn</span>
+        </TapTip>
         {run.patchCells > 0 && <span>CELLS x{run.patchCells}</span>}
         <span>
           KIT S{run.kit.scanTier}/A{run.kit.attackTier}/D{run.kit.defendTier}
@@ -216,6 +226,7 @@ export function AnalyzeScreen({
           DIVE
         </button>
       </div>
+      <Teach id="analyze-readout" />
     </div>
   );
 }
@@ -258,17 +269,17 @@ export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dis
               const owned = kit.attackModes.includes(m);
               const active = kit.attackMode === m;
               return (
-                <button
-                  key={m}
-                  type="button"
-                  className={`kp-mode ${active ? "kp-mode-on" : ""} ${owned ? "" : "kp-mode-locked"}`}
-                  disabled={!owned}
-                  onClick={() => dispatch({ type: "setAttackMode", mode: m })}
-                  title={owned ? attackModeDesc(m, kit.attackTier) : "Config not installed. Win jobs to draft it."}
-                >
-                  {ATTACK_MODE_LABEL[m]}
-                  {!owned && <i> ?</i>}
-                </button>
+                <TapTip key={m} text={owned ? attackModeDesc(m, kit.attackTier) : tip("modeLocked")}>
+                  <button
+                    type="button"
+                    className={`kp-mode ${active ? "kp-mode-on" : ""} ${owned ? "" : "kp-mode-locked"}`}
+                    disabled={!owned}
+                    onClick={() => dispatch({ type: "setAttackMode", mode: m })}
+                  >
+                    {ATTACK_MODE_LABEL[m]}
+                    {!owned && <i> ?</i>}
+                  </button>
+                </TapTip>
               );
             })}
           </div>
@@ -285,17 +296,17 @@ export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dis
               const owned = kit.defendModes.includes(m);
               const active = kit.defendMode === m;
               return (
-                <button
-                  key={m}
-                  type="button"
-                  className={`kp-mode ${active ? "kp-mode-on" : ""} ${owned ? "" : "kp-mode-locked"}`}
-                  disabled={!owned}
-                  onClick={() => dispatch({ type: "setDefendMode", mode: m })}
-                  title={owned ? defendModeDesc(m, kit.defendTier) : "Config not installed. Win jobs to draft it."}
-                >
-                  {DEFEND_MODE_LABEL[m]}
-                  {!owned && <i> ?</i>}
-                </button>
+                <TapTip key={m} text={owned ? defendModeDesc(m, kit.defendTier) : tip("modeLocked")}>
+                  <button
+                    type="button"
+                    className={`kp-mode ${active ? "kp-mode-on" : ""} ${owned ? "" : "kp-mode-locked"}`}
+                    disabled={!owned}
+                    onClick={() => dispatch({ type: "setDefendMode", mode: m })}
+                  >
+                    {DEFEND_MODE_LABEL[m]}
+                    {!owned && <i> ?</i>}
+                  </button>
+                </TapTip>
               );
             })}
           </div>
@@ -365,7 +376,7 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
         <div>
           <span>PAYOUT</span>
           <em>
-            {r.pay} cr{r.capWin ? " (timeout rate)" : ""}
+            {r.pay} cr{r.capWin ? " (half rate: you hit the turn cap)" : ""}
           </em>
         </div>
         <div>
@@ -374,6 +385,40 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
             {r.chip > 0 ? `-${r.chip}` : "clean"} ({run.strain} left)
           </em>
         </div>
+        {/* The chip has three inputs. Showing only the total left a player who
+            stayed under par unable to tell a sprung trap had billed them. */}
+        {r.chip > 0 && (
+          <ul className="kp-chip-breakdown">
+            {r.overRotations > 0 && (
+              <li>
+                <span>
+                  {r.overRotations} rotation{r.overRotations === 1 ? "" : "s"} over par
+                </span>
+                <em>-{r.overRotations * 2}</em>
+              </li>
+            )}
+            {r.trapsFired > 0 && (
+              <li>
+                <span>
+                  {r.trapsFired} trap{r.trapsFired === 1 ? "" : "s"} sprung
+                </span>
+                <em>-{r.trapsFired * 4}</em>
+              </li>
+            )}
+            {r.capWin && (
+              <li>
+                <span>hit the turn cap</span>
+                <em>-10</em>
+              </li>
+            )}
+            {r.overRotations * 2 + r.trapsFired * 4 + (r.capWin ? 10 : 0) > 40 && (
+              <li className="kp-chip-capped">
+                <span>strain billed, capped</span>
+                <em>-40 max</em>
+              </li>
+            )}
+          </ul>
+        )}
       </div>
 
       {r.draft.length > 0 ? (
@@ -418,6 +463,8 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
             : "SKIP THE DRAFT"}
         </button>
       </div>
+      <Teach id="strain-chip" />
+      <Teach id="augment-draft" signals={{ draftOffered: r.draft.length > 0 }} />
     </div>
   );
 }
@@ -475,11 +522,17 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         )}
       </div>
       <div className="kp-upgrade-grid">
-        <button type="button" className="kp-upg" onClick={() => dispatch({ type: "chooseUpgrade", pick: "ram" })}>
-          <strong>+1 RAM / TURN</strong>
+        <button
+          type="button"
+          className="kp-upg"
+          disabled={run.ramPerTurn >= MAX_RAM}
+          onClick={() => dispatch({ type: "chooseUpgrade", pick: "ram" })}
+        >
+          <strong>{run.ramPerTurn >= MAX_RAM ? "RAM MAXED" : "+1 RAM / TURN"}</strong>
           <span>
-            {run.ramPerTurn} to {Math.min(9, run.ramPerTurn + 1)}. More moves, more programs, every
-            single turn.
+            {run.ramPerTurn >= MAX_RAM
+              ? "Already at the per turn cap."
+              : `${run.ramPerTurn} to ${run.ramPerTurn + 1}. More moves, more programs, every single turn.`}
           </span>
         </button>
         {tierBtn("scan", kit.scanTier, "SCAN.EXE", "Wider sweep radius. Still always 1 RAM.")}
@@ -522,7 +575,7 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
           BUY PATCH CELL ({PATCH_CELL_COST} cr)
         </button>
         <span className="kp-rail-dim">
-          PATCH CELLS {run.patchCells}/{PATCH_CELL_MAX}
+          PATCH CELLS {run.patchCells}/{PATCH_CELL_MAX} - {run.credits} cr
         </span>
         <span className="kp-cell-pips" aria-hidden="true">
           {Array.from({ length: PATCH_CELL_MAX }).map((_, i) => (
@@ -531,6 +584,8 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         </span>
         <span className="kp-rail-dim">One slag block becomes a live cross junction. Single use.</span>
       </div>
+      <Teach id="day-upgrade" />
+      <Teach id="night-shop" />
     </div>
   );
 }

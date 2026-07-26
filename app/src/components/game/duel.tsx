@@ -20,6 +20,7 @@ import {
   defendModeDesc,
   scanDesc,
 } from "../../game/content/kit";
+import { tip, tutorialLine } from "../../game/content/teaching";
 import {
   attackTargetLegal,
   defendTargetLegal,
@@ -27,6 +28,8 @@ import {
   programUnlocked,
   tierOf,
 } from "../../game/duel-actions";
+import { Teach } from "./teach";
+import { TapTip, useLongPress } from "./tap-tip";
 import { canPlace, canRotate, routeCost } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
@@ -67,6 +70,9 @@ export interface DuelFinish {
   chip: number;
   capWin: boolean;
   cellsUsed: number;
+  /** The two inputs behind the chip, so the result row can itemize it. */
+  overRotations: number;
+  trapsFired: number;
 }
 
 export interface DuelScreenProps {
@@ -84,35 +90,22 @@ export interface DuelScreenProps {
   onToggleSound: () => void;
 }
 
+/**
+ * The bench's running commentary through the opening dive. The ladder itself
+ * lives in `content/teaching.ts`; this only reads the duel state into the
+ * shape it tests against.
+ */
 function coachLine(s: DuelState): string | null {
   if (!s.cfg.tutorial || s.phase !== "playing") return null;
-  const owned = s.cells.filter((c) => c.kind === "node" && c.owner === "player").length;
-  const f = s.tutFlags;
-  if (s.turn === "opp") {
-    if (s.round === 1) return "Now watch it move. Watch what it plants.";
-    if (!f.attacked) return "It is holding back. It wants to see what you learned.";
-    return "It has stopped holding back.";
-  }
-  if (s.round === 1) {
-    if (owned <= 2) {
-      return "The grid is live. Your programs are still indexing; for now, click a glowing junction to rotate it (1 RAM). Line the pipes up and your signal floods forward on its own.";
-    }
-    return "Chain rotations toward the CORE. When a junction clicks into line, everything connected claims at once. Spend your RAM, then END TURN.";
-  }
-  if (!f.scanned) {
-    return "It armed something on your lane last cycle. SCAN.EXE just came online: cast it (1 RAM) and it sweeps everything near your line. Always scan before you walk.";
-  }
-  const shownTrap = s.cells.some((c) => c.trap && c.trap.by === "opp" && c.trap.revealed);
-  if (!f.purged && shownTrap) {
-    return "There it is. DEFEND.EXE is online, set to PURGE: cast it, click the exposed trap, and defuse the thing before your flood walks in.";
-  }
-  if (!f.purged) {
-    return "The trap is gone but it WILL plant another. When one shows, DEFEND purges it. Keep pushing meanwhile.";
-  }
-  if (!f.attacked) {
-    return "Last program: ATTACK.EXE, set to REDIRECT. Cast it and click one of ITS junctions to twist its line off true. Make it hurt.";
-  }
-  return "That is the whole toolbox: scan, defend, attack, rotate. Push for the core with everything you have.";
+  return tutorialLine({
+    turn: s.turn,
+    round: s.round,
+    ownedNodes: s.cells.filter((c) => c.kind === "node" && c.owner === "player").length,
+    scanned: s.tutFlags.scanned,
+    purged: s.tutFlags.purged,
+    attacked: s.tutFlags.attacked,
+    trapShown: s.cells.some((c) => c.trap && c.trap.by === "opp" && c.trap.revealed),
+  });
 }
 
 /** fx → screen shake magnitude, impact label, and sound. */
@@ -217,7 +210,48 @@ export function DuelScreen(props: DuelScreenProps) {
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [virus, setVirus] = useState<VirusMsg | null>(null);
   const [sweep, setSweep] = useState(0);
+  // Sticky: the CASCADE lesson is about a claim chain, so it waits for a real
+  // one. Banked RAM alone is the wrong tell, since a siphon trap and ECHO TAP
+  // bank it too. Sticky because the fx queue drains the frame it arrives.
+  const [sawCascade, setSawCascade] = useState(false);
   const finishedRef = useRef(false);
+  // True only while the ability panel was opened by a hold, so the
+  // tap-elsewhere dismiss can never fight the mouse's enter/leave pair.
+  const infoByTouch = useRef(false);
+
+  // Three programs, so three fixed hook calls. They cannot live inside the
+  // dock's map without breaking the rules of hooks.
+  const openInfo = (p: Program) => () => {
+    infoByTouch.current = true;
+    setInfoProg(p);
+  };
+  const closeInfo = () => {
+    infoByTouch.current = false;
+    setInfoProg(null);
+  };
+  const lpScan = useLongPress({ isOpen: infoProg === "scan", onOpen: openInfo("scan"), onClose: closeInfo });
+  const lpAttack = useLongPress({ isOpen: infoProg === "attack", onOpen: openInfo("attack"), onClose: closeInfo });
+  const lpDefend = useLongPress({ isOpen: infoProg === "defend", onOpen: openInfo("defend"), onClose: closeInfo });
+  const holdInfo: Record<Program, ReturnType<typeof useLongPress>> = {
+    scan: lpScan,
+    attack: lpAttack,
+    defend: lpDefend,
+  };
+
+  // A hold-opened panel closes when the next tap lands anywhere else.
+  useEffect(() => {
+    if (!infoProg || !infoByTouch.current) return;
+    const away = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      const owner = t && t.closest ? t.closest("[data-prog]") : null;
+      if (!owner || owner.getAttribute("data-prog") !== infoProg) {
+        infoByTouch.current = false;
+        setInfoProg(null);
+      }
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [infoProg]);
 
   const playerTurn = state.phase === "playing" && state.turn === "player";
   const econ = state.econ.player;
@@ -258,6 +292,9 @@ export function DuelScreen(props: DuelScreenProps) {
         if (soundOn) sfx("aim", { jitter: 0.04 });
         continue;
       }
+      // Emitted only for a player claim chain of four or more, which is the
+      // one thing the CASCADE callout describes.
+      if (e.kind === "cascadeRam") setSawCascade(true);
       // Over-par rotations click on top of the normal rotate sound.
       if (
         e.kind === "rotate" &&
@@ -387,6 +424,7 @@ export function DuelScreen(props: DuelScreenProps) {
 
   const onProgram = (prog: Program) => {
     if (!playerTurn || econ.used[prog]) return;
+    if (infoProg) closeInfo();
     if (soundOn) playUiPress();
     setPlacing(false);
     if (prog === "scan") {
@@ -422,6 +460,10 @@ export function DuelScreen(props: DuelScreenProps) {
       chip: state.strainChip,
       capWin: state.winKind === "cap",
       cellsUsed: kit.patchCells - state.patchCells,
+      // Mirrors finishDuel's own inputs (duel-actions.ts), so the result
+      // screen redisplays the bill rather than re-deriving it.
+      overRotations: Math.max(0, state.econ.player.rotations - state.par),
+      trapsFired: state.econ.player.trapsFired,
     });
   };
 
@@ -463,16 +505,19 @@ export function DuelScreen(props: DuelScreenProps) {
           <span className="kp-osk-item">
             R{Math.min(state.round, ROUND_CAP)}/{ROUND_CAP}
           </span>
-          <span
-            key={parPopKey}
-            className={`kp-osk-item kp-par ${overPar > 0 ? "kp-par-over" : ""} ${parPopKey > 0 ? "kp-par-warn-pop" : ""}`}
-            title="Rotation budget. Rotations past par cost Neural Strain on a win."
-          >
-            PAR {econ.rotations}/{state.par}
-            {overPar > 0 && <i className="kp-par-over-tag">+{overPar} OVER</i>}
-          </span>
-          <div className="kp-strain" title="Neural Strain">
-            <span>STRAIN</span>
+          <TapTip text={tip("par")}>
+            <span
+              key={parPopKey}
+              className={`kp-osk-item kp-par ${overPar > 0 ? "kp-par-over" : ""} ${parPopKey > 0 ? "kp-par-warn-pop" : ""}`}
+            >
+              PAR {econ.rotations}/{state.par}
+              {overPar > 0 && <i className="kp-par-over-tag">+{overPar} OVER</i>}
+            </span>
+          </TapTip>
+          <div className="kp-strain">
+            <TapTip text={tip("strain")}>
+              <span>STRAIN</span>
+            </TapTip>
             <div className="kp-strain-bar">
               <div className="kp-strain-fill" style={{ width: `${props.strain}%` }} />
             </div>
@@ -512,6 +557,9 @@ export function DuelScreen(props: DuelScreenProps) {
             </div>
           )}
           {coach && <div className="kp-coach">{coach}</div>}
+          <Teach id="par-budget" signals={{ overPar: overPar > 0 }} />
+          <Teach id="cascade-bank" signals={{ cascadeBanked: sawCascade }} />
+          <Teach id="patch-cell-use" signals={{ holdingCells: state.patchCells > 0 }} />
           {placing && (
             <div className="kp-targetbar">
               <span>
@@ -570,10 +618,12 @@ export function DuelScreen(props: DuelScreenProps) {
 
       <footer className="kp-dive2-dock">
         <div className="kp-dock-ram">
-          <span className="kp-dock-label">
-            RAM <em>{playerTurn ? econ.ram : 0}</em>
-            {banked > 0 && <i className="kp-dock-banked">+{banked} NEXT</i>}
-          </span>
+          <TapTip text={tip("ram")}>
+            <span className="kp-dock-label">
+              RAM <em>{playerTurn ? econ.ram : 0}</em>
+              {banked > 0 && <i className="kp-dock-banked">+{banked} NEXT</i>}
+            </span>
+          </TapTip>
           <div className="kp-ram-pips">
             {Array.from({ length: Math.max(econ.ramPerTurn + 3, econ.ram) }).map((_, i) => (
               <span key={i} className={i < econ.ram && playerTurn ? "kp-pip kp-pip-on" : "kp-pip"} />
@@ -598,12 +648,14 @@ export function DuelScreen(props: DuelScreenProps) {
                 key={prog}
                 type="button"
                 className={`kp-ability kp-prog-${prog} ${targeting?.prog === prog ? "kp-ability-arming" : ""} ${offline ? "kp-prog-offline" : ""}`}
+                data-prog={prog}
                 disabled={disabled}
                 onClick={() => onProgram(prog)}
                 onMouseEnter={() => setInfoProg(prog)}
                 onMouseLeave={() => setInfoProg(null)}
                 onFocus={() => setInfoProg(prog)}
                 onBlur={() => setInfoProg(null)}
+                {...holdInfo[prog]}
               >
                 <span className="kp-ability-name">
                   {prog.toUpperCase()}
