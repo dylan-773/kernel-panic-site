@@ -1,3 +1,4 @@
+import { PAR_FLAT, PAR_RATE } from "./content/kit";
 import { routeCost, routePlan, runFlood, computeDuelPower } from "./duel-power";
 import {
   DuelCell,
@@ -52,6 +53,8 @@ function initialEcon(ramPerTurn: number, carryCap: number): SideEcon {
     used: { scan: false, attack: false, defend: false },
     attacksCast: 0,
     trapsFired: 0,
+    rotations: 0,
+    placedThisTurn: false,
   };
 }
 
@@ -159,6 +162,8 @@ export function createDuel(
       oppNextIntent: null,
       routeTrace: null,
       oppStartCost: 0,
+      par: 0,
+      patchCells: kit.patchCells,
       strainChip: 0,
       rngState: seedRng(seed ^ 0x5f3759df),
       claimCounter: 0,
@@ -272,6 +277,13 @@ export function createDuel(
   {
     const rc = routeCost(s, "opp");
     s.oppStartCost = Math.max(1, isFinite(rc) ? rc : cfg.minCost);
+  }
+  {
+    // Par is set once, from the starting board the player actually faces
+    // (head start applied): the honest route cost plus a working margin.
+    const pd = routeCost(s, "player");
+    const base = isFinite(pd) ? pd : cfg.minCost;
+    s.par = Math.ceil(base * PAR_RATE) + (cfg.parFlat ?? PAR_FLAT);
   }
   s.power = computeDuelPower(s);
   s.econ.player.ram = playerRamPerTurn + (kit.augments.includes("hotBoot") ? 2 : 0);

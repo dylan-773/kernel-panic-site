@@ -29,22 +29,23 @@ export interface FloodResult {
   reached: boolean[];
   /** Indexes claimed by this flood, in claim order. */
   claimed: number[];
-  /** Trap that fired on the flooding side, if any. */
-  trapFired: { idx: number; kind: TrapKind; drain: number } | null;
+  /** Traps sprung on the flooding side this settle, in claim order. */
+  trapsFired: Array<{ idx: number; kind: TrapKind; drain: number }>;
   reachedCore: boolean;
 }
 
 /**
  * Run one side's flood, claiming neutral nodes it touches. A trapped
- * neutral node is claimed and consumes the trap, but the flood does not
- * expand past it this settle, and the victim loses their next turn.
+ * neutral node is claimed and consumes the trap. Traps are tempo hits
+ * (a lost turn or a RAM drain), never walls: the cascade keeps
+ * expanding past a sprung trap.
  */
 export function runFlood(s: DuelState, side: Side): FloodResult {
   const start = side === "player" ? s.entryP : s.entryO;
   const enemy = otherSide(side);
   const reached = new Array<boolean>(s.cells.length).fill(false);
   const claimed: number[] = [];
-  let trapFired: { idx: number; kind: TrapKind; drain: number } | null = null;
+  const trapsFired: Array<{ idx: number; kind: TrapKind; drain: number }> = [];
   let reachedCore = false;
 
   reached[start] = true;
@@ -77,14 +78,13 @@ export function runFlood(s: DuelState, side: Side): FloodResult {
         if (nc.trap && nc.trap.by === enemy) {
           const trap = nc.trap;
           nc.trap = null;
-          trapFired = { idx: ni, kind: trap.kind, drain: trap.drain };
-          continue; // the flood stops at a sprung trap
+          trapsFired.push({ idx: ni, kind: trap.kind, drain: trap.drain });
         }
       }
       queue.push(ni);
     }
   }
-  return { reached, claimed, trapFired, reachedCore };
+  return { reached, claimed, trapsFired, reachedCore };
 }
 
 export function computeDuelPower(s: DuelState): DuelPower {
@@ -323,6 +323,17 @@ export function reachOf(s: DuelState, side: Side): number {
 export function inReach(s: DuelState, side: Side, idx: number, reach: number): boolean {
   const c0 = s.cells[idx];
   if (c0.kind !== "node" || c0.owner !== "none") return false;
+  return withinReachWalk(s, side, idx, reach);
+}
+
+/** May this side fill this slag block with a patch cell (same reach walk)? */
+export function canPlace(s: DuelState, side: Side, idx: number): boolean {
+  const c0 = s.cells[idx];
+  if (!c0 || c0.kind !== "block") return false;
+  return withinReachWalk(s, side, idx, reachOf(s, side));
+}
+
+function withinReachWalk(s: DuelState, side: Side, idx: number, reach: number): boolean {
   const seen = new Set<number>([idx]);
   let frontier = [idx];
   for (let step = 1; step <= reach; step++) {

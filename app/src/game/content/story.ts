@@ -69,8 +69,8 @@ export function runOpenerScene(runCount: number): Scene {
             speaker: "system",
             still: STILL_LOCKED,
             lines: [
-              "Behind the curtain, under a decade of dust, the machine waits.",
-              "The padlock is the only thing in this shop without dust on it.",
+              "Behind the curtain, past drifts of Dad's clutter, the machine waits.",
+              "The padlock is the only thing in this shop Dad ever put away properly.",
             ],
           },
         ],
@@ -80,6 +80,11 @@ export function runOpenerScene(runCount: number): Scene {
         id,
         beats: [
           { speaker: "system", lines: ["RUN 2.", "The lock is where you left it. So is the debt."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["You scared me last night. Whatever is wrong with that machine does not get to take my brother too."],
+          },
           {
             speaker: "sister",
             portrait: SISTER,
@@ -99,6 +104,11 @@ export function runOpenerScene(runCount: number): Scene {
           {
             speaker: "sister",
             portrait: SISTER,
+            lines: ["You slept maybe two hours. I counted the mug rings on the bench. That is how I know."],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
             lines: [
               "You keep going back. Dad had that same look.",
               "Same hours, too. I am not saying anything. I am just saying.",
@@ -111,6 +121,11 @@ export function runOpenerScene(runCount: number): Scene {
         id,
         beats: [
           { speaker: "system", lines: ["RUN 4.", "The shop opens anyway. It always opens anyway."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["I keep thinking about the word waited. I should not have said it out loud."],
+          },
           {
             speaker: "sister",
             portrait: SISTER,
@@ -129,6 +144,11 @@ export function runOpenerScene(runCount: number): Scene {
           {
             speaker: "sister",
             portrait: SISTER,
+            lines: ["It paces you. I wrote that down and then read it back to myself about six times."],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
             lines: [
               "I oiled the hinges on the back door. Do not read into it.",
               "Three tickets today. Eat something first.",
@@ -140,7 +160,12 @@ export function runOpenerScene(runCount: number): Scene {
       return {
         id,
         beats: [
-          { speaker: "system", lines: ["RUN 6.", "Dust settles on everything here but the padlock."] },
+          { speaker: "system", lines: ["RUN 6.", "The clutter shrinks a little more every week. The padlock never has."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["Kind first, then it takes you apart. What kind of virus plays nice on purpose?"],
+          },
           {
             speaker: "sister",
             still: STILL_COUNTER,
@@ -151,7 +176,131 @@ export function runOpenerScene(runCount: number): Scene {
           },
         ],
       };
+    case 7:
+      return {
+        id,
+        beats: [
+          { speaker: "system", lines: ["RUN 7.", "The shop opens anyway."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I keep hearing you talk back to it. Not shouting. Talking.",
+              "I do not know what kind of person does that for a virus, but here we are.",
+            ],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["Coffee is on the bench. It is even fresh.", "Come back up this time. I mean it."],
+          },
+        ],
+      };
+    case 8:
+      return {
+        id,
+        beats: [
+          { speaker: "system", lines: ["RUN 8.", "The spike is full. The room is patient."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I did the math twice, hoping I would get a different number. I did not.",
+              "Whatever he was doing back there, he paid for it himself. Every month. Nobody made him.",
+            ],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["That lock looks looser every week. So does my theory.", "Go earn the rent first."],
+          },
+        ],
+      };
+    case 9:
+      return {
+        id,
+        beats: [
+          { speaker: "system", lines: ["RUN 9.", "The spike refills. It always does."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I left something at the door this morning. Do not ask me why.",
+              "If it really is just waiting, I figure waiting is easier with coffee.",
+            ],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["Go on, before it gets cold.", "The coffee. I meant the coffee."],
+          },
+        ],
+      };
+    case 10:
+      return {
+        id,
+        beats: [
+          { speaker: "system", lines: ["RUN 10.", "Ten times now. The lock has not moved. Neither have you."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I stood at the curtain again last night. Did not touch it. Just stood there.",
+              "It feels wrong to keep calling it that. I do not have a better word yet.",
+            ],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: ["Anyway. Three tickets. The world outside that curtain still needs fixing.", "Go."],
+          },
+        ],
+      };
+    case 11:
+      return {
+        id,
+        beats: [
+          { speaker: "system", lines: ["RUN 11.", "The padlock. The curtain. The same morning, again."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I am not scared walking past that door anymore. I noticed this morning.",
+              "I do not know when that happened. Somewhere around run six, maybe. I was not paying attention.",
+            ],
+          },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "Three tickets. Go be the good half of this shop for a few hours.",
+              "Then go be whatever the other half of you is doing in there.",
+            ],
+          },
+        ],
+      };
+    case 12:
+      return {
+        id,
+        beats: [
+          { speaker: "system", lines: ["RUN 12.", "The book resets. The padlock does not."] },
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "Twelve of these now. I have stopped asking when you will stop.",
+              "I have started asking what happens when you finally get through.",
+            ],
+          },
+          {
+            speaker: "sister",
+            still: STILL_COUNTER,
+            lines: ["Go find out, then.", "I will keep the coffee hot. Same as every time."],
+          },
+        ],
+      };
     default: {
+      // Runs 13 and beyond rotate; Rhea's arc has landed by now.
       const fallbacks: StoryBeat[][] = [
         [
           { speaker: "system", lines: ["RUN " + runCount + ".", "The spike is full. The room is patient."] },
@@ -166,7 +315,7 @@ export function runOpenerScene(runCount: number): Scene {
           {
             speaker: "sister",
             portrait: SISTER,
-            lines: ["That lock looks looser every week. So does my theory.", "Go earn the rent first."],
+            lines: ["I will keep the coffee hot.", "Go earn the rent first."],
           },
         ],
         [
@@ -178,7 +327,7 @@ export function runOpenerScene(runCount: number): Scene {
           },
         ],
       ];
-      return { id, beats: fallbacks[(runCount - 7) % fallbacks.length] };
+      return { id, beats: fallbacks[(runCount - 13) % fallbacks.length] };
     }
   }
 }
@@ -245,7 +394,7 @@ export function runEndScene(runCount: number): Scene {
             speaker: "father",
             portrait: FATHER,
             lines: [
-              "She took the car and the quiet with her.",
+              "This bench light is the only one on the block.",
               "Go back to bed, kiddo. I will be up a while yet.",
               "The shop and I have some talking to do.",
             ],
@@ -377,7 +526,108 @@ export function runEndScene(runCount: number): Scene {
           },
         ],
       };
+    case 9:
+      return {
+        id,
+        beats: [
+          strainBeat(runCount),
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "You are getting up slower every time. Or I am getting more scared every time. Hard to tell which anymore.",
+              "I want to believe it lets you through eventually. I did not expect to be the one hoping.",
+            ],
+          },
+          { speaker: "system", lines: ["SECTOR SCAN: NO NEW DATA.", "ECHO FOLLOWS."] },
+          {
+            speaker: "father",
+            still: STILL_BENCH,
+            lines: [
+              "Hold the iron like a pencil, not a hammer. There.",
+              "See? The joint holds because you were patient with it.",
+              "Most things do.",
+            ],
+          },
+        ],
+      };
+    case 10:
+      return {
+        id,
+        beats: [
+          strainBeat(runCount),
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I still think about the wall, some nights. Him talking to something on the other side of it.",
+              "I used to think it was the radio. I know better now. I still like pretending, some nights.",
+            ],
+          },
+          { speaker: "system", lines: ["SECTOR SCAN: NO NEW DATA.", "ECHO FOLLOWS."] },
+          {
+            speaker: "father",
+            portrait: FATHER,
+            lines: [
+              "Again. You almost had me that time.",
+              "Do not go easy on me. If you learn to go easy, you will ruin the whole point.",
+              "One more game, then I open the shop.",
+            ],
+          },
+        ],
+      };
+    case 11:
+      return {
+        id,
+        beats: [
+          strainBeat(runCount),
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "I am done being scared of that room. I do not know what I am instead.",
+              "Ready, maybe. Or just tired of being scared. Some days those are the same thing.",
+            ],
+          },
+          { speaker: "system", lines: ["SECTOR SCAN: NO NEW DATA.", "ECHO FOLLOWS."] },
+          {
+            speaker: "father",
+            portrait: FATHER,
+            lines: [
+              "He is not ready yet. Keep the door shut.",
+              "Not until he can beat you square. Promise me.",
+              "No shortcuts. He will hate it. That is fine.",
+            ],
+          },
+        ],
+      };
+    case 12:
+      return {
+        id,
+        beats: [
+          strainBeat(runCount),
+          {
+            speaker: "sister",
+            portrait: SISTER,
+            lines: [
+              "Twelve times now. I stopped counting how many times you have gone in.",
+              "I started counting how close you are coming back out.",
+            ],
+          },
+          { speaker: "system", lines: ["SECTOR SCAN: NO NEW DATA.", "ECHO FOLLOWS."] },
+          {
+            speaker: "father",
+            portrait: FATHER,
+            lines: [
+              "This bench light is the only one on the block.",
+              "Go back to bed, kiddo. I will be up a while yet.",
+              "The shop and I have some talking to do.",
+            ],
+          },
+        ],
+      };
     default: {
+      // Runs 13 and beyond rotate echoes; no new data before the finale.
       const fallbacks: StoryBeat[][] = [
         [
           strainBeat(runCount),
@@ -414,7 +664,7 @@ export function runEndScene(runCount: number): Scene {
           },
         ],
       ];
-      return { id, beats: fallbacks[(runCount - 9) % fallbacks.length] };
+      return { id, beats: fallbacks[(runCount - 13) % fallbacks.length] };
     }
   }
 }
@@ -488,6 +738,176 @@ export function finaleWinScene(): Scene {
       },
     ],
   };
+}
+
+/** Before the scripted first dive: caught at the curtain, keys not yet handed over. */
+export function tutorialIntroScene(): Scene {
+  return {
+    id: "tutorial-intro",
+    beats: [
+      { speaker: "system", lines: ["BENCH TERMINAL: FIRST BOOT.", "DAD.LOG: FOUND, UNOPENED."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Do not. I have not even given you the keys yet.",
+          "Whatever is back there, it can wait one more day. Can it not?",
+        ],
+      },
+      { speaker: "system", lines: ["OVERRIDE ACCEPTED.", "MANUAL DIVE INITIATED."] },
+    ],
+  };
+}
+
+/** After the scripted dive fails and the machine reseals, before run 1 day 1. */
+export function tutorialOutroScene(): Scene {
+  return {
+    id: "tutorial-outro",
+    beats: [
+      { speaker: "system", lines: ["CORE UNREACHED.", "THE ROOM SEALS ITSELF AGAIN."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "You scared ten years off me just now.",
+          "Whatever Dad locked in there, it stays locked. Are we clear?",
+        ],
+      },
+      { speaker: "system", lines: ["MORNING.", "THE SHOP OPENS ANYWAY."] },
+    ],
+  };
+}
+
+/**
+ * Morning cutscene for each day 1..10. Run-count-agnostic by design: the
+ * same scene plays on every run's day N, so these stay in the daily shop
+ * rhythm register and never carry Rhea's evolving theory.
+ */
+export function dayOpenScene(day: number): Scene {
+  const id = "day-open-" + day;
+  const byDay: Record<number, StoryBeat[]> = {
+    1: [
+      { speaker: "system", lines: ["DAY 1.", "SPIKE: THREE TICKETS.", "REGISTER: OPEN."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Till is counted. Spike is loaded. Try not to break anything before lunch.",
+          "Yell if the fans start smelling like smoke.",
+        ],
+      },
+      { speaker: "system", lines: ["THE CURTAIN AT THE BACK DOES NOT MOVE.", "IT NEVER DOES."] },
+    ],
+    2: [
+      { speaker: "system", lines: ["DAY 2.", "STRAIN CARRIES OVER.", "THE COFFEE DOES NOT."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Pot is fresh. Drink it before it is not.",
+          "The Kestrel courier drone is back. Same customer, new complaint.",
+        ],
+      },
+    ],
+    3: [
+      { speaker: "system", lines: ["DAY 3.", "WORD IS GETTING AROUND."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Somebody asked if we fix possessed machines now.",
+          "I told them we fix intrusions. They looked disappointed either way.",
+        ],
+      },
+      { speaker: "system", lines: ["THE TICKET SPIKE IS GETTING TALLER.", "SO IS THE LINE OUTSIDE."] },
+    ],
+    4: [
+      { speaker: "system", lines: ["DAY 4.", "THE INTRUSIONS ARE PACING THEMSELVES.", "WATCH FOR IT."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: ["Ledger is balanced. Barely.", "Four tickets came in already and it is not even ten."],
+      },
+    ],
+    5: [
+      { speaker: "system", lines: ["DAY 5.", "HALFWAY.", "THE BACK ROOM HAS BEEN QUIET. JUST QUIET."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Halfway through the book and the shop is still standing. Small miracles.",
+          "Eat something. I will not ask twice.",
+        ],
+      },
+      {
+        speaker: "system",
+        still: STILL_LOCKED,
+        lines: ["THE PADLOCK CATCHES THE LIGHT WHEN THE SUN COMES THROUGH THE CURTAIN.", "STILL CLOSED."],
+      },
+    ],
+    6: [
+      { speaker: "system", lines: ["DAY 6.", "THREE TICKETS. NO EXCUSES."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Coffee is on the bench. Drink it before it becomes a science experiment.",
+          "The Ledgerstone pawn vault sent someone over again. Good, they pay on time.",
+        ],
+      },
+    ],
+    7: [
+      { speaker: "system", lines: ["DAY 7.", "THE HARD CASES ARE FINDING YOU."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Take them anyway. Hard cases pay better and complain less.",
+          "Three tickets. One of them looks like it bites.",
+        ],
+      },
+    ],
+    8: [
+      { speaker: "system", lines: ["DAY 8.", "STRAIN IS A BUDGET.", "SPEND IT LIKE RENT IS DUE."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "The register drawer is getting fat with customer receipts again.",
+          "Do the deposit before you dive into anything. Please.",
+        ],
+      },
+    ],
+    9: [
+      { speaker: "system", lines: ["DAY 9.", "LAST DAY OF PAYING WORK.", "TOMORROW THE BACK ROOM SETTLES UP."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: [
+          "Last three tickets before the books close for the cycle.",
+          "Whatever is waiting for you tomorrow, it can wait one more day of customers first.",
+        ],
+      },
+    ],
+    10: [
+      { speaker: "system", lines: ["DAY 10.", "NO TICKETS ON THE SPIKE.", "THE BACK ROOM SETTLES UP TODAY."] },
+      {
+        speaker: "sister",
+        still: STILL_COUNTER,
+        lines: [
+          "No customers today. Just you, the curtain, and that padlock.",
+          "I am not going to pretend I am fine with this. I am going to make coffee instead.",
+        ],
+      },
+      { speaker: "system", lines: ["THE PADLOCK WAITS WHERE IT ALWAYS WAITS.", "TODAY IT EITHER LETS GO OR IT DOES NOT."] },
+      {
+        speaker: "sister",
+        portrait: SISTER,
+        lines: ["Go on, then.", "I will be at the counter. Same as always."],
+      },
+    ],
+  };
+  return { id, beats: byDay[day] ?? byDay[1] };
 }
 
 /** Short terminal one-liners for each day 1..9 morning. */

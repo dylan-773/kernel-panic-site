@@ -15,7 +15,15 @@ import {
   scanDesc,
 } from "../../game/content/kit";
 import { Scene } from "../../game/content/story";
-import { GameState, PATCH_COST, PATCH_HEAL, RunAction } from "../../game/run-reducer";
+import {
+  DAY_REST_REGEN,
+  GameState,
+  PATCH_CELL_COST,
+  PATCH_CELL_MAX,
+  PATCH_COST,
+  PATCH_HEAL,
+  RunAction,
+} from "../../game/run-reducer";
 import { MetaState, RunState } from "../../game/save";
 
 export function customerById(id: string): CustomerProfile {
@@ -35,7 +43,16 @@ const SPEAKER_NAME: Record<string, string> = {
   companion: "???",
 };
 
-export function StoryScene({ scene, onDone }: { scene: Scene; onDone: () => void }) {
+export function StoryScene({
+  scene,
+  onDone,
+  tag,
+}: {
+  scene: Scene;
+  onDone: () => void;
+  /** Persistent corner chrome, e.g. "DAY 4" on morning scenes. */
+  tag?: string;
+}) {
   const [beat, setBeat] = useState(0);
   useEffect(() => setBeat(0), [scene.id]);
   const b = scene.beats[beat];
@@ -48,6 +65,7 @@ export function StoryScene({ scene, onDone }: { scene: Scene; onDone: () => void
   };
   return (
     <div className="kp-story" onClick={advance}>
+      {tag && <span className="kp-story-daytag">{tag}</span>}
       {b.still && (
         <div className="kp-story-still">
           <img src={b.still} alt="" width={576} height={384} />
@@ -117,6 +135,7 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
         <span>STRAIN {run.strain}</span>
         <span>{run.credits} cr</span>
         <span>RAM {run.ramPerTurn}/turn</span>
+        {run.patchCells > 0 && <span>CELLS x{run.patchCells}</span>}
         <span>
           KIT S{run.kit.scanTier}/A{run.kit.attackTier}/D{run.kit.defendTier}
         </span>
@@ -409,6 +428,19 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
 
 export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
   const kit = run.kit;
+  // Night rest already applied by the reducer; animate the fill from the
+  // pre-rest value once per mount, silent when the meter was already full.
+  const [regenShown, setRegenShown] = useState(false);
+  useEffect(() => {
+    if (run.lastRegen <= 0) return;
+    const t = setTimeout(() => {
+      setRegenShown(true);
+      sfx("dayCloseRegen", { bus: "ui" });
+    }, 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const strainShown = regenShown || run.lastRegen <= 0 ? run.strain : run.strain - run.lastRegen;
   const tierBtn = (
     pick: "scan" | "attack" | "defend",
     tier: number,
@@ -433,6 +465,15 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         <h2>DAY {run.day} CLOSED</h2>
         <p>One upgrade holds for the rest of the run. Pick.</p>
       </header>
+      <div className="kp-regen">
+        <span>STRAIN</span>
+        <div className="kp-strain-bar">
+          <div className="kp-strain-fill" style={{ width: `${strainShown}%` }} />
+        </div>
+        {regenShown && run.lastRegen > 0 && (
+          <em className="kp-regen-pop">+{run.lastRegen} STRAIN</em>
+        )}
+      </div>
       <div className="kp-upgrade-grid">
         <button type="button" className="kp-upg" onClick={() => dispatch({ type: "chooseUpgrade", pick: "ram" })}>
           <strong>+1 RAM / TURN</strong>
@@ -450,13 +491,45 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
           type="button"
           className="kp-btn-ghost"
           disabled={run.credits < PATCH_COST || run.strain >= 100}
-          onClick={() => dispatch({ type: "buyPatch" })}
+          onClick={() => {
+            sfx("granted", { bus: "ui" });
+            dispatch({ type: "buyPatch" });
+          }}
         >
           NIGHT PATCH: +{PATCH_HEAL} STRAIN ({PATCH_COST} cr)
         </button>
         <span className="kp-rail-dim">
-          STRAIN {run.strain}/100 - {run.credits} cr
+          STRAIN {run.strain}/100 - {run.credits} cr - rest restored +{DAY_REST_REGEN}
         </span>
+      </div>
+      <div className="kp-patchrow kp-cellrow">
+        <button
+          type="button"
+          className="kp-btn-ghost"
+          disabled={run.credits < PATCH_CELL_COST || run.patchCells >= PATCH_CELL_MAX}
+          title={
+            run.patchCells >= PATCH_CELL_MAX
+              ? `HOLDING MAX (${PATCH_CELL_MAX})`
+              : run.credits < PATCH_CELL_COST
+                ? `NEED ${PATCH_CELL_COST} CR`
+                : undefined
+          }
+          onClick={() => {
+            sfx("granted", { bus: "ui" });
+            dispatch({ type: "buyPatchCell" });
+          }}
+        >
+          BUY PATCH CELL ({PATCH_CELL_COST} cr)
+        </button>
+        <span className="kp-rail-dim">
+          PATCH CELLS {run.patchCells}/{PATCH_CELL_MAX}
+        </span>
+        <span className="kp-cell-pips" aria-hidden="true">
+          {Array.from({ length: PATCH_CELL_MAX }).map((_, i) => (
+            <span key={i} className={i < run.patchCells ? "kp-pip kp-cell-pip-on" : "kp-pip"} />
+          ))}
+        </span>
+        <span className="kp-rail-dim">One slag block becomes a live cross junction. Single use.</span>
       </div>
     </div>
   );
@@ -478,10 +551,6 @@ export function FinalePre({
       <header className="kp-screen-head">
         <h2>DAY 10</h2>
       </header>
-      <div className="kp-finale-copy">
-        <p>No tickets today. The counter is dark. The only machine left is the one in the back room.</p>
-        <p>It has watched you work for nine days. It will not go easy. It never once has.</p>
-      </div>
       <div className="kp-screen-actions">
         <button type="button" className="kp-btn-ghost" onClick={onConfigureKit}>
           CONFIGURE KIT

@@ -29,11 +29,12 @@ export type RunAction =
   | { type: "setAttackMode"; mode: AttackMode }
   | { type: "setDefendMode"; mode: DefendMode }
   | { type: "startDuel" }
-  | { type: "duelFinished"; won: boolean; chip: number; capWin: boolean }
+  | { type: "duelFinished"; won: boolean; chip: number; capWin: boolean; cellsUsed: number }
   | { type: "pickAugment"; id: AugmentId }
   | { type: "resultNext" }
   | { type: "chooseUpgrade"; pick: "ram" | "scan" | "attack" | "defend" }
   | { type: "buyPatch" }
+  | { type: "buyPatchCell" }
   | { type: "startFinale" }
   | { type: "endRunAck" }
   | { type: "toggleSound" }
@@ -44,6 +45,10 @@ export const START_STRAIN = 100;
 export const PATCH_COST = 60;
 export const PATCH_HEAL = 12;
 export const MAX_RAM = 9;
+/** Strain restored for free when a day closes. */
+export const DAY_REST_REGEN = 10;
+export const PATCH_CELL_COST = 35;
+export const PATCH_CELL_MAX = 3;
 
 function genDayJobs(runSeed: number, day: number): JobInstance[] {
   const cfg = DAY_CONFIGS[day];
@@ -117,6 +122,8 @@ export function runReducer(state: GameState, action: RunAction): GameState {
         strain: START_STRAIN,
         ramPerTurn: BASE_RAM,
         credits: 0,
+        patchCells: 0,
+        lastRegen: 0,
         kit: baseRunKit(),
         jobs: genDayJobs(action.seed, 1),
         jobsDone: [false, false, false],
@@ -130,9 +137,19 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     case "storyDone": {
       if (!run) return state;
       if (run.screen === "opener") {
-        // Run 1 walks into the machine blind; later runs skip straight to
-        // day one (the opener scene covers the ritual attempt).
-        const screen = run.runNumber === 1 ? "tutorial" : "day";
+        // Run 1 walks into the machine blind; later runs open on day
+        // one's morning scene (the opener covers the ritual attempt).
+        const screen = run.runNumber === 1 ? "tutIntro" : "dayOpen";
+        return { ...state, run: { ...run, screen } };
+      }
+      if (run.screen === "tutIntro") {
+        return { ...state, run: { ...run, screen: "tutorial" } };
+      }
+      if (run.screen === "tutOutro") {
+        return { ...state, run: { ...run, screen: "dayOpen" } };
+      }
+      if (run.screen === "dayOpen") {
+        const screen = run.day === FINAL_DAY ? "finalePre" : "day";
         return { ...state, run: { ...run, screen } };
       }
       if (run.screen === "finaleWin" || run.screen === "runEnd") {
@@ -143,7 +160,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
 
     case "tutorialDone": {
       if (!run || run.screen !== "tutorial") return state;
-      return { ...state, run: { ...run, screen: "day", strain: START_STRAIN } };
+      return { ...state, run: { ...run, screen: "tutOutro", strain: START_STRAIN } };
     }
 
     case "pickJob": {
@@ -207,6 +224,12 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       // A dry augment cache pays out as salvage instead.
       const pay = jobPayFor(run, action.capWin) + (draft.length === 0 ? 25 : 0);
       const jobsDone = run.jobsDone.map((d, i) => (i === run.activeJob ? true : d));
+      const cellsLeft = Math.max(0, run.patchCells - action.cellsUsed);
+      // Clean Run: a chip-zero win banks a patch cell.
+      const patchCells =
+        action.chip === 0 && run.kit.augments.includes("cleanRun")
+          ? Math.min(PATCH_CELL_MAX, cellsLeft + 1)
+          : cellsLeft;
 
       // Zero by any means ends the run, a bled-out win included.
       const screen = strain <= 0 ? "runEnd" : "result";
@@ -216,6 +239,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
           ...run,
           credits: run.credits + pay,
           strain,
+          patchCells,
           jobsDone,
           screen,
           lastResult: {
@@ -259,7 +283,13 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       if (!allDone) {
         return { ...state, run: { ...run, activeJob: null, screen: "day" } };
       }
-      return { ...state, run: { ...run, activeJob: null, screen: "upgrade" } };
+      // The shop closes for the night: rest restores strain as the
+      // upgrade screen opens, so the meter visibly fills there.
+      const strain = Math.min(100, run.strain + DAY_REST_REGEN);
+      return {
+        ...state,
+        run: { ...run, activeJob: null, strain, lastRegen: strain - run.strain, screen: "upgrade" },
+      };
     }
 
     case "chooseUpgrade": {
@@ -271,10 +301,11 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       else if (action.pick === "attack") kit.attackTier = Math.min(3, kit.attackTier + 1) as RunKit["attackTier"];
       else kit.defendTier = Math.min(3, kit.defendTier + 1) as RunKit["defendTier"];
       const day = run.day + 1;
+      // Every morning opens on its cutscene; day 10's frames the finale.
       if (day === FINAL_DAY) {
         return {
           ...state,
-          run: { ...run, ramPerTurn, kit, day, jobs: [], jobsDone: [], screen: "finalePre" },
+          run: { ...run, ramPerTurn, kit, day, jobs: [], jobsDone: [], screen: "dayOpen" },
         };
       }
       return {
@@ -286,7 +317,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
           day,
           jobs: genDayJobs(run.runSeed, day),
           jobsDone: [false, false, false],
-          screen: "day",
+          screen: "dayOpen",
         },
       };
     }
@@ -300,6 +331,19 @@ export function runReducer(state: GameState, action: RunAction): GameState {
           ...run,
           credits: run.credits - PATCH_COST,
           strain: Math.min(100, run.strain + PATCH_HEAL),
+        },
+      };
+    }
+
+    case "buyPatchCell": {
+      if (!run || run.screen !== "upgrade") return state;
+      if (run.credits < PATCH_CELL_COST || run.patchCells >= PATCH_CELL_MAX) return state;
+      return {
+        ...state,
+        run: {
+          ...run,
+          credits: run.credits - PATCH_CELL_COST,
+          patchCells: run.patchCells + 1,
         },
       };
     }

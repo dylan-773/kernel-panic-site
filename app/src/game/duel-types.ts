@@ -70,6 +70,8 @@ export interface DuelKit {
   attackMode: AttackMode;
   defendMode: DefendMode;
   augments: AugmentId[];
+  /** Single-use slag fills carried into the dive. */
+  patchCells: number;
 }
 
 export const BASE_KIT: DuelKit = {
@@ -79,6 +81,7 @@ export const BASE_KIT: DuelKit = {
   attackMode: "redirect",
   defendMode: "purge",
   augments: [],
+  patchCells: 0,
 };
 
 export interface DuelConfig {
@@ -99,6 +102,8 @@ export interface DuelConfig {
   oppTier: Tier;
   /** The mode Analyze reports; prioritized and guaranteed early. */
   dominant: OppMode;
+  /** Per-day override of the par margin's flat term (defaults to PAR_FLAT). */
+  parFlat?: number;
   tutorial?: boolean;
 }
 
@@ -128,6 +133,10 @@ export interface SideEcon {
   attacksCast: number;
   /** Enemy traps that have fired on this side (feeds the strain formula). */
   trapsFired: number;
+  /** Manual rotations this dive (the par meter). Program twists are free. */
+  rotations: number;
+  /** A patch cell was placed this turn (one per turn). */
+  placedThisTurn: boolean;
 }
 
 export interface DuelState {
@@ -152,8 +161,12 @@ export interface DuelState {
   oppNextIntent: string | null;
   /** TAP LINE augment: the intrusion's traced route, cleared each round. */
   routeTrace: { round: number; cells: number[] } | null;
-  /** Opponent route cost measured at duel start (strain formula baseline). */
+  /** Opponent route cost measured at duel start (progress readouts). */
   oppStartCost: number;
+  /** Rotation budget for a clean win; going over chips strain. */
+  par: number;
+  /** Patch cells still unspent this dive. */
+  patchCells: number;
   strainChip: number;
   rngState: RngState;
   claimCounter: number;

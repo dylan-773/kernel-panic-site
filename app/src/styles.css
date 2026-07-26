@@ -2895,3 +2895,90 @@ img {
   color: var(--kp-crimson);
   letter-spacing: 0.16em;
 }
+
+/* Par meter: the rotation budget readout in the dive header. */
+.kp-par { color: var(--kp-steel, #9fb2cc); }
+
+.kp-par-over {
+  color: var(--kp-crimson);
+  text-shadow: 0 0 12px rgba(207, 75, 69, 0.5);
+  animation: kp-par-throb 1.1s ease-in-out infinite;
+}
+
+@keyframes kp-par-throb {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Patch cell button in the dive dock. */
+.kp-prog-place .kp-ability-name { color: var(--kp-gold, #d9a53f); }
+
+/* Over-par tag and crossing pop on the par readout. */
+.kp-par-over-tag {
+  font-family: var(--kp-display);
+  font-size: 9px;
+  font-style: normal;
+  margin-left: 6px;
+  color: var(--kp-crimson);
+  letter-spacing: 0.14em;
+}
+
+.kp-par-warn-pop {
+  animation: kp-par-warn-pop 180ms steps(4);
+}
+
+@keyframes kp-par-warn-pop {
+  from { transform: scale(1.5); }
+  to { transform: scale(1); }
+}
+
+/* Gold aiming ring on slag blocks while a patch cell is armed. */
+.kp-dblock-patchable .kp-dblock-body {
+  stroke: var(--kp-gold, #d9a53f);
+  stroke-width: 2;
+  animation: kp-legal-pulse 1s steps(2) infinite;
+}
+
+/* Day-open cutscene chrome. */
+.kp-story-daytag {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 3;
+  font-family: var(--kp-display);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--kp-gold, #d9a53f);
+  border: 2px solid var(--kp-line);
+  background: var(--kp-panel);
+  padding: 4px 8px;
+}
+
+/* Day-close rest meter and patch cell pips. */
+.kp-regen {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--kp-dim);
+  margin-bottom: 12px;
+}
+
+.kp-regen .kp-strain-bar { flex: 0 0 220px; }
+
+.kp-regen-pop {
+  font-style: normal;
+  color: var(--kp-signal);
+  animation: kp-banked-pop 300ms steps(3);
+}
+
+.kp-cell-pips {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.kp-cell-pip-on {
+  background: var(--kp-gold, #d9a53f);
+  border-color: var(--kp-gold, #d9a53f);
+}

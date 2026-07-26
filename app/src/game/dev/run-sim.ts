@@ -11,12 +11,28 @@
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../content/arc";
 import { CUSTOMERS } from "../content/customers";
 import { AUGMENTS, MODE_TELL } from "../content/kit";
-import { finaleWinScene, runEndScene, runOpenerScene, DAY_LINES } from "../content/story";
+import {
+  dayOpenScene,
+  finaleWinScene,
+  runEndScene,
+  runOpenerScene,
+  tutorialIntroScene,
+  tutorialOutroScene,
+  DAY_LINES,
+} from "../content/story";
 import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
 import { BASE_KIT, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
-import { GameState, ownsAugment, runReducer, RunAction } from "../run-reducer";
+import {
+  DAY_REST_REGEN,
+  GameState,
+  ownsAugment,
+  PATCH_CELL_COST,
+  PATCH_CELL_MAX,
+  runReducer,
+  RunAction,
+} from "../run-reducer";
 import { EMPTY_META, RunKit } from "../save";
 
 let dispatchCount = 0;
@@ -44,7 +60,7 @@ function playDuelToEnd(duel: DuelState): { won: boolean; chip: number; capWin: b
   return { won: duel.phase === "won", chip: duel.strainChip, capWin: duel.winKind === "cap" };
 }
 
-function duelKitOf(kit: RunKit) {
+function duelKitOf(kit: RunKit, patchCells: number) {
   return {
     scanTier: kit.scanTier,
     attackTier: kit.attackTier,
@@ -52,6 +68,7 @@ function duelKitOf(kit: RunKit) {
     attackMode: kit.attackMode,
     defendMode: kit.defendMode,
     augments: kit.augments,
+    patchCells,
   };
 }
 
@@ -64,12 +81,21 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
 
   s = d(s, { type: "storyDone" });
   if (s.run!.runNumber === 1) {
-    must(s.run!.screen === "tutorial", "run 1 goes to tutorial");
+    must(s.run!.screen === "tutIntro", "run 1 goes to the tutorial intro");
+    must(tutorialIntroScene().beats.length >= 2, "tutorial intro has beats");
+    s = d(s, { type: "storyDone" });
+    must(s.run!.screen === "tutorial", "tutorial after its intro");
     const t = createDuel(tutorialConfig(), mixSeed(s.run!.runSeed, 0, 0), BASE_KIT, s.run!.ramPerTurn);
     const res = playDuelToEnd(t);
     must(!res.won, "tutorial is unwinnable");
     s = d(s, { type: "tutorialDone" });
+    must(s.run!.screen === "tutOutro", "tutorial outro after the seal");
+    must(tutorialOutroScene().beats.length >= 2, "tutorial outro has beats");
+    s = d(s, { type: "storyDone" });
   }
+  must(s.run!.screen === "dayOpen", "morning scene before the board");
+  must(dayOpenScene(s.run!.day).beats.length >= 2, "day-open scene has beats");
+  s = d(s, { type: "storyDone" });
   must(s.run!.screen === "day", "day board reached");
 
   let guard = 0;
@@ -90,12 +116,22 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       const duel = createDuel(
         dayDuelConfig(run.day, job.dominant, job.tier, job.kitSeed),
         mixSeed(run.runSeed, run.day, idx),
-        duelKitOf(s.run!.kit),
+        duelKitOf(s.run!.kit, s.run!.patchCells),
         s.run!.ramPerTurn,
       );
+      must(duel.par > 0, "par computed for every dive");
       const res = playDuelToEnd(duel);
+      const cellsUsed = s.run!.patchCells - duel.patchCells;
       const strainBefore = s.run!.strain;
-      s = d(s, { type: "duelFinished", won: res.won, chip: res.chip, capWin: res.capWin });
+      const cellsBefore = s.run!.patchCells;
+      const ownsCleanRun = s.run!.kit.augments.includes("cleanRun");
+      s = d(s, { type: "duelFinished", won: res.won, chip: res.chip, capWin: res.capWin, cellsUsed });
+      if (res.won && s.run) {
+        const spent = cellsBefore - cellsUsed;
+        const expected =
+          res.chip === 0 && ownsCleanRun ? Math.min(PATCH_CELL_MAX, spent + 1) : spent;
+        must(s.run.patchCells === expected, "patch cells consumed on win (clean-run bank included)");
+      }
       if (!res.won) {
         must(s.run!.screen === "runEnd", "loss ends run");
         must(s.run!.strain === 0, "loss zeroes strain");
@@ -120,23 +156,50 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         }
       }
     } else if (run.screen === "result") {
+      const strainBefore = run.strain;
       s = d(s, { type: "resultNext" });
+      if (s.run!.screen === "upgrade") {
+        must(
+          s.run!.strain === Math.min(100, strainBefore + DAY_REST_REGEN),
+          "night rest restores strain",
+        );
+        must(s.run!.lastRegen === s.run!.strain - strainBefore, "lastRegen recorded");
+      }
+    } else if (run.screen === "dayOpen") {
+      must(dayOpenScene(run.day).beats.length >= 2, "day-open scene has beats");
+      s = d(s, { type: "storyDone" });
+      must(
+        s.run!.screen === (run.day === FINAL_DAY ? "finalePre" : "day"),
+        "morning scene lands on the board",
+      );
     } else if (run.screen === "upgrade") {
+      // Exercise the shop: buy a patch cell when affordable, then close.
+      const creditsBefore = run.credits;
+      s = d(s, { type: "buyPatchCell" });
+      if (creditsBefore >= PATCH_CELL_COST && run.patchCells < PATCH_CELL_MAX) {
+        must(s.run!.patchCells === run.patchCells + 1, "patch cell bought");
+        must(s.run!.credits === creditsBefore - PATCH_CELL_COST, "patch cell paid for");
+      }
+      must(s.run!.patchCells <= PATCH_CELL_MAX, "patch cell pouch capped");
+      const strainBeforeClose = s.run!.strain;
       const cycle = ["ram", "scan", "attack", "defend"] as const;
       s = d(s, { type: "chooseUpgrade", pick: cycle[guard % 4] });
       must(s.run!.day > run.day, "day advanced after upgrade");
       must(s.run!.kit.scanTier <= 3 && s.run!.kit.attackTier <= 3, "tiers capped");
+      must(s.run!.strain >= strainBeforeClose, "day close never drains strain");
+      must(s.run!.strain <= 100, "strain capped at 100");
     } else if (run.screen === "finalePre") {
       s = d(s, { type: "startFinale" });
       must(s.run!.screen === "duel", "finale dives directly");
       const duel = createDuel(
         finaleConfig(),
         mixSeed(run.runSeed, FINAL_DAY, 9),
-        duelKitOf(s.run!.kit),
+        duelKitOf(s.run!.kit, s.run!.patchCells),
         s.run!.ramPerTurn,
       );
       const res = playDuelToEnd(duel);
-      s = d(s, { type: "duelFinished", won: res.won, chip: res.chip, capWin: res.capWin });
+      const cellsUsed = s.run!.patchCells - duel.patchCells;
+      s = d(s, { type: "duelFinished", won: res.won, chip: res.chip, capWin: res.capWin, cellsUsed });
       if (res.won) {
         must(s.run!.screen === "finaleWin", "finale win screen");
         must(s.meta.machineOpened, "machine opened");

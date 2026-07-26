@@ -16,20 +16,22 @@ export interface DayConfig {
   abilityFreq: number;
   minCost: number;
   headStart: number;
+  /** Flat term of the par margin for this day (tapers late; see kit.ts). */
+  parFlat: number;
   /** Opponent difficulty tier of the day's three jobs. */
   jobTiers: [number, number, number];
 }
 
 export const DAY_CONFIGS: Record<number, DayConfig> = {
-  1: { grid: [9, 7], oppRam: 6, greed: 0.7, abilityFreq: 0.2, minCost: 16, headStart: 0, jobTiers: [1, 1, 1] },
-  2: { grid: [9, 7], oppRam: 6, greed: 0.73, abilityFreq: 0.25, minCost: 16, headStart: 0, jobTiers: [1, 1, 2] },
-  3: { grid: [9, 9], oppRam: 6, greed: 0.86, abilityFreq: 0.45, minCost: 18, headStart: 1, jobTiers: [1, 2, 2] },
-  4: { grid: [9, 9], oppRam: 6, greed: 0.85, abilityFreq: 0.45, minCost: 18, headStart: 2, jobTiers: [2, 2, 3] },
-  5: { grid: [11, 9], oppRam: 7, greed: 0.88, abilityFreq: 0.55, minCost: 20, headStart: 2, jobTiers: [2, 3, 3] },
-  6: { grid: [11, 9], oppRam: 7, greed: 0.92, abilityFreq: 0.6, minCost: 20, headStart: 2, jobTiers: [3, 3, 3] },
-  7: { grid: [11, 9], oppRam: 7, greed: 0.93, abilityFreq: 0.65, minCost: 21, headStart: 3, jobTiers: [3, 3, 4] },
-  8: { grid: [11, 11], oppRam: 8, greed: 0.95, abilityFreq: 0.7, minCost: 22, headStart: 3, jobTiers: [4, 4, 4] },
-  9: { grid: [11, 11], oppRam: 9, greed: 0.96, abilityFreq: 0.75, minCost: 22, headStart: 4, jobTiers: [4, 4, 5] },
+  1: { grid: [9, 7], oppRam: 6, greed: 0.7, abilityFreq: 0.2, minCost: 16, headStart: 0, parFlat: 6, jobTiers: [1, 1, 1] },
+  2: { grid: [9, 7], oppRam: 6, greed: 0.73, abilityFreq: 0.25, minCost: 16, headStart: 0, parFlat: 5, jobTiers: [1, 1, 2] },
+  3: { grid: [9, 9], oppRam: 6, greed: 0.86, abilityFreq: 0.45, minCost: 18, headStart: 1, parFlat: 5, jobTiers: [1, 2, 2] },
+  4: { grid: [9, 9], oppRam: 6, greed: 0.89, abilityFreq: 0.45, minCost: 18, headStart: 2, parFlat: 4, jobTiers: [2, 2, 3] },
+  5: { grid: [11, 9], oppRam: 7, greed: 0.92, abilityFreq: 0.55, minCost: 20, headStart: 2, parFlat: 4, jobTiers: [2, 3, 3] },
+  6: { grid: [11, 9], oppRam: 7, greed: 0.98, abilityFreq: 0.6, minCost: 20, headStart: 2, parFlat: 3, jobTiers: [3, 3, 3] },
+  7: { grid: [11, 9], oppRam: 7, greed: 0.99, abilityFreq: 0.65, minCost: 21, headStart: 3, parFlat: 2, jobTiers: [3, 3, 4] },
+  8: { grid: [11, 11], oppRam: 8, greed: 0.97, abilityFreq: 0.7, minCost: 22, headStart: 3, parFlat: 2, jobTiers: [4, 4, 4] },
+  9: { grid: [11, 11], oppRam: 9, greed: 0.96, abilityFreq: 0.75, minCost: 22, headStart: 4, parFlat: 1, jobTiers: [4, 4, 5] },
 };
 
 export const FINAL_DAY = 10;
@@ -95,6 +97,7 @@ export function dayDuelConfig(
     oppDefendModes: kit.defendModes,
     oppTier: kit.oppTier,
     dominant,
+    parFlat: d.parFlat,
   };
 }
 

@@ -2,6 +2,7 @@ import { ATTACK_WIDTH, DEFEND_WIDTH, Program } from "./content/kit";
 import {
   applyRotate,
   applyCast,
+  applyPlace,
   attackTargetLegal,
   defendTargetLegal,
   emit,
@@ -11,7 +12,7 @@ import {
   say,
   tierOf,
 } from "./duel-actions";
-import { canRotate } from "./duel-power";
+import { canPlace, canRotate } from "./duel-power";
 import { DuelState } from "./duel-types";
 import { oppStep } from "./opponent";
 
@@ -23,6 +24,7 @@ import { oppStep } from "./opponent";
 
 export type DuelAction =
   | { type: "rotate"; idx: number }
+  | { type: "place"; idx: number }
   | { type: "cast"; prog: Program; targets: number[] }
   | { type: "endTurn" }
   | { type: "oppStep" }
@@ -75,6 +77,19 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
         return deny(s, "Out of reach. Work outward from your territory.");
       }
       applyRotate(s, "player", action.idx);
+      return s;
+    }
+
+    case "place": {
+      if (!playerCanAct(state)) return state;
+      const s = cloneState(state);
+      if (s.patchCells < 1) return deny(s, "No patch cells left.");
+      if (s.econ.player.placedThisTurn) return deny(s, "One patch cell per turn.");
+      if (s.econ.player.ram < 1) return deny(s, "No RAM left. End the turn.");
+      if (!canPlace(s, "player", action.idx)) {
+        return deny(s, "Patch cells only fill slag within reach of your territory.");
+      }
+      applyPlace(s, "player", action.idx);
       return s;
     }
 

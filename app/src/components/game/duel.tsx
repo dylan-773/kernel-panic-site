@@ -27,7 +27,7 @@ import {
   programUnlocked,
   tierOf,
 } from "../../game/duel-actions";
-import { canRotate, routeCost } from "../../game/duel-power";
+import { canPlace, canRotate, routeCost } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
 import { DuelConfig, DuelKit, DuelState, ROUND_CAP } from "../../game/duel-types";
@@ -66,6 +66,7 @@ export interface DuelFinish {
   won: boolean;
   chip: number;
   capWin: boolean;
+  cellsUsed: number;
 }
 
 export interface DuelScreenProps {
@@ -182,6 +183,11 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
       if (soundOn) sfx("backdoorCast");
       pulse = mk("DEFUSED", "kp-pulse-info");
       break;
+    case "place":
+      // Utility placement, not a combat impact: no shake.
+      if (soundOn) sfx("patchPlace");
+      pulse = mk("CELL PLACED", "kp-pulse-info");
+      break;
     case "lock":
       if (soundOn) sfx("shieldCast");
       break;
@@ -203,6 +209,9 @@ export function DuelScreen(props: DuelScreenProps) {
     () => createDuel(cfg, seed, kit, ramPerTurn),
   );
   const [targeting, setTargeting] = useState<Targeting | null>(null);
+  const [placing, setPlacing] = useState(false);
+  const [parPopKey, setParPopKey] = useState(0);
+  const prevOverRef = useRef(0);
   const [infoProg, setInfoProg] = useState<Program | null>(null);
   const [shake, setShake] = useState<{ mag: number; key: number }>({ mag: 0, key: 0 });
   const [pulses, setPulses] = useState<Pulse[]>([]);
@@ -249,6 +258,15 @@ export function DuelScreen(props: DuelScreenProps) {
         if (soundOn) sfx("aim", { jitter: 0.04 });
         continue;
       }
+      // Over-par rotations click on top of the normal rotate sound.
+      if (
+        e.kind === "rotate" &&
+        soundOn &&
+        state.turn === "player" &&
+        state.econ.player.rotations > state.par
+      ) {
+        sfx("overParTick", { jitter: 0.05 });
+      }
       if (e.kind.startsWith("oppCast:")) {
         const mode = e.kind.slice(8);
         const lines = VIRUS_LINES[mode] ?? VIRUS_LINES.armHalt;
@@ -276,11 +294,19 @@ export function DuelScreen(props: DuelScreenProps) {
     return () => clearTimeout(t);
   }, [virus]);
 
+  // The par readout pops exactly once, at the rotation that crosses it.
+  const overPar = state.econ.player.rotations - state.par;
+  useEffect(() => {
+    if (overPar > 0 && prevOverRef.current <= 0) setParPopKey((k) => k + 1);
+    prevOverRef.current = overPar;
+  }, [overPar]);
+
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Escape") {
         setTargeting(null);
+        setPlacing(false);
       } else if (e.code === "KeyE" && playerTurn && !targeting) {
         dispatch({ type: "endTurn" });
       }
@@ -293,6 +319,13 @@ export function DuelScreen(props: DuelScreenProps) {
   const legal = useMemo(() => {
     const out = new Set<number>();
     if (!playerTurn) return out;
+    if (placing) {
+      if (econ.ram < 1) return out;
+      for (let i = 0; i < state.cells.length; i++) {
+        if (canPlace(state, "player", i)) out.add(i);
+      }
+      return out;
+    }
     if (targeting) {
       for (let i = 0; i < state.cells.length; i++) {
         if (targeting.picked.includes(i)) continue;
@@ -310,7 +343,7 @@ export function DuelScreen(props: DuelScreenProps) {
       if (canRotate(state, "player", i)) out.add(i);
     }
     return out;
-  }, [state, playerTurn, targeting, econ.ram]);
+  }, [state, playerTurn, targeting, placing, econ.ram]);
 
   const aimed = useMemo(() => {
     const a = state.oppTurn.aim;
@@ -334,6 +367,11 @@ export function DuelScreen(props: DuelScreenProps) {
 
   const onCell = (idx: number) => {
     if (!playerTurn) return;
+    if (placing) {
+      dispatch({ type: "place", idx });
+      setPlacing(false);
+      return;
+    }
     if (targeting) {
       const picked = [...targeting.picked, idx];
       if (picked.length >= targeting.want) {
@@ -350,6 +388,7 @@ export function DuelScreen(props: DuelScreenProps) {
   const onProgram = (prog: Program) => {
     if (!playerTurn || econ.used[prog]) return;
     if (soundOn) playUiPress();
+    setPlacing(false);
     if (prog === "scan") {
       dispatch({ type: "cast", prog: "scan", targets: [] });
       return;
@@ -382,6 +421,7 @@ export function DuelScreen(props: DuelScreenProps) {
       won: state.phase === "won",
       chip: state.strainChip,
       capWin: state.winKind === "cap",
+      cellsUsed: kit.patchCells - state.patchCells,
     });
   };
 
@@ -422,6 +462,14 @@ export function DuelScreen(props: DuelScreenProps) {
           <span className="kp-osk-item">DAY {props.day === 0 ? "--" : props.day}</span>
           <span className="kp-osk-item">
             R{Math.min(state.round, ROUND_CAP)}/{ROUND_CAP}
+          </span>
+          <span
+            key={parPopKey}
+            className={`kp-osk-item kp-par ${overPar > 0 ? "kp-par-over" : ""} ${parPopKey > 0 ? "kp-par-warn-pop" : ""}`}
+            title="Rotation budget. Rotations past par cost Neural Strain on a win."
+          >
+            PAR {econ.rotations}/{state.par}
+            {overPar > 0 && <i className="kp-par-over-tag">+{overPar} OVER</i>}
           </span>
           <div className="kp-strain" title="Neural Strain">
             <span>STRAIN</span>
@@ -464,6 +512,18 @@ export function DuelScreen(props: DuelScreenProps) {
             </div>
           )}
           {coach && <div className="kp-coach">{coach}</div>}
+          {placing && (
+            <div className="kp-targetbar">
+              <span>
+                {legal.size > 0
+                  ? "PATCH CELL: pick a slag block within reach (1 RAM)"
+                  : "PATCH CELL: no slag block in reach"}
+              </span>
+              <button type="button" onClick={() => setPlacing(false)}>
+                CANCEL (ESC)
+              </button>
+            </div>
+          )}
           {targeting && (
             <div className="kp-targetbar">
               <span>
@@ -556,6 +616,33 @@ export function DuelScreen(props: DuelScreenProps) {
             );
           })}
         </div>
+
+        {!cfg.tutorial && (
+          <button
+            type="button"
+            className={`kp-ability kp-prog-place ${placing ? "kp-ability-arming" : ""} ${state.patchCells < 1 ? "kp-prog-offline" : ""}`}
+            disabled={
+              !playerTurn ||
+              state.patchCells < 1 ||
+              econ.placedThisTurn ||
+              econ.ram < 1
+            }
+            onClick={() => {
+              if (soundOn) playUiPress();
+              setTargeting(null);
+              setPlacing((p) => !p);
+            }}
+          >
+            <span className="kp-ability-name">PATCH CELL</span>
+            <span className="kp-ability-meta">
+              {state.patchCells < 1
+                ? "NONE HELD"
+                : econ.placedThisTurn
+                  ? `x${state.patchCells} - USED`
+                  : `x${state.patchCells} - 1R`}
+            </span>
+          </button>
+        )}
 
         <button
           type="button"

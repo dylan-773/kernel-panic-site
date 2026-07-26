@@ -2,6 +2,7 @@ import {
   DefendMode,
   LOCK_ROUNDS,
   OppMode,
+  PAR_STRAIN_PER,
   PROGRAM_COST,
   Program,
   SCAN_RANGE,
@@ -12,7 +13,7 @@ import {
   cascadeRam,
 } from "./content/kit";
 import { computeDuelPower, routeCost, routePlan, runFlood } from "./duel-power";
-import { DuelState, ROUND_CAP, Side, TrapKind, otherSide } from "./duel-types";
+import { DuelState, PIECE_X, ROUND_CAP, Side, TrapKind, otherSide } from "./duel-types";
 import { nextU32 } from "./rng";
 
 /**
@@ -80,10 +81,10 @@ export function finishDuel(s: DuelState, winner: Side, kind: "core" | "cap"): vo
   s.winKind = kind;
   s.notice = null;
   if (winner === "player") {
-    const remaining = routeCost(s, "opp");
-    const rem = isFinite(remaining) ? Math.min(remaining, s.oppStartCost) : s.oppStartCost;
-    const progress = Math.max(0, Math.min(1, 1 - rem / s.oppStartCost));
-    let chip = Math.max(0, Math.round(50 * (progress - 0.5)));
+    // Strain is an efficiency bill: rotations past par, sprung traps,
+    // and dragging the link to the cap. At or under par, clean, zero.
+    const over = Math.max(0, s.econ.player.rotations - s.par);
+    let chip = PAR_STRAIN_PER * over;
     chip += 4 * s.econ.player.trapsFired;
     if (kind === "cap") chip += 10;
     s.strainChip = Math.min(40, chip);
@@ -118,12 +119,12 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
       emit(s, side === "player" ? "cascadeRam" : "cascadeRamOpp", bonus);
     }
 
-    if (f.trapFired) {
+    for (const trap of f.trapsFired) {
       const econ = s.econ[side];
       const enemyEcon = s.econ[otherSide(side)];
       econ.trapsFired++;
-      if (f.trapFired.kind === "halt") {
-        econ.drainNext += f.trapFired.drain;
+      if (trap.kind === "halt") {
+        econ.drainNext += trap.drain;
         if (side === acting) {
           actingTrapped = true;
         } else {
@@ -133,18 +134,18 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
         say(
           s,
           side === "player"
-            ? "HALT TRAP. Your signal hit an armed node. Turn lost."
-            : "Your halt trap fired. The intrusion chokes on it.",
+            ? "HALT TRAP. Your signal hit an armed node. The cascade lands, then your turn is forfeit."
+            : "Your halt trap fired. The intrusion stalls a full cycle.",
         );
       } else {
-        econ.drainNext += f.trapFired.drain;
-        enemyEcon.drainNext -= f.trapFired.drain;
-        emit(s, "siphonFire", f.trapFired.drain);
+        econ.drainNext += trap.drain;
+        enemyEcon.drainNext -= trap.drain;
+        emit(s, "siphonFire", trap.drain);
         say(
           s,
           side === "player"
-            ? `SIPHON TRAP. It bleeds ${f.trapFired.drain} RAM out of your next turn.`
-            : `Your siphon fired. ${f.trapFired.drain} RAM drains out of its next turn, into yours.`,
+            ? `SIPHON TRAP. It bleeds ${trap.drain} RAM out of your next turn.`
+            : `Your siphon fired. ${trap.drain} RAM drains out of its next turn, into yours.`,
         );
       }
       if (otherSide(side) === "player" && kitHas(s, "echoTap")) {
@@ -174,7 +175,37 @@ export function applyRotate(s: DuelState, side: Side, idx: number): boolean {
   c.rot = (c.rot + 1) % 4;
   c.spin += 1;
   econ.ram -= 1;
+  econ.rotations += 1;
   emit(s, "rotate");
+  const trapped = settleFloods(s, side);
+  if (trapped && s.phase === "playing") {
+    if (side === "player") forceEndPlayerTurn(s);
+    else endOppTurn(s);
+  }
+  return true;
+}
+
+/**
+ * Spend a patch cell: the slag block becomes an open cross junction.
+ * 1 RAM, once per turn, consumes a cell. Does not count against par.
+ */
+export function applyPlace(s: DuelState, side: Side, idx: number): boolean {
+  const econ = s.econ[side];
+  if (econ.ram < 1 || s.patchCells < 1 || econ.placedThisTurn) return false;
+  const c = s.cells[idx];
+  c.kind = "node";
+  c.base = PIECE_X;
+  c.rot = 0;
+  // Slag Ward rider: the fresh junction opens under cover.
+  if (side === "player" && kitHas(s, "slagWard")) {
+    c.wardThroughRound = Math.max(c.wardThroughRound, s.round);
+    c.wardBy = "player";
+  }
+  econ.ram -= 1;
+  econ.placedThisTurn = true;
+  s.patchCells -= 1;
+  emit(s, "place");
+  say(s, "PATCH CELL. The slag melts into a live cross junction.");
   const trapped = settleFloods(s, side);
   if (trapped && s.phase === "playing") {
     if (side === "player") forceEndPlayerTurn(s);
@@ -201,6 +232,8 @@ export function redirectTargetLegal(s: DuelState, caster: Side, idx: number): bo
   if (!c || c.kind !== "node") return false;
   if (c.owner === caster) return false; // own nodes rotate for 1 RAM instead
   if (c.lockedThroughRound >= s.round && c.lockedBy === otherSide(caster)) return false;
+  // An enemy ward refuses redirects the same way it refuses traps.
+  if (c.wardThroughRound >= s.round && c.wardBy === otherSide(caster)) return false;
   return true;
 }
 
@@ -309,6 +342,11 @@ export function applyCast(
         const c = s.cells[idx];
         c.rot = (c.rot + 1) % 4;
         c.spin += 1;
+        // Jam Anchor rider: the twist holds for a round.
+        if (side === "player" && kitHas(s, "jamAnchor")) {
+          c.lockedThroughRound = Math.max(c.lockedThroughRound, s.round);
+          c.lockedBy = "player";
+        }
       }
       if (side === "player") s.lastPlayerHitRound = s.round;
       emit(s, "redirect", targets.length);
@@ -323,7 +361,9 @@ export function applyCast(
       const kind: TrapKind = mode === "armSiphon" ? "siphon" : "halt";
       let drain = 0;
       if (kind === "siphon") {
-        drain = SIPHON_STEAL + (side === "player" && kitHas(s, "siphonPlus") ? 1 : 0);
+        drain =
+          SIPHON_STEAL[tierOf(s, side, "attack")] +
+          (side === "player" && kitHas(s, "siphonPlus") ? 1 : 0);
       } else if (side === "player" && kitHas(s, "tripwire")) {
         drain = 2;
       }
@@ -352,6 +392,10 @@ export function applyCast(
         s.cells[idx].trap = null;
         n++;
       }
+    }
+    // Sweep Credit: a purge that actually lands pays for itself.
+    if (n > 0 && side === "player" && kitHas(s, "sweepCredit")) {
+      econ.ram += PROGRAM_COST;
     }
     emit(s, "purge", n);
     say(
@@ -415,6 +459,7 @@ export function applyCast(
 function beginTurnEconomy(s: DuelState, side: Side): boolean {
   const econ = s.econ[side];
   econ.used = { scan: false, attack: false, defend: false };
+  econ.placedThisTurn = false;
   if (econ.loseNextTurn) {
     econ.loseNextTurn = false;
     econ.ram = 0;

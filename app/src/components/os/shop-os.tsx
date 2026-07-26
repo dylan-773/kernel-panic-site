@@ -10,7 +10,14 @@ import {
   scanDesc,
 } from "../../game/content/kit";
 import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../../game/content/arc";
-import { finaleWinScene, runEndScene, runOpenerScene } from "../../game/content/story";
+import {
+  dayOpenScene,
+  finaleWinScene,
+  runEndScene,
+  runOpenerScene,
+  tutorialIntroScene,
+  tutorialOutroScene,
+} from "../../game/content/story";
 import { mixSeed } from "../../game/duel-setup";
 import { visibleJournal } from "../../game/content/journal";
 import { runReducer } from "../../game/run-reducer";
@@ -53,9 +60,13 @@ function windowTitle(screen: string | null): string {
     case "analyze":
       return "DIAGNOSTIC.LOG";
     case "opener":
+    case "tutIntro":
+    case "tutOutro":
     case "runEnd":
     case "finaleWin":
       return "SHOPFRONT";
+    case "dayOpen":
+      return "MORNING.LOG";
     case "upgrade":
       return "NIGHT.SYS";
     case "finalePre":
@@ -68,7 +79,16 @@ function windowTitle(screen: string | null): string {
 }
 
 /** Flow screens where closing the window has no sensible meaning. */
-const UNCLOSABLE_SCREENS = new Set(["opener", "runEnd", "finaleWin", "upgrade", "result"]);
+const UNCLOSABLE_SCREENS = new Set([
+  "opener",
+  "tutIntro",
+  "tutOutro",
+  "dayOpen",
+  "runEnd",
+  "finaleWin",
+  "upgrade",
+  "result",
+]);
 
 function ManualContent() {
   return (
@@ -257,7 +277,7 @@ export function ShopOS() {
         ? finaleConfig()
         : dayDuelConfig(run.day, job?.dominant ?? "redirect", job?.tier ?? 1, job?.kitSeed ?? run.runSeed);
     const duelKit = isTutorial
-      ? { scanTier: 1 as const, attackTier: 1 as const, defendTier: 1 as const, attackMode: "redirect" as const, defendMode: "purge" as const, augments: [] }
+      ? { scanTier: 1 as const, attackTier: 1 as const, defendTier: 1 as const, attackMode: "redirect" as const, defendMode: "purge" as const, augments: [], patchCells: 0 }
       : {
           scanTier: run.kit.scanTier,
           attackTier: run.kit.attackTier,
@@ -265,6 +285,7 @@ export function ShopOS() {
           attackMode: run.kit.attackMode,
           defendMode: run.kit.defendMode,
           augments: run.kit.augments,
+          patchCells: run.patchCells,
         };
     return (
       <div className="kp-os">
@@ -299,7 +320,7 @@ export function ShopOS() {
           onToggleSound={() => dispatch({ type: "toggleSound" })}
           onFinish={(r) => {
             if (isTutorial) dispatch({ type: "tutorialDone" });
-            else dispatch({ type: "duelFinished", won: r.won, chip: r.chip, capWin: r.capWin });
+            else dispatch({ type: "duelFinished", won: r.won, chip: r.chip, capWin: r.capWin, cellsUsed: r.cellsUsed });
           }}
         />
         <div className="kp-crt" aria-hidden="true" />
@@ -315,6 +336,25 @@ export function ShopOS() {
       case "opener":
         content = (
           <StoryScene scene={runOpenerScene(run.runNumber)} onDone={() => dispatch({ type: "storyDone" })} />
+        );
+        break;
+      case "tutIntro":
+        content = (
+          <StoryScene scene={tutorialIntroScene()} onDone={() => dispatch({ type: "storyDone" })} />
+        );
+        break;
+      case "tutOutro":
+        content = (
+          <StoryScene scene={tutorialOutroScene()} onDone={() => dispatch({ type: "storyDone" })} />
+        );
+        break;
+      case "dayOpen":
+        content = (
+          <StoryScene
+            scene={dayOpenScene(run.day)}
+            tag={`DAY ${run.day}`}
+            onDone={() => dispatch({ type: "storyDone" })}
+          />
         );
         break;
       case "day":

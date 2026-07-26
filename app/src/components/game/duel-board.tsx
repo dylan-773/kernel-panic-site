@@ -76,6 +76,8 @@ const DuelCellView = memo(function DuelCellView({
     if (lit) classes.push("kp-dlit");
   }
   if (legal) classes.push("kp-dlegal", "kp-dlive");
+  // Blocks are only ever legal while a patch cell is being aimed.
+  if (legal && cell.kind === "block") classes.push("kp-dblock-patchable");
   if (selected) classes.push("kp-dselected");
   if (traced) classes.push("kp-dtraced");
 

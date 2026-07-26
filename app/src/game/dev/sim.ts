@@ -23,7 +23,14 @@ function playPlayerTurn(s: DuelState): void {
   if (s.phase === "playing" && s.turn === "player") endPlayerTurn(s);
 }
 
-export function playDuel(s: DuelState): { rounds: number; won: boolean; cap: boolean; chip: number } {
+export function playDuel(s: DuelState): {
+  rounds: number;
+  won: boolean;
+  cap: boolean;
+  chip: number;
+  rotations: number;
+  par: number;
+} {
   let guard = 0;
   while (s.phase === "playing" && guard++ < 4000) {
     if (s.turn === "player") playPlayerTurn(s);
@@ -35,6 +42,8 @@ export function playDuel(s: DuelState): { rounds: number; won: boolean; cap: boo
     won: s.phase === "won",
     cap: s.winKind === "cap",
     chip: s.strainChip,
+    rotations: s.econ.player.rotations,
+    par: s.par,
   };
 }
 
@@ -50,8 +59,12 @@ function runDay(label: string, mk: (seed: number) => DuelState): void {
   let chipWins = 0;
   let minRounds = Infinity;
   let maxRounds = 0;
+  let parTotal = 0;
+  let rotTotal = 0;
+  let overWins = 0;
   for (let i = 0; i < SEEDS; i++) {
     const s = mk(mixSeed(1337, i));
+    const par = s.par;
     const r = playDuel(s);
     roundsTotal += r.rounds;
     minRounds = Math.min(minRounds, r.rounds);
@@ -60,12 +73,18 @@ function runDay(label: string, mk: (seed: number) => DuelState): void {
       wins++;
       chipTotal += r.chip;
       chipWins++;
+      parTotal += par;
+      rotTotal += r.rotations;
+      if (r.rotations > par) overWins++;
     }
     if (r.cap) caps++;
   }
   const avgChip = chipWins > 0 ? (chipTotal / chipWins).toFixed(1) : "-";
+  const avgPar = chipWins > 0 ? (parTotal / chipWins).toFixed(0) : "-";
+  const avgRot = chipWins > 0 ? (rotTotal / chipWins).toFixed(1) : "-";
+  const overPct = chipWins > 0 ? pct(overWins, chipWins) : "-";
   console.log(
-    `${label.padEnd(10)} win ${pct(wins, SEEDS).padStart(6)}  cap ${pct(caps, SEEDS).padStart(5)}  rounds ${(roundsTotal / SEEDS).toFixed(1)} (${minRounds}-${maxRounds})  chip/win ${avgChip}`,
+    `${label.padEnd(10)} win ${pct(wins, SEEDS).padStart(6)}  cap ${pct(caps, SEEDS).padStart(5)}  rounds ${(roundsTotal / SEEDS).toFixed(1)} (${minRounds}-${maxRounds})  chip/win ${avgChip}  par ${avgPar} rot ${avgRot} over ${overPct}`,
   );
 }
 

@@ -62,7 +62,7 @@ export const JOURNAL_ENTRIES: JournalEntry[] = [
     title: "THE DRAWER OF BILLS",
     date: "bottom drawer of the bench",
     body: [
-      "MERIDIAN NEUROCARE - FINAL NOTICE. Patient: Overby. Diagnosis code NF-3, neurofilament degradation, stage three. Balance outstanding: more than this shop clears in a year.",
+      "MERIDIAN NEUROCARE - FINAL NOTICE. Account No. 118823. Diagnosis code NF-3, neurofilament degradation, stage three. Balance outstanding: more than this shop clears in a year.",
       "There are eleven of these. He filed them under W for whatever.",
       "Stage three of what? He fixed computers. He was not a diver. As far as I knew.",
     ],

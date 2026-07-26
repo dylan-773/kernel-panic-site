@@ -17,7 +17,10 @@ export interface MetaState {
 
 export type RunScreen =
   | "opener"
+  | "tutIntro"
   | "tutorial"
+  | "tutOutro"
+  | "dayOpen"
   | "day"
   | "analyze"
   | "build"
@@ -68,6 +71,10 @@ export interface RunState {
   strain: number;
   ramPerTurn: number;
   credits: number;
+  /** Single-use slag fills bought at day close, carried across the run. */
+  patchCells: number;
+  /** Strain restored by the most recent day-close rest (for the meter fill). */
+  lastRegen: number;
   kit: RunKit;
   jobs: JobInstance[];
   jobsDone: boolean[];
@@ -122,12 +129,17 @@ function parseRun(raw: string): RunState | null {
   ) {
     return null;
   }
+  // Pre-patch-cell saves resume with an empty pouch.
+  if (typeof p.patchCells !== "number") p.patchCells = 0;
+  if (typeof p.lastRegen !== "number") p.lastRegen = 0;
   // Never resume into a transient screen; land on the day board.
   if (p.screen === "duel" || p.screen === "analyze" || p.screen === "build") {
     p.screen = "day";
     p.activeJob = null;
   }
-  if (p.screen === "tutorial" || p.screen === "opener") p.screen = "opener";
+  if (p.screen === "tutorial" || p.screen === "tutIntro" || p.screen === "tutOutro" || p.screen === "opener") {
+    p.screen = "opener";
+  }
   return p;
 }
 

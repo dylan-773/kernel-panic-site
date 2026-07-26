@@ -27,7 +27,18 @@ export const WARD_RADIUS: Record<Tier, number> = { 1: 1, 2: 2, 3: 3 };
 
 export const LOCK_ROUNDS = 2;
 export const WARD_ROUNDS = 2;
-export const SIPHON_STEAL = 2;
+/** Siphon steal scales with the caster's ATTACK tier (width buys bite too). */
+export const SIPHON_STEAL: Record<Tier, number> = { 1: 2, 2: 3, 3: 4 };
+
+/**
+ * Par: the rotation budget for a clean dive, computed at board gen from
+ * the player's starting route cost. Rotations past par chip strain on a
+ * win; program twists and patch cells never count against it.
+ */
+export const PAR_RATE = 1.25;
+export const PAR_FLAT = 2;
+/** Strain lost per rotation past par. */
+export const PAR_STRAIN_PER = 2;
 
 /** Neutral junctions within this many steps of your territory can be rotated. */
 export const BASE_REACH = 2;
@@ -70,11 +81,11 @@ export function attackModeDesc(mode: AttackMode, tier: Tier): string {
   const n = w === 1 ? "one node" : `${w} nodes`;
   switch (mode) {
     case "redirect":
-      return `Twist ${w === 1 ? "an enemy or open junction" : `${w} enemy or open junctions`} a quarter turn. Cuts power to everything downstream.`;
+      return `Twist ${w === 1 ? "any enemy or open junction" : `${w} enemy or open junctions`} anywhere on the board a quarter turn, no reach limit. Cuts power to everything downstream.`;
     case "armHalt":
-      return `Plant a halt trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When their signal claims it, their flood stops dead and they lose a full turn.`;
+      return `Plant a halt trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When their signal claims it, they lose a full turn.`;
     case "armSiphon":
-      return `Plant a siphon trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When it fires, ${SIPHON_STEAL} RAM drains from their next turn into yours.`;
+      return `Plant a siphon trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When it fires, ${SIPHON_STEAL[tier]} RAM drains from their next turn into yours.`;
   }
 }
 
@@ -86,7 +97,7 @@ export function defendModeDesc(mode: DefendMode, tier: Tier): string {
     case "lock":
       return `Freeze ${w === 1 ? "a junction" : `${w} junctions`} for ${LOCK_ROUNDS} rounds: nothing rotates or redirects ${w === 1 ? "it" : "them"}. Bolt down your line, or a junction it needs.`;
     case "ward":
-      return `Ward a junction and everything within ${WARD_RADIUS[tier]} of it for ${WARD_ROUNDS} rounds: no new traps land there.`;
+      return `Ward a junction and everything within ${WARD_RADIUS[tier]} of it for ${WARD_ROUNDS} rounds: no new traps land there, and REDIRECT cannot touch it.`;
   }
 }
 
@@ -126,7 +137,7 @@ export const AUGMENTS: AugmentDef[] = [
     name: "SIPHON DRIVER",
     kind: "config",
     attackMode: "armSiphon",
-    desc: `ATTACK config: plant siphon traps. A sprung trap moves ${SIPHON_STEAL} RAM from its next turn into yours.`,
+    desc: "ATTACK config: plant siphon traps. A sprung trap drains RAM from its next turn into yours, more at higher ATTACK tiers.",
   },
   {
     id: "cfgLock",
@@ -140,7 +151,7 @@ export const AUGMENTS: AugmentDef[] = [
     name: "WARD DRIVER",
     kind: "config",
     defendMode: "ward",
-    desc: "DEFEND config: ward an area so no new traps can land in it.",
+    desc: "DEFEND config: ward an area so no new traps can land in it, and REDIRECT cannot touch anything inside it either.",
   },
   {
     id: "longArms",
@@ -202,6 +213,30 @@ export const AUGMENTS: AugmentDef[] = [
     kind: "boost",
     desc: "Whenever one of your traps fires, gain 2 RAM on your next turn.",
   },
+  {
+    id: "jamAnchor",
+    name: "JAM ANCHOR",
+    kind: "boost",
+    desc: "Your REDIRECT also freezes the junction it twists for 1 round. Nothing rotates or redirects it back while it holds.",
+  },
+  {
+    id: "sweepCredit",
+    name: "SWEEP CREDIT",
+    kind: "boost",
+    desc: "PURGE refunds its own RAM cost whenever it defuses at least one trap.",
+  },
+  {
+    id: "cleanRun",
+    name: "CLEAN RUN",
+    kind: "boost",
+    desc: "Win a dive at or under par with no traps sprung, and bank one patch cell for the rest of the run.",
+  },
+  {
+    id: "slagWard",
+    name: "SLAG WARD",
+    kind: "boost",
+    desc: "Every patch cell you place also wards that new junction for 1 round. Nothing can trap it the instant it opens.",
+  },
 ];
 
 export const AUGMENT_BY_ID: Record<AugmentId, AugmentDef> = Object.fromEntries(
@@ -218,5 +253,5 @@ export const MODE_TELL: Record<OppMode, string> = {
   armSiphon: "Diagnostic flags siphon traps. It wants your RAM more than your route. Scan early.",
   purge: "Diagnostic flags self-cleaning routines. Traps you plant will not stick around.",
   lock: "Diagnostic flags clamp routines. Junctions you need will freeze solid.",
-  ward: "Diagnostic flags warding fields. Whole approaches will refuse your traps.",
+  ward: "Diagnostic flags warding fields. Whole approaches will refuse your traps and shrug off your redirects.",
 };
