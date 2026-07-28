@@ -20,7 +20,7 @@ import {
   tutorialOutroScene,
   DAY_LINES,
 } from "../content/story";
-import { endPlayerTurn } from "../duel-actions";
+import { endPlayerTurn, playerHasRoute } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
 import { BASE_KIT, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
@@ -63,6 +63,23 @@ function playDuelToEnd(duel: DuelState): {
     }
   }
   must(duel.phase !== "playing", "duel terminated");
+  // Every ending has to be nameable. A loss the machine won without ever
+  // touching the core used to print "Its flood got there first", which is
+  // how a legitimate route verdict read as a broken win check.
+  must(duel.winKind !== null, "finished duel records how it ended");
+  must(
+    duel.endReason !== null && duel.endReason.length > 0,
+    `finished duel (${duel.winKind}) carries a player-facing reason`,
+  );
+  if (duel.winKind === "severed") {
+    // The verdict is only allowed when no rotation AND no unspent patch cell
+    // can reopen a corridor. Holding a usable cell must never lose the dive.
+    must(!playerHasRoute(duel), "severed verdict means no route exists, patch cells included");
+    must(duel.phase === "lost", "severed is a loss");
+  }
+  if (duel.winKind === "gridlock") {
+    must(duel.phase === "won", "a deadlocked board resolves in the player's favor");
+  }
   return {
     won: duel.phase === "won",
     chip: duel.strainChip,
@@ -145,6 +162,9 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         cellsUsed,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        scans: duel.econ.player.scansCast,
+        attackCasts: duel.econ.player.attacksCast,
+        defendCasts: duel.econ.player.defendsCast,
       });
       if (res.won && s.run) {
         const spent = cellsBefore - cellsUsed;
@@ -203,8 +223,18 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       must(s.run!.patchCells <= PATCH_CELL_MAX, "patch cell pouch capped");
       const strainBeforeClose = s.run!.strain;
       const cycle = ["ram", "scan", "attack", "defend"] as const;
+      // The night is two steps now: picking must NOT end the day, so the
+      // shop rows stay spendable after the upgrade is chosen.
+      must(s.run!.nightPick === null, "night opens undecided");
+      s = d(s, { type: "closeNight" });
+      must(s.run!.day === run.day, "night cannot close without a pick");
       s = d(s, { type: "chooseUpgrade", pick: cycle[guard % 4] });
-      must(s.run!.day > run.day, "day advanced after upgrade");
+      must(s.run!.day === run.day, "choosing an upgrade does not end the night");
+      must(s.run!.nightPick === cycle[guard % 4], "night pick recorded");
+      s = d(s, { type: "buyPatch" });
+      s = d(s, { type: "closeNight" });
+      must(s.run!.nightPick === null, "night pick cleared on close");
+      must(s.run!.day > run.day, "day advanced after closing the night");
       must(s.run!.kit.scanTier <= 3 && s.run!.kit.attackTier <= 3, "tiers capped");
       must(s.run!.strain >= strainBeforeClose, "day close never drains strain");
       must(s.run!.strain <= 100, "strain capped at 100");
@@ -227,6 +257,9 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         cellsUsed,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        scans: duel.econ.player.scansCast,
+        attackCasts: duel.econ.player.attacksCast,
+        defendCasts: duel.econ.player.defendsCast,
       });
       if (res.won) {
         must(s.run!.screen === "finaleWin", "finale win screen");

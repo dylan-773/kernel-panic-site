@@ -4,7 +4,9 @@ import {
   ATTACK_MODE_LABEL,
   AUGMENTS,
   DEFEND_MODE_LABEL,
+  MODE_LABEL,
   MODE_TELL,
+  OppMode,
   attackModeDesc,
   defendModeDesc,
   scanDesc,
@@ -21,7 +23,7 @@ import {
 import { mixSeed } from "../../game/duel-setup";
 import { visibleJournal } from "../../game/content/journal";
 import { tip } from "../../game/content/teaching";
-import { runReducer } from "../../game/run-reducer";
+import { PATCH_CELL_MAX, runReducer } from "../../game/run-reducer";
 import {
   EMPTY_META,
   applyOneTimeSoundReset,
@@ -185,12 +187,72 @@ function JournalContent({ meta }: { meta: import("../../game/save").MetaState })
   );
 }
 
+/** Highest-count key in a tally, or null when nothing has been recorded. */
+function topOf(counts: Record<string, number>): { key: string; n: number } | null {
+  let best: { key: string; n: number } | null = null;
+  for (const [key, n] of Object.entries(counts)) {
+    if (!best || n > best.n) best = { key, n };
+  }
+  return best;
+}
+
+/**
+ * LEDGER.LOG: the current run above the line, the lifetime tallies below.
+ * The run rows reset every attempt, which left nothing on screen that a
+ * player could point at after twenty of them.
+ */
+function LedgerContent({
+  meta,
+  run,
+}: {
+  meta: import("../../game/save").MetaState;
+  run: import("../../game/save").RunState | null;
+}) {
+  const st = meta.stats;
+  const mode = topOf(st.modeUse);
+  const lethal = topOf(st.lostTo);
+  const lethalName = lethal ? customerById(lethal.key).name : null;
+  return (
+    <div className="kp-ledgerwin">
+      {run ? (
+        <>
+          <div><span>ATTEMPT</span><em>{run.runNumber}</em></div>
+          <div><span>DAY</span><em>{Math.min(run.day, FINAL_DAY)}/10</em></div>
+          <div><span>NEURAL STRAIN</span><em>{run.strain}/100</em></div>
+          <div><span>CREDITS</span><em>{run.credits} cr</em></div>
+          <div><span>RAM / TURN</span><em>{run.ramPerTurn}</em></div>
+          <div><span>PATCH CELLS</span><em>{run.patchCells}/{PATCH_CELL_MAX}</em></div>
+          <div><span>KIT TIERS</span><em>S{run.kit.scanTier} A{run.kit.attackTier} D{run.kit.defendTier}</em></div>
+          <div><span>AUGMENTS</span><em>{run.kit.augments.length}/{AUGMENTS.filter((a) => a.kind === "boost").length}</em></div>
+        </>
+      ) : (
+        <div><span>ACTIVE RUN</span><em>none</em></div>
+      )}
+      <h4 className="kp-ledger-head">LIFETIME</h4>
+      <div><span>ATTEMPTS</span><em>{meta.runCount}</em></div>
+      <div><span>MACHINE BEATEN</span><em>{st.runsWon}</em></div>
+      <div><span>JOBS CLEARED</span><em>{st.divesCleared}</em></div>
+      <div><span>DIVES LOST</span><em>{st.divesLost}</em></div>
+      <div><span>SCANS RUN</span><em>{st.scans}</em></div>
+      <div>
+        <span>MOST USED MODE</span>
+        <em>{mode ? `${MODE_LABEL[mode.key as OppMode] ?? mode.key} x${mode.n}` : "none yet"}</em>
+      </div>
+      <div>
+        <span>MOST LETHAL</span>
+        <em>{lethalName ? `${lethalName} x${lethal!.n}` : "nobody yet"}</em>
+      </div>
+    </div>
+  );
+}
+
 export function ShopOS() {
   const [state, dispatch] = useReducer(runReducer, { meta: EMPTY_META, run: null });
   const [ready, setReady] = useState(false);
   const [booted, setBooted] = useState(false);
   const [slot, setSlot] = useState<number | null>(null);
   const [startOpen, setStartOpen] = useState(false);
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
   const wm = useWindowManager(WIN_DEFS);
 
   useEffect(() => {
@@ -336,6 +398,9 @@ export function ShopOS() {
                 cellsUsed: r.cellsUsed,
                 overRotations: r.overRotations,
                 trapsFired: r.trapsFired,
+                scans: r.scans,
+                attackCasts: r.attackCasts,
+                defendCasts: r.defendCasts,
               });
           }}
         />
@@ -487,20 +552,7 @@ export function ShopOS() {
                 ) : (
                   <p className="kp-rail-dim kp-float-pad">No active run. Open the shop first.</p>
                 ))}
-              {def.id === "ledger" &&
-                (run ? (
-                  <div className="kp-ledgerwin">
-                    <div><span>ATTEMPT</span><em>{run.runNumber}</em></div>
-                    <div><span>DAY</span><em>{Math.min(run.day, FINAL_DAY)}/10</em></div>
-                    <div><span>NEURAL STRAIN</span><em>{run.strain}/100</em></div>
-                    <div><span>CREDITS</span><em>{run.credits} cr</em></div>
-                    <div><span>RAM / TURN</span><em>{run.ramPerTurn}</em></div>
-                    <div><span>KIT TIERS</span><em>S{run.kit.scanTier} A{run.kit.attackTier} D{run.kit.defendTier}</em></div>
-                    <div><span>AUGMENTS</span><em>{run.kit.augments.length}/{AUGMENTS.filter((a) => a.kind === "boost").length}</em></div>
-                  </div>
-                ) : (
-                  <p className="kp-rail-dim kp-float-pad">No active run.</p>
-                ))}
+              {def.id === "ledger" && <LedgerContent meta={meta} run={run} />}
             </FloatingWindow>
           );
         })}
@@ -548,15 +600,7 @@ export function ShopOS() {
           <button
             type="button"
             className="kp-task-btn kp-task-danger"
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Abandon this run? This ends it exactly like a loss: kit, credits, and patch cells all reset for the next attempt.",
-                )
-              ) {
-                dispatch({ type: "endRunAck" });
-              }
-            }}
+            onClick={() => setConfirmAbandon(true)}
           >
             ABANDON
           </button>
@@ -565,6 +609,35 @@ export function ShopOS() {
           SND {meta.sound ? "ON" : "OFF"}
         </button>
       </footer>
+      {/* An in-OS dialog rather than window.confirm: a browser chrome prompt
+          on top of the desktop broke the fiction and styled nothing. */}
+      {confirmAbandon && run && (
+        <div className="kp-modal" role="dialog" aria-modal="true" aria-label="Abandon this run">
+          <div className="kp-modal-box">
+            <h3>ABANDON THIS RUN?</h3>
+            <p>
+              This ends attempt {run.runNumber} exactly like a loss. Kit tiers, augments, credits
+              and patch cells all reset for the next attempt. The journal and the ledger keep what
+              they already hold.
+            </p>
+            <div className="kp-modal-actions">
+              <button type="button" className="kp-btn-ghost" onClick={() => setConfirmAbandon(false)}>
+                KEEP DIVING
+              </button>
+              <button
+                type="button"
+                className="kp-btn kp-btn-danger"
+                onClick={() => {
+                  setConfirmAbandon(false);
+                  dispatch({ type: "endRunAck" });
+                }}
+              >
+                ABANDON
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="kp-crt" aria-hidden="true" />
     </div>
     </TeachProvider>

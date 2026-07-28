@@ -144,6 +144,13 @@ export interface RoutePlan {
   path: RouteStep[];
   /** Only the nodes still needing rotation. */
   steps: RouteStep[];
+  /**
+   * The reroute search ran out of attempts and this plan still crosses
+   * itself at one junction: the cost is a lower bound and executing the
+   * queue verbatim will not conduct. A route DOES exist, which is the part
+   * callers testing for "walled off" must not get wrong.
+   */
+  approx?: boolean;
 }
 
 /**
@@ -274,10 +281,14 @@ export function routePlan(
   // A route that crosses itself demanding two different orientations of one
   // node is physically impossible: reroute around the conflicted junction.
   if (conflict !== -1) {
-    if (depth >= 4) return null;
-    const nextAvoid = new Set(avoid ?? []);
-    nextAvoid.add(conflict);
-    return routePlan(s, side, nextAvoid, depth + 1);
+    if (depth < 4) {
+      const nextAvoid = new Set(avoid ?? []);
+      nextAvoid.add(conflict);
+      return routePlan(s, side, nextAvoid, depth + 1);
+    }
+    // Out of reroutes. Reporting null here reads as "no route exists", which
+    // is how a still-winnable dive used to end in an instant severed loss.
+    return { cost: total, path, steps: path.filter((p) => p.turns > 0), approx: true };
   }
   return { cost: total, path, steps: path.filter((p) => p.turns > 0) };
 }

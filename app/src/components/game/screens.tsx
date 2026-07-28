@@ -26,7 +26,8 @@ import {
   RunAction,
 } from "../../game/run-reducer";
 import { tip } from "../../game/content/teaching";
-import { MetaState, RunState } from "../../game/save";
+import { MetaState, NightPick, RunState } from "../../game/save";
+import { VERSION_LABEL } from "../../game/version";
 import { Teach } from "./teach";
 import { TapTip } from "./tap-tip";
 
@@ -313,6 +314,26 @@ export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dis
           <p>{defendModeDesc(kit.defendMode, kit.defendTier)}</p>
         </div>
 
+        {/* The pouch used to be readable only from the job board footer, so
+            a player checking their kit before a dive could not see it. */}
+        <div className="kp-kit-card kp-kit-cells">
+          <header>
+            <strong>PATCH CELLS</strong>
+            <em>
+              {run.patchCells} / {PATCH_CELL_MAX}
+            </em>
+          </header>
+          <span className="kp-cell-pips" aria-hidden="true">
+            {Array.from({ length: PATCH_CELL_MAX }).map((_, i) => (
+              <span key={i} className={i < run.patchCells ? "kp-pip kp-cell-pip-on" : "kp-pip"} />
+            ))}
+          </span>
+          <p>
+            One slag block becomes a live cross junction. 1 RAM, one per turn, single use. Bought
+            at day close, and the pouch never holds more than {PATCH_CELL_MAX}.
+          </p>
+        </div>
+
         <div className="kp-kit-card kp-kit-augs">
           <header>
             <strong>AUGMENTS</strong>
@@ -375,10 +396,31 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
       <div className="kp-result-rows">
         <div>
           <span>PAYOUT</span>
-          <em>
-            {r.pay} cr{r.capWin ? " (half rate: you hit the turn cap)" : ""}
-          </em>
+          <em>{r.pay} cr</em>
         </div>
+        {/* Itemized because the ticket rate on the job board is not what
+            lands: a cap win halves it, a dry augment cache adds salvage on
+            top, and a bare total made both look like a miscount. */}
+        {(r.capWin || r.salvage > 0) && (
+          <ul className="kp-chip-breakdown">
+            <li>
+              <span>ticket rate</span>
+              <em>{r.basePay} cr</em>
+            </li>
+            {r.capWin && (
+              <li>
+                <span>half rate, you hit the turn cap</span>
+                <em>-{r.basePay - Math.floor(r.basePay / 2)} cr</em>
+              </li>
+            )}
+            {r.salvage > 0 && (
+              <li>
+                <span>salvage, augment cache dry</span>
+                <em>+{r.salvage} cr</em>
+              </li>
+            )}
+          </ul>
+        )}
         <div>
           <span>NEURAL STRAIN</span>
           <em className={r.chip > 0 ? "kp-chip-bad" : ""}>
@@ -419,6 +461,19 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
             )}
           </ul>
         )}
+        {/* The augment fires on a condition the player cannot see from the
+            board. Saying so is the whole difference between a reward and a
+            coincidence. */}
+        {r.cleanRun !== null && (
+          <div className="kp-cleanrun">
+            <span>CLEAN RUN</span>
+            <em>
+              {r.cleanRun === "banked"
+                ? "At or under par, no traps sprung. One patch cell banked."
+                : `At or under par, no traps sprung. Pouch already holds the maximum of ${PATCH_CELL_MAX}.`}
+            </em>
+          </div>
+        )}
       </div>
 
       {r.draft.length > 0 ? (
@@ -444,6 +499,12 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
                   <span className="kp-draft-kind">{a.kind === "config" ? "CONFIG" : "BOOST"}</span>
                   <strong>{a.name}</strong>
                   <p>{a.desc}</p>
+                  {a.kind === "config" && (
+                    <p className="kp-draft-note">
+                      Unlocks the mode. Your active kit does not change; switch to it in
+                      LOADOUT.CFG when you want it.
+                    </p>
+                  )}
                   {picked && <em className="kp-draft-stamp">INSTALLED</em>}
                 </button>
               );
@@ -473,6 +534,13 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
 /* Upgrade (day close)                                                 */
 /* ------------------------------------------------------------------ */
 
+const NIGHT_PICK_LABEL: Record<Exclude<NightPick, null>, string> = {
+  ram: "+1 RAM / TURN",
+  scan: "the SCAN.EXE tier",
+  attack: "the ATTACK.EXE tier",
+  defend: "the DEFEND.EXE tier",
+};
+
 export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
   const kit = run.kit;
   // Night rest already applied by the reducer; animate the fill from the
@@ -488,6 +556,7 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const strainShown = regenShown || run.lastRegen <= 0 ? run.strain : run.strain - run.lastRegen;
+  const picked = run.nightPick;
   const tierBtn = (
     pick: "scan" | "attack" | "defend",
     tier: number,
@@ -496,21 +565,26 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
   ) => (
     <button
       type="button"
-      className="kp-upg"
+      className={`kp-upg ${picked === pick ? "kp-upg-picked" : ""}`}
       disabled={tier >= 3}
+      aria-pressed={picked === pick}
       onClick={() => dispatch({ type: "chooseUpgrade", pick })}
     >
       <strong>
         {label} {tier >= 3 ? "MAXED" : `T${tier} > T${tier + 1}`}
       </strong>
       <span>{detail}</span>
+      {picked === pick && <em className="kp-upg-stamp">SELECTED</em>}
     </button>
   );
   return (
     <div className="kp-screen kp-upgrade">
       <header className="kp-screen-head">
         <h2>DAY {run.day} CLOSED</h2>
-        <p>One upgrade holds for the rest of the run. Pick.</p>
+        <p>
+          One upgrade holds for the rest of the run. Pick it, spend your credits, then close the
+          night. Nothing is locked in until you do.
+        </p>
       </header>
       <div className="kp-regen">
         <span>STRAIN</span>
@@ -524,16 +598,18 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
       <div className="kp-upgrade-grid">
         <button
           type="button"
-          className="kp-upg"
+          className={`kp-upg ${picked === "ram" ? "kp-upg-picked" : ""}`}
           disabled={run.ramPerTurn >= MAX_RAM}
+          aria-pressed={picked === "ram"}
           onClick={() => dispatch({ type: "chooseUpgrade", pick: "ram" })}
         >
-          <strong>{run.ramPerTurn >= MAX_RAM ? "RAM MAXED" : "+1 RAM / TURN"}</strong>
+          <strong>{run.ramPerTurn >= MAX_RAM ? "RAM / TURN MAXED" : "+1 RAM / TURN"}</strong>
           <span>
             {run.ramPerTurn >= MAX_RAM
-              ? "Already at the per turn cap."
+              ? `Already at the per turn cap of ${MAX_RAM}.`
               : `${run.ramPerTurn} to ${run.ramPerTurn + 1}. More moves, more programs, every single turn.`}
           </span>
+          {picked === "ram" && <em className="kp-upg-stamp">SELECTED</em>}
         </button>
         {tierBtn("scan", kit.scanTier, "SCAN.EXE", "Wider sweep radius. Still always 1 RAM.")}
         {tierBtn("attack", kit.attackTier, "ATTACK.EXE", "One more node per cast: redirect or trap in bulk.")}
@@ -583,6 +659,21 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
           ))}
         </span>
         <span className="kp-rail-dim">One slag block becomes a live cross junction. Single use.</span>
+      </div>
+      <div className="kp-screen-actions kp-nightclose">
+        <span className="kp-rail-dim">
+          {picked === null
+            ? "Pick one upgrade above to close the night."
+            : `Closing the night applies ${NIGHT_PICK_LABEL[picked]} and opens day ${run.day + 1}.`}
+        </span>
+        <button
+          type="button"
+          className="kp-btn kp-btn-dive"
+          disabled={picked === null}
+          onClick={() => dispatch({ type: "closeNight" })}
+        >
+          CLOSE THE NIGHT
+        </button>
       </div>
       <Teach id="day-upgrade" />
       <Teach id="night-shop" />
@@ -638,6 +729,7 @@ export function DesktopIdle({
         <img src="/assets/px/stills/still-locked.png" alt="" width={576} height={384} />
       </div>
       <h2>KERNEL PANIC</h2>
+      <p className="kp-idle-version">{VERSION_LABEL}</p>
       {meta.machineOpened ? (
         <p className="kp-idle-sub">
           The back room is open now. The shop still takes tickets, if you want the practice.

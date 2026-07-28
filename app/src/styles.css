@@ -782,6 +782,16 @@ img {
   text-shadow: 0 0 20px rgba(233, 79, 109, 0.45);
 }
 
+/* Build stamp under the wordmark: quiet enough to ignore, present enough
+   that a playtest screenshot names the build it came from. */
+.kp-idle-version {
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--kp-dim);
+  margin-top: -6px;
+}
+
 .kp-idle-sub {
   font-family: var(--kp-term);
   font-size: 21px;
@@ -1084,6 +1094,92 @@ img {
 }
 
 /* Itemizes what actually billed strain, under the total on the result row. */
+/* KP/OS modal dialog. */
+.kp-modal {
+  /* Fixed, not absolute: .kp-os is not a containing block, and a confirm
+     dialog has to cover the desktop and the taskbar both. */
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 10, 0.72);
+  z-index: 60;
+}
+
+.kp-modal-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(460px, 88%);
+  padding: 22px;
+  background: var(--kp-panel);
+  border: 2px solid var(--kp-crimson);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5);
+}
+
+.kp-modal-box h3 {
+  font-family: var(--kp-display);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--kp-crimson);
+}
+
+.kp-modal-box p {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--kp-text);
+}
+
+.kp-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.kp-btn-danger {
+  background: var(--kp-crimson);
+  border-color: var(--kp-crimson);
+  color: #1b0a10;
+}
+
+/* CLEAN RUN confirmation: the condition is invisible on the board, so the
+   payoff has to be stated where the player is already looking. */
+.kp-cleanrun {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 2px solid var(--kp-gold);
+  background: rgba(217, 165, 63, 0.1);
+  max-width: 460px;
+}
+
+.kp-cleanrun span {
+  font-family: var(--kp-display);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--kp-gold);
+}
+
+.kp-cleanrun em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--kp-text);
+}
+
+.kp-draft-note {
+  font-size: 11px;
+  color: var(--kp-dim);
+  line-height: 1.35;
+}
+
+.kp-kit-cells .kp-cell-pips {
+  display: flex;
+  gap: 5px;
+}
+
 .kp-chip-breakdown {
   list-style: none;
   display: flex;
@@ -1149,6 +1245,31 @@ img {
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
 }
 
+/* Selected but not yet committed: the night stays open until CLOSE THE
+   NIGHT, so the pick has to look held rather than spent. */
+.kp-upg-picked {
+  position: relative;
+  border-color: var(--kp-gold);
+  background: rgba(217, 165, 63, 0.12);
+}
+
+.kp-upg-stamp {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--kp-gold);
+}
+
+.kp-nightclose {
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 .kp-upg:hover {
   border-color: var(--kp-signal);
 }
@@ -1176,6 +1297,10 @@ img {
 /* ---------- story ---------- */
 
 .kp-story {
+  /* The day tag is absolutely positioned inside this scene. Without a
+     containing block here it resolved against the floating window itself
+     and printed DAY N straight through the MORNING.LOG title bar. */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1581,6 +1706,17 @@ img {
   cursor: default;
 }
 
+/* Held open while a program is being aimed: reads as "waiting on you",
+   not as a dead button. */
+.kp-endturn-held:disabled {
+  opacity: 1;
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--kp-gold);
+  color: var(--kp-gold);
+  box-shadow: none;
+}
+
 /* ---------- board svg ---------- */
 
 .kp-dboard-bg {
@@ -1799,11 +1935,22 @@ img {
 
 /* ---------- duel overlays ---------- */
 
-.kp-toast {
+/* Top-of-board stack: threat bands first, then the notice toast, so the two
+   cannot land on top of each other when the dive gets loud. */
+.kp-topstack {
   position: absolute;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.kp-toast {
   padding: 8px 16px;
   background: var(--kp-bg0);
   border: 2px solid var(--kp-signal);
@@ -1812,14 +1959,43 @@ img {
   letter-spacing: 0.1em;
   animation: kp-toast-life 2.4s steps(8) forwards;
   pointer-events: none;
-  white-space: nowrap;
-  z-index: 5;
+  max-width: 92%;
+  text-align: center;
 }
 
 @keyframes kp-toast-life {
-  0% { opacity: 0; transform: translateX(-50%) translateY(-6px); }
-  8%, 78% { opacity: 1; transform: translateX(-50%); }
+  0% { opacity: 0; transform: translateY(-6px); }
+  8%, 78% { opacity: 1; transform: none; }
   100% { opacity: 0; }
+}
+
+/* Core-threat band. Deliberately not tied to the heartbeat sound: the
+   warning that the dive is about to end has to survive SND OFF. */
+.kp-threat {
+  padding: 5px 18px;
+  background: rgba(5, 6, 10, 0.92);
+  border: 2px solid var(--kp-crimson);
+  border-top: 0;
+  color: var(--kp-crimson);
+  font-family: var(--kp-display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.kp-threat-max {
+  animation: kp-threat-blink 700ms steps(2) infinite;
+}
+
+@keyframes kp-threat-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kp-threat-max { animation: none; }
 }
 
 .kp-coach {
@@ -2012,6 +2188,66 @@ img {
 
 .kp-result-btn:hover {
   background: var(--kp-rose-hot);
+}
+
+.kp-result-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.kp-result-btn-ghost {
+  background: transparent;
+  border-color: var(--kp-line);
+  color: var(--kp-text);
+}
+
+.kp-result-btn-ghost:hover {
+  background: transparent;
+  border-color: var(--kp-signal);
+  color: var(--kp-signal);
+}
+
+/* Board review bar: the result panel steps aside instead of covering the
+   finished grid. */
+.kp-reviewbar {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 92%;
+  padding: 10px 16px;
+  background: rgba(5, 6, 10, 0.94);
+  border: 2px solid var(--kp-line);
+  color: var(--kp-text);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  z-index: 12;
+}
+
+.kp-reviewbar button {
+  font-family: var(--kp-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  padding: 8px 14px;
+  background: var(--kp-rose);
+  border: 2px solid var(--kp-rose);
+  color: #1b0a10;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.kp-rail-sub {
+  font-style: normal;
+  color: var(--kp-dim, #7c8598);
+  font-size: 10px;
+  margin-left: 6px;
+}
+
+.kp-rail-row-warn em {
+  color: var(--kp-gold);
 }
 
 .kp-pickbox h3 {

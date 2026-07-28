@@ -229,7 +229,7 @@ export const AUGMENTS: AugmentDef[] = [
     id: "cleanRun",
     name: "CLEAN RUN",
     kind: "boost",
-    desc: "Win a dive at or under par with no traps sprung, and bank one patch cell for the rest of the run.",
+    desc: "Win a dive at or under par with no traps sprung, and bank one patch cell. The pouch still holds 3 at most, so a clean win on a full pouch banks nothing.",
   },
   {
     id: "slagWard",

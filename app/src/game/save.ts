@@ -20,7 +20,35 @@ export interface MetaState {
    * returning player still gets the explanations nothing ever gave them.
    */
   taught: string[];
+  /**
+   * Lifetime tallies, kept across runs purely for the ledger. Nothing here
+   * feeds a rule; a corrupt or missing field degrades to zero rather than
+   * costing a save.
+   */
+  stats: LifetimeStats;
 }
+
+export interface LifetimeStats {
+  /** Runs that beat the machine on day 10. */
+  runsWon: number;
+  /** Jobs cleared, tutorial excluded. */
+  divesCleared: number;
+  divesLost: number;
+  scans: number;
+  /** Casts per ATTACK and DEFEND mode id, for "most used". */
+  modeUse: Record<string, number>;
+  /** Losses per customer id, for "most lethal". */
+  lostTo: Record<string, number>;
+}
+
+export const EMPTY_STATS: LifetimeStats = {
+  runsWon: 0,
+  divesCleared: 0,
+  divesLost: 0,
+  scans: 0,
+  modeUse: {},
+  lostTo: {},
+};
 
 export type RunScreen =
   | "opener"
@@ -71,6 +99,11 @@ export function baseRunKit(): RunKit {
   };
 }
 
+/** The one upgrade a closed day buys. Null until the player commits. */
+export type NightPick = "ram" | "scan" | "attack" | "defend" | null;
+
+export const NIGHT_PICKS: Array<Exclude<NightPick, null>> = ["ram", "scan", "attack", "defend"];
+
 export interface RunState {
   runSeed: number;
   runNumber: number;
@@ -82,6 +115,12 @@ export interface RunState {
   patchCells: number;
   /** Strain restored by the most recent day-close rest (for the meter fill). */
   lastRegen: number;
+  /**
+   * Upgrade chosen at the night screen but not yet applied. The pick used
+   * to end the night the instant it was made, which quietly forfeited the
+   * night patch and patch cell sitting on the same screen.
+   */
+  nightPick: NightPick;
   kit: RunKit;
   jobs: JobInstance[];
   jobsDone: boolean[];
@@ -91,7 +130,14 @@ export interface RunState {
   lastResult: {
     won: boolean;
     chip: number;
+    /** Total credited. Itemized by the two fields below, never bare. */
     pay: number;
+    /** Ticket rate for the job's tier, before the cap-win halving. */
+    basePay: number;
+    /** Salvage paid in place of an augment when the cache ran dry. */
+    salvage: number;
+    /** Did CLEAN RUN fire, and did the pouch have room for the cell? */
+    cleanRun: "banked" | "capped" | null;
     capWin: boolean;
     /** Chip inputs, kept so the result row can show what actually billed. */
     overRotations: number;
@@ -112,7 +158,31 @@ export const EMPTY_META: MetaState = {
   sound: true,
   music: true,
   taught: [],
+  stats: EMPTY_STATS,
 };
+
+function parseCounts(v: unknown): Record<string, number> {
+  if (!v || typeof v !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof n === "number" && isFinite(n) && n > 0) out[k] = n;
+  }
+  return out;
+}
+
+/** Saves written before lifetime stats existed start their tallies at zero. */
+function parseStats(v: unknown): LifetimeStats {
+  const p = (v ?? {}) as Partial<LifetimeStats>;
+  const num = (x: unknown): number => (typeof x === "number" && isFinite(x) && x > 0 ? x : 0);
+  return {
+    runsWon: num(p.runsWon),
+    divesCleared: num(p.divesCleared),
+    divesLost: num(p.divesLost),
+    scans: num(p.scans),
+    modeUse: parseCounts(p.modeUse),
+    lostTo: parseCounts(p.lostTo),
+  };
+}
 
 function parseMeta(raw: string): MetaState {
   const p = JSON.parse(raw) as Partial<MetaState>;
@@ -122,6 +192,7 @@ function parseMeta(raw: string): MetaState {
     sound: p.sound !== false,
     music: p.music !== false,
     taught: Array.isArray(p.taught) ? p.taught.filter((t) => typeof t === "string") : [],
+    stats: parseStats(p.stats),
   };
 }
 
@@ -144,6 +215,8 @@ function parseRun(raw: string): RunState | null {
   // Pre-patch-cell saves resume with an empty pouch.
   if (typeof p.patchCells !== "number") p.patchCells = 0;
   if (typeof p.lastRegen !== "number") p.lastRegen = 0;
+  // Pre-night-pick saves resume with the night still undecided.
+  if (!NIGHT_PICKS.includes(p.nightPick as Exclude<NightPick, null>)) p.nightPick = null;
   // Never resume into a transient screen; land on the day board.
   if (p.screen === "duel" || p.screen === "analyze" || p.screen === "build") {
     p.screen = "day";

@@ -3,7 +3,15 @@ import { CUSTOMERS } from "./content/customers";
 import { AUGMENTS, AttackMode, AugmentId, DefendMode } from "./content/kit";
 import { mixSeed } from "./duel-setup";
 import { Rng } from "./rng";
-import { JobInstance, MetaState, RunKit, RunState, baseRunKit } from "./save";
+import {
+  JobInstance,
+  LifetimeStats,
+  MetaState,
+  NightPick,
+  RunKit,
+  RunState,
+  baseRunKit,
+} from "./save";
 
 /**
  * Run-level state machine: meta (cross-run) plus the current run. Pure
@@ -37,10 +45,14 @@ export type RunAction =
       cellsUsed: number;
       overRotations: number;
       trapsFired: number;
+      scans: number;
+      attackCasts: number;
+      defendCasts: number;
     }
   | { type: "pickAugment"; id: AugmentId }
   | { type: "resultNext" }
-  | { type: "chooseUpgrade"; pick: "ram" | "scan" | "attack" | "defend" }
+  | { type: "chooseUpgrade"; pick: Exclude<NightPick, null> }
+  | { type: "closeNight" }
   | { type: "buyPatch" }
   | { type: "buyPatchCell" }
   | { type: "startFinale" }
@@ -58,6 +70,8 @@ export const MAX_RAM = 9;
 export const DAY_REST_REGEN = 10;
 export const PATCH_CELL_COST = 35;
 export const PATCH_CELL_MAX = 3;
+/** Paid in place of an augment once the draft pool is exhausted. */
+export const SALVAGE_PAY = 25;
 
 function genDayJobs(runSeed: number, day: number): JobInstance[] {
   const cfg = DAY_CONFIGS[day];
@@ -103,6 +117,34 @@ export function rollDraft(run: RunState): AugmentId[] {
   return picks;
 }
 
+function bump(counts: Record<string, number>, key: string, by = 1): Record<string, number> {
+  return { ...counts, [key]: (counts[key] ?? 0) + by };
+}
+
+/**
+ * Fold one finished dive into the lifetime ledger. Display only: nothing
+ * here is read back by a rule, so a stat that drifts costs a number on a
+ * screen and nothing else.
+ */
+function tallyDive(
+  stats: LifetimeStats,
+  run: RunState,
+  r: { won: boolean; scans: number; attackCasts: number; defendCasts: number },
+): LifetimeStats {
+  const job = run.activeJob !== null ? run.jobs[run.activeJob] : null;
+  let modeUse = stats.modeUse;
+  if (r.attackCasts > 0) modeUse = bump(modeUse, run.kit.attackMode, r.attackCasts);
+  if (r.defendCasts > 0) modeUse = bump(modeUse, run.kit.defendMode, r.defendCasts);
+  return {
+    ...stats,
+    divesCleared: stats.divesCleared + (r.won ? 1 : 0),
+    divesLost: stats.divesLost + (r.won ? 0 : 1),
+    scans: stats.scans + r.scans,
+    modeUse,
+    lostTo: !r.won && job ? bump(stats.lostTo, job.customerId) : stats.lostTo,
+  };
+}
+
 export function jobPayFor(run: RunState, capWin: boolean): number {
   const job = run.activeJob !== null ? run.jobs[run.activeJob] : null;
   if (!job) return 0;
@@ -140,6 +182,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
         credits: 0,
         patchCells: 0,
         lastRegen: 0,
+        nightPick: null,
         kit: baseRunKit(),
         jobs: genDayJobs(action.seed, 1),
         jobsDone: [false, false, false],
@@ -220,37 +263,45 @@ export function runReducer(state: GameState, action: RunAction): GameState {
     case "duelFinished": {
       if (!run || run.screen !== "duel") return state;
       const isFinale = run.day === FINAL_DAY;
+      const stats = tallyDive(meta.stats, run, action);
 
       if (!action.won) {
         return {
-          ...state,
+          meta: { ...meta, stats },
           run: { ...run, strain: 0, screen: "runEnd", lastResult: null },
         };
       }
 
       if (isFinale) {
         return {
-          meta: { ...meta, machineOpened: true },
+          meta: { ...meta, machineOpened: true, stats: { ...stats, runsWon: stats.runsWon + 1 } },
           run: { ...run, screen: "finaleWin", lastResult: null },
         };
       }
 
       const strain = Math.max(0, run.strain - action.chip);
       const draft = rollDraft(run);
-      // A dry augment cache pays out as salvage instead.
-      const pay = jobPayFor(run, action.capWin) + (draft.length === 0 ? 25 : 0);
+      // A dry augment cache pays out as salvage instead. Kept as its own
+      // term so the result screen can show why the credited amount does not
+      // match the rate printed on the ticket.
+      const salvage = draft.length === 0 ? SALVAGE_PAY : 0;
+      const ticketPay = jobPayFor(run, action.capWin);
+      const pay = ticketPay + salvage;
       const jobsDone = run.jobsDone.map((d, i) => (i === run.activeJob ? true : d));
       const cellsLeft = Math.max(0, run.patchCells - action.cellsUsed);
-      // Clean Run: a chip-zero win banks a patch cell.
-      const patchCells =
-        action.chip === 0 && run.kit.augments.includes("cleanRun")
-          ? Math.min(PATCH_CELL_MAX, cellsLeft + 1)
-          : cellsLeft;
+      // Clean Run: a chip-zero win banks a patch cell, up to the pouch cap.
+      const cleanRunFired = action.chip === 0 && run.kit.augments.includes("cleanRun");
+      const cleanRun: "banked" | "capped" | null = !cleanRunFired
+        ? null
+        : cellsLeft >= PATCH_CELL_MAX
+          ? "capped"
+          : "banked";
+      const patchCells = cleanRunFired ? Math.min(PATCH_CELL_MAX, cellsLeft + 1) : cellsLeft;
 
       // Zero by any means ends the run, a bled-out win included.
       const screen = strain <= 0 ? "runEnd" : "result";
       return {
-        ...state,
+        meta: { ...meta, stats },
         run: {
           ...run,
           credits: run.credits + pay,
@@ -262,6 +313,9 @@ export function runReducer(state: GameState, action: RunAction): GameState {
             won: true,
             chip: action.chip,
             pay,
+            basePay: jobPay(run.jobs[run.activeJob ?? 0]?.tier ?? 1),
+            salvage,
+            cleanRun,
             capWin: action.capWin,
             overRotations: action.overRotations,
             trapsFired: action.trapsFired,
@@ -280,12 +334,13 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       const def = AUGMENTS.find((a) => a.id === action.id);
       if (!def || ownsAugment(run.kit, action.id)) return state;
       const kit = { ...run.kit };
+      // A drafted config is unlocked, never equipped. Swapping the live mode
+      // on pickup meant walking into the next dive with WARD instead of the
+      // PURGE that was deliberately set, and no sign it had changed.
       if (def.attackMode) {
         kit.attackModes = [...kit.attackModes, def.attackMode];
-        kit.attackMode = def.attackMode;
       } else if (def.defendMode) {
         kit.defendModes = [...kit.defendModes, def.defendMode];
-        kit.defendMode = def.defendMode;
       } else {
         kit.augments = [...kit.augments, action.id];
       }
@@ -306,24 +361,39 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       const strain = Math.min(100, run.strain + DAY_REST_REGEN);
       return {
         ...state,
-        run: { ...run, activeJob: null, strain, lastRegen: strain - run.strain, screen: "upgrade" },
+        run: {
+          ...run,
+          activeJob: null,
+          strain,
+          lastRegen: strain - run.strain,
+          nightPick: null,
+          screen: "upgrade",
+        },
       };
     }
 
+    // Picking is now reversible and does NOT end the night: the shop rows
+    // live on the same screen, and committing on click meant a player who
+    // upgraded first silently lost the chance to spend their credits.
     case "chooseUpgrade": {
       if (!run || run.screen !== "upgrade") return state;
+      return { ...state, run: { ...run, nightPick: action.pick } };
+    }
+
+    case "closeNight": {
+      if (!run || run.screen !== "upgrade" || run.nightPick === null) return state;
       let ramPerTurn = run.ramPerTurn;
       const kit = { ...run.kit };
-      if (action.pick === "ram") ramPerTurn = Math.min(MAX_RAM, ramPerTurn + 1);
-      else if (action.pick === "scan") kit.scanTier = Math.min(3, kit.scanTier + 1) as RunKit["scanTier"];
-      else if (action.pick === "attack") kit.attackTier = Math.min(3, kit.attackTier + 1) as RunKit["attackTier"];
+      if (run.nightPick === "ram") ramPerTurn = Math.min(MAX_RAM, ramPerTurn + 1);
+      else if (run.nightPick === "scan") kit.scanTier = Math.min(3, kit.scanTier + 1) as RunKit["scanTier"];
+      else if (run.nightPick === "attack") kit.attackTier = Math.min(3, kit.attackTier + 1) as RunKit["attackTier"];
       else kit.defendTier = Math.min(3, kit.defendTier + 1) as RunKit["defendTier"];
       const day = run.day + 1;
       // Every morning opens on its cutscene; day 10's frames the finale.
       if (day === FINAL_DAY) {
         return {
           ...state,
-          run: { ...run, ramPerTurn, kit, day, jobs: [], jobsDone: [], screen: "dayOpen" },
+          run: { ...run, ramPerTurn, kit, day, nightPick: null, jobs: [], jobsDone: [], screen: "dayOpen" },
         };
       }
       return {
@@ -333,6 +403,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
           ramPerTurn,
           kit,
           day,
+          nightPick: null,
           jobs: genDayJobs(run.runSeed, day),
           jobsDone: [false, false, false],
           screen: "dayOpen",

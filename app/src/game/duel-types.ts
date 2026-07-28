@@ -109,6 +109,14 @@ export interface DuelConfig {
 
 export type DuelPhase = "playing" | "won" | "lost";
 
+/**
+ * How the dive ended. "core" is a flood touching the core; "cap" is the
+ * round-cap tiebreak; "severed" and "gridlock" are route verdicts, decided
+ * without either flood arriving. The last two exist because calling them
+ * "core" made a walled-off loss read as a bug.
+ */
+export type DuelEndKind = "core" | "cap" | "severed" | "gridlock";
+
 export interface DuelFx {
   id: number;
   kind: string;
@@ -131,6 +139,9 @@ export interface SideEcon {
   used: Record<Program, boolean>;
   /** ATTACK casts this dive (for first-cast discounts). */
   attacksCast: number;
+  /** SCAN and DEFEND casts this dive. Ledger only; no rule reads these. */
+  scansCast: number;
+  defendsCast: number;
   /** Enemy traps that have fired on this side (feeds the strain formula). */
   trapsFired: number;
   /** Manual rotations this dive (the par meter). Program twists are free. */
@@ -150,7 +161,13 @@ export interface DuelState {
   coreIdx: number;
   power: DuelPower;
   phase: DuelPhase;
-  winKind: "core" | "cap" | null;
+  winKind: DuelEndKind | null;
+  /**
+   * Why the dive ended, in the player's language. Set at finish and never
+   * cleared, so the result overlay can explain a loss the machine won
+   * without ever touching the core.
+   */
+  endReason: string | null;
   /** 1-based; one round = one player turn then one opponent turn. */
   round: number;
   turn: Side;
@@ -167,6 +184,12 @@ export interface DuelState {
   par: number;
   /** Patch cells still unspent this dive. */
   patchCells: number;
+  /**
+   * Consecutive round-ends where the player had no route to the core. The
+   * severed verdict needs two, so a one-round planner blindspot cannot end
+   * a dive that is still winnable.
+   */
+  severedStreak: number;
   strainChip: number;
   rngState: RngState;
   claimCounter: number;

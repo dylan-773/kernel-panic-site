@@ -125,10 +125,6 @@ const DuelCellView = memo(function DuelCellView({
         </g>
       )}
 
-      {traced && cell.kind === "node" && (
-        <rect x={-HALF + 7} y={-HALF + 7} width={CS - 14} height={CS - 14} className="kp-dtrace-ring" aria-hidden="true" />
-      )}
-
       {cell.kind === "block" && (
         <g className="kp-dblock">
           <polygon points="-14,-8 -4,-15 9,-12 15,-2 10,10 -2,14 -13,7" className="kp-dblock-body" />
@@ -171,6 +167,18 @@ const DuelCellView = memo(function DuelCellView({
                 className="kp-dtrap-body"
               />
             </g>
+          )}
+          {/* Drawn last so the TAP LINE trace stays legible through a legal
+              ring; a wide REDIRECT lights most of the board at once. */}
+          {traced && (
+            <rect
+              x={-HALF + 7}
+              y={-HALF + 7}
+              width={CS - 14}
+              height={CS - 14}
+              className="kp-dtrace-ring"
+              aria-hidden="true"
+            />
           )}
         </g>
       )}

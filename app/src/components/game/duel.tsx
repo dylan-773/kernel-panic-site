@@ -73,6 +73,10 @@ export interface DuelFinish {
   /** The two inputs behind the chip, so the result row can itemize it. */
   overRotations: number;
   trapsFired: number;
+  /** Ledger-only tallies for this dive. Nothing in the rules reads these. */
+  scans: number;
+  attackCasts: number;
+  defendCasts: number;
 }
 
 export interface DuelScreenProps {
@@ -119,12 +123,25 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
       pulse = mk(`CASCADE x${n ?? 2}`, "kp-pulse-good");
       if (soundOn) playCascade(n ?? 2);
       break;
+    case "cascadeOpp":
+      shake = 1;
+      pulse = mk(`IT CLAIMED x${n ?? 2}`, "kp-pulse-bad");
+      if (soundOn) sfx("claimTick", { vol: 0.5, rate: 0.7 });
+      break;
     case "claim":
       if (soundOn) playCascade(1);
+      break;
+    case "claimOpp":
+      if (soundOn) sfx("claimTick", { vol: 0.4, rate: 0.7 });
       break;
     case "cascadeRam":
       pulse = mk(`+${n ?? 1} RAM BANKED`, "kp-pulse-good");
       if (soundOn) sfx("overclockCast", { vol: 0.8 });
+      break;
+    case "cascadeRamOpp":
+      // Silent, but never invisible: unexplained banked RAM is why the
+      // machine's programs read as free.
+      pulse = mk(`IT BANKED +${n ?? 1} RAM`, "kp-pulse-bad");
       break;
     case "trapFire":
       shake = 3;
@@ -210,11 +227,14 @@ export function DuelScreen(props: DuelScreenProps) {
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [virus, setVirus] = useState<VirusMsg | null>(null);
   const [sweep, setSweep] = useState(0);
+  // Result panel stood aside so the finished board can be read (and shared).
+  const [reviewing, setReviewing] = useState(false);
   // Sticky: the CASCADE lesson is about a claim chain, so it waits for a real
   // one. Banked RAM alone is the wrong tell, since a siphon trap and ECHO TAP
   // bank it too. Sticky because the fx queue drains the frame it arrives.
   const [sawCascade, setSawCascade] = useState(false);
   const finishedRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   // True only while the ability panel was opened by a hold, so the
   // tap-elsewhere dismiss can never fight the mouse's enter/leave pair.
   const infoByTouch = useRef(false);
@@ -254,6 +274,8 @@ export function DuelScreen(props: DuelScreenProps) {
   }, [infoProg]);
 
   const playerTurn = state.phase === "playing" && state.turn === "player";
+  /** A program is half placed: targets picked but not yet committed. */
+  const arming = targeting !== null || placing;
   const econ = state.econ.player;
 
   // Opponent moves on a readable cadence, with a low presence drone.
@@ -267,20 +289,32 @@ export function DuelScreen(props: DuelScreenProps) {
     };
   }, [state.phase, state.turn, soundOn]);
 
+  // How many rotations each port still needs to reach the core. Recomputed
+  // every beat, the machine's own steps included: keying this to the round
+  // meant a route that closed inside one opponent turn raised no warning at
+  // all, and the dive just ended.
+  const threat = useMemo(() => {
+    if (state.phase !== "playing") return { player: Infinity, opp: Infinity };
+    return { player: routeCost(state, "player"), opp: routeCost(state, "opp") };
+  }, [state]);
+
+  const oppNear = isFinite(threat.opp) ? threat.opp : 99;
+  const playerNear = isFinite(threat.player) ? threat.player : 99;
+  const near = Math.min(playerNear, oppNear);
+  // Bucketed so the interval restarts on a real change of tension, not on
+  // every rotation that shifts the count by one.
+  const beatTier = near <= 1 ? 2 : near <= 3 ? 1 : 0;
+
   // Tension heartbeat when either flood is within reach of the core.
   useEffect(() => {
-    if (state.phase !== "playing" || !soundOn) return;
-    const pc = routeCost(state, "player");
-    const oc = routeCost(state, "opp");
-    const near = Math.min(isFinite(pc) ? pc : 99, isFinite(oc) ? oc : 99);
-    if (near > 3) return;
+    if (state.phase !== "playing" || !soundOn || beatTier === 0) return;
     const beat = () => {
-      sfx("heartbeat", { vol: near <= 1 ? 1 : 0.7, rate: near <= 1 ? 1.15 : 1 });
+      sfx("heartbeat", { vol: beatTier === 2 ? 1 : 0.7, rate: beatTier === 2 ? 1.15 : 1 });
     };
     beat();
-    const t = setInterval(beat, near <= 1 ? 650 : 950);
+    const t = setInterval(beat, beatTier === 2 ? 650 : 950);
     return () => clearInterval(t);
-  }, [state.round, state.turn, state.phase, soundOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [beatTier, state.phase, soundOn]);
 
   // Juice: drain the fx queue into sound, shake, and impact labels.
   useEffect(() => {
@@ -319,10 +353,28 @@ export function DuelScreen(props: DuelScreenProps) {
     }
     if (maxShake > 0) setShake((sh) => ({ mag: maxShake, key: sh.key + 1 }));
     if (newPulses.length > 0) {
-      setPulses((p) => [...p.slice(-3), ...newPulses]);
+      // Two at a time. Four stacked labels on top of a toast, a virus banner
+      // and the coach line is more than a busy turn can be read through.
+      setPulses((p) => [...p, ...newPulses].slice(-2));
     }
     dispatch({ type: "fxDrain", upTo: state.fx[state.fx.length - 1].id });
   }, [state.fx, soundOn]);
+
+  /**
+   * Replay the shake without remounting. The root used to carry
+   * `key={shake.key}`, so every single shake tore down and rebuilt the whole
+   * duel tree: the notice toast, the impact pulses, the virus banner and
+   * every claim pop restarted their entrance animations from zero. A stale
+   * "TRAP SPRUNG" toast therefore reappeared on each later shake, which read
+   * as traps firing that never fired.
+   */
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || shake.mag === 0 || shake.key === 0) return;
+    el.style.animation = "none";
+    void el.offsetHeight;
+    el.style.animation = "";
+  }, [shake.key, shake.mag]);
 
   // Virus banners burn out on their own.
   useEffect(() => {
@@ -344,13 +396,13 @@ export function DuelScreen(props: DuelScreenProps) {
       if (e.code === "Escape") {
         setTargeting(null);
         setPlacing(false);
-      } else if (e.code === "KeyE" && playerTurn && !targeting) {
+      } else if (e.code === "KeyE" && playerTurn && !targeting && !placing) {
         dispatch({ type: "endTurn" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playerTurn, targeting]);
+  }, [playerTurn, targeting, placing]);
 
   // Legal cells for the current interaction.
   const legal = useMemo(() => {
@@ -427,6 +479,11 @@ export function DuelScreen(props: DuelScreenProps) {
     if (infoProg) closeInfo();
     if (soundOn) playUiPress();
     setPlacing(false);
+    // Any program press abandons the one being aimed. Leaving it live meant
+    // casting SCAN with ATTACK armed kept the board in attack-target
+    // highlighting, which under REDIRECT lights nearly every node and buries
+    // the traps and the TAP LINE trace the scan just exposed.
+    setTargeting(null);
     if (prog === "scan") {
       dispatch({ type: "cast", prog: "scan", targets: [] });
       return;
@@ -464,12 +521,16 @@ export function DuelScreen(props: DuelScreenProps) {
       // screen redisplays the bill rather than re-deriving it.
       overRotations: Math.max(0, state.econ.player.rotations - state.par),
       trapsFired: state.econ.player.trapsFired,
+      scans: state.econ.player.scansCast,
+      attackCasts: state.econ.player.attacksCast,
+      defendCasts: state.econ.player.defendsCast,
     });
   };
 
   const coach = coachLine(state);
   const oppEcon = state.econ.opp;
   const banked = econ.drainNext < 0 ? -econ.drainNext : 0;
+  const oppBanked = oppEcon.drainNext < 0 ? -oppEcon.drainNext : 0;
 
   const programInfo = (prog: Program): { title: string; desc: string } => {
     if (prog === "scan") {
@@ -492,7 +553,7 @@ export function DuelScreen(props: DuelScreenProps) {
 
   return (
     <div
-      key={shake.key}
+      ref={rootRef}
       className={`kp-dive2 ${shake.mag > 0 ? `kp-shake-${shake.mag}` : ""}`}
     >
       <header className="kp-dive2-top">
@@ -551,11 +612,25 @@ export function DuelScreen(props: DuelScreenProps) {
               </div>
             ))}
           </div>
-          {state.notice && (
-            <div key={state.notice.id} className="kp-toast">
-              {state.notice.text}
-            </div>
-          )}
+          <div className="kp-topstack">
+            {playerNear >= 99 && state.phase === "playing" && (
+              <div className="kp-threat kp-threat-max" aria-live="assertive">
+                NO ROUTE FROM YOUR PORT TO THE CORE
+              </div>
+            )}
+            {oppNear <= 2 && state.phase === "playing" && (
+              <div className={`kp-threat ${oppNear === 0 ? "kp-threat-max" : ""}`} aria-live="assertive">
+                {oppNear === 0
+                  ? "ITS ROUTE IS OPEN TO THE CORE"
+                  : `INTRUSION ${oppNear} ROTATION${oppNear === 1 ? "" : "S"} FROM THE CORE`}
+              </div>
+            )}
+            {state.notice && (
+              <div key={state.notice.id} className="kp-toast">
+                {state.notice.text}
+              </div>
+            )}
+          </div>
           {coach && <div className="kp-coach">{coach}</div>}
           <Teach id="par-budget" signals={{ overPar: overPar > 0 }} />
           <Teach id="cascade-bank" signals={{ cascadeBanked: sawCascade }} />
@@ -598,10 +673,23 @@ export function DuelScreen(props: DuelScreenProps) {
 
         <aside className="kp-dive2-opp">
           <h3>INTRUSION</h3>
+          {/* Live RAM, not just the per-turn rate. A cascade banks RAM into
+              the machine's next turn, so a turn where it also ran a program
+              could still show the same number of moves: with only the rate
+              on screen, its programs looked free. */}
           <div className="kp-rail-row">
-            <span>RAM/TURN</span>
-            <em>{oppEcon.ramPerTurn}</em>
+            <span>RAM</span>
+            <em>
+              {state.turn === "opp" ? oppEcon.ram : oppEcon.ramPerTurn}
+              <i className="kp-rail-sub">/{oppEcon.ramPerTurn} per turn</i>
+            </em>
           </div>
+          {oppBanked > 0 && (
+            <div className="kp-rail-row kp-rail-row-warn">
+              <span>BANKED</span>
+              <em>+{oppBanked} next turn</em>
+            </div>
+          )}
           <div className="kp-rail-row">
             <span>ARMED NODES</span>
             <em>{armedCount > 0 ? `${armedCount}${revealedCount < armedCount ? " (hidden)" : ""}` : "0"}</em>
@@ -696,16 +784,19 @@ export function DuelScreen(props: DuelScreenProps) {
           </button>
         )}
 
+        {/* Locked out mid cast: ending the turn with a program armed threw
+            the cast away, and the button gave no sign it would. */}
         <button
           type="button"
-          className="kp-endturn"
-          disabled={!playerTurn}
+          className={`kp-endturn ${arming ? "kp-endturn-held" : ""}`}
+          disabled={!playerTurn || arming}
+          title={arming ? "Finish or cancel the program you are placing first" : undefined}
           onClick={() => {
             if (soundOn) playUiPress();
             dispatch({ type: "endTurn" });
           }}
         >
-          END TURN (E)
+          {arming ? "PLACING..." : "END TURN (E)"}
         </button>
       </footer>
 
@@ -716,7 +807,24 @@ export function DuelScreen(props: DuelScreenProps) {
         </div>
       )}
 
-      {state.phase !== "playing" && (
+      {/* Board review. The final board is already fully rendered underneath
+          with every trap revealed (see DuelBoard's trapVisible); only this
+          panel was hiding it, so a loss could never be read back. */}
+      {state.phase !== "playing" && reviewing && (
+        <div className="kp-reviewbar">
+          <span>
+            FINAL BOARD.{" "}
+            {state.winKind === "severed"
+              ? "Your territory has no open corridor left to the core."
+              : "Every trap on the grid is exposed."}
+          </span>
+          <button type="button" onClick={() => setReviewing(false)}>
+            BACK TO RESULT
+          </button>
+        </div>
+      )}
+
+      {state.phase !== "playing" && !reviewing && (
         <div className="kp-overlay">
           <div className={`kp-result ${state.phase === "won" ? "kp-result-w" : "kp-result-l"}`}>
             {cfg.tutorial ? (
@@ -729,25 +837,35 @@ export function DuelScreen(props: DuelScreenProps) {
               </>
             ) : state.phase === "won" ? (
               <>
-                <h2 className="kp-result-won">CORE SEIZED</h2>
-                <p>
-                  {state.winKind === "cap"
-                    ? "The link timed out with your route closer. It counts, barely."
-                    : "Your flood touched the core first. The intrusion collapses."}
-                </p>
+                <h2 className="kp-result-won">
+                  {state.winKind === "gridlock" ? "LINK COLLAPSED" : "CORE SEIZED"}
+                </h2>
+                <p>{state.endReason ?? "Your flood touched the core first. The intrusion collapses."}</p>
                 {state.strainChip > 0 && (
                   <p className="kp-result-chip">Messy work. Neural Strain -{state.strainChip}.</p>
                 )}
               </>
             ) : (
               <>
-                <h2 className="kp-result-lost">CORE LOST</h2>
-                <p>Its flood got there first. Neural Strain zeroes. The run is over.</p>
+                <h2 className="kp-result-lost">
+                  {state.winKind === "severed" ? "ROUTE SEVERED" : "CORE LOST"}
+                </h2>
+                <p>{state.endReason ?? "Its flood got there first."}</p>
+                <p>Neural Strain zeroes. The run is over.</p>
               </>
             )}
-            <button type="button" className="kp-result-btn" onClick={finish}>
-              CONTINUE
-            </button>
+            <div className="kp-result-actions">
+              <button
+                type="button"
+                className="kp-result-btn kp-result-btn-ghost"
+                onClick={() => setReviewing(true)}
+              >
+                VIEW BOARD
+              </button>
+              <button type="button" className="kp-result-btn" onClick={finish}>
+                CONTINUE
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -12,8 +12,16 @@ import {
   WARD_ROUNDS,
   cascadeRam,
 } from "./content/kit";
-import { computeDuelPower, routeCost, routePlan, runFlood } from "./duel-power";
-import { DuelState, PIECE_X, ROUND_CAP, Side, TrapKind, otherSide } from "./duel-types";
+import { canPlace, computeDuelPower, routeCost, routePlan, runFlood } from "./duel-power";
+import {
+  DuelEndKind,
+  DuelState,
+  PIECE_X,
+  ROUND_CAP,
+  Side,
+  TrapKind,
+  otherSide,
+} from "./duel-types";
 import { nextU32 } from "./rng";
 
 /**
@@ -76,9 +84,20 @@ export function programCost(s: DuelState, side: Side, prog: Program): number {
   return prog === "attack" ? attackCost(s, side) : PROGRAM_COST;
 }
 
-export function finishDuel(s: DuelState, winner: Side, kind: "core" | "cap"): void {
+/**
+ * End the dive. `reason` is the player-facing sentence for the result
+ * overlay; it survives on state because the toast is cleared here (a
+ * 2.4 second toast cannot carry the one line that explains the loss).
+ */
+export function finishDuel(
+  s: DuelState,
+  winner: Side,
+  kind: DuelEndKind,
+  reason?: string,
+): void {
   s.phase = winner === "player" ? "won" : "lost";
   s.winKind = kind;
+  if (reason) s.endReason = reason;
   s.notice = null;
   if (winner === "player") {
     // Strain is an efficiency bill: rotations past par, sprung traps,
@@ -104,10 +123,13 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
   for (const side of [acting, otherSide(acting)] as Side[]) {
     if (s.phase !== "playing") break;
     const f = runFlood(s, side);
+    // Side-tagged: an untagged "cascade" rendered the machine eating half
+    // the board as a green win banner on the player's screen.
+    const mine = side === "player";
     if (f.claimed.length >= 3) {
-      emit(s, "cascade", f.claimed.length);
+      emit(s, mine ? "cascade" : "cascadeOpp", f.claimed.length);
     } else if (f.claimed.length > 0) {
-      emit(s, "claim", f.claimed.length);
+      emit(s, mine ? "claim" : "claimOpp", f.claimed.length);
     }
 
     // Cascades bank RAM for the next turn: the chain you set up buys the
@@ -156,10 +178,21 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
       // The tutorial is unwinnable by definition: the moment the player's
       // flood actually touches the core, every port slams shut at once.
       if (s.cfg.tutorial && side === "player") {
-        say(s, "Your flood touches the core... and every port on the machine slams shut at once.");
-        finishDuel(s, "opp", "core");
+        finishDuel(
+          s,
+          "opp",
+          "core",
+          "Your flood touched the core, and every port on the machine slammed shut at once.",
+        );
       } else {
-        finishDuel(s, side, "core");
+        finishDuel(
+          s,
+          side,
+          "core",
+          side === "player"
+            ? "Your flood touched the core first. The intrusion collapses."
+            : "Its flood reached the core before yours did.",
+        );
       }
     }
   }
@@ -294,6 +327,8 @@ export function applyCast(
   econ.ram -= programCost(s, side, prog);
   econ.used[prog] = true;
   if (prog === "attack") econ.attacksCast++;
+  if (prog === "scan") econ.scansCast++;
+  if (prog === "defend") econ.defendsCast++;
   if (s.cfg.tutorial && side === "player") {
     if (prog === "scan") s.tutFlags.scanned = true;
     if (prog === "defend") s.tutFlags.purged = true;
@@ -497,32 +532,56 @@ export function endOppTurn(s: DuelState): void {
   if (s.cfg.tutorial) {
     const lessonOver = tutorialLessonDone(s) && s.round > s.tutorialLessonRound + 1;
     if (lessonOver || s.round >= 7) {
-      say(s, "The machine stops pretending. The door was never really open.");
-      finishDuel(s, "opp", "core");
+      finishDuel(
+        s,
+        "opp",
+        "core",
+        "The machine stopped pretending and sealed itself. The door was never really open.",
+      );
       return;
     }
   }
   if (s.round > ROUND_CAP) {
     const pd = routeCost(s, "player");
     const od = routeCost(s, "opp");
-    finishDuel(s, pd <= od ? "player" : "opp", "cap");
+    const playerCloser = pd <= od;
+    finishDuel(
+      s,
+      playerCloser ? "player" : "opp",
+      "cap",
+      playerCloser
+        ? "The link timed out with your route closer to the core than its. It counts, barely."
+        : "The link timed out with its route closer to the core than yours.",
+    );
     return;
   }
-  // A severed route never heals (enemy territory only grows), so a walled
-  // player is already beaten: call it instead of a dead march to the cap.
-  {
-    const pd = routeCost(s, "player");
-    if (!isFinite(pd)) {
-      const od = routeCost(s, "opp");
-      if (isFinite(od)) {
-        say(s, "SEVERED. Its territory walls your port off from the core. No route remains.");
-        finishDuel(s, "opp", "core");
+  // A walled-off player is already beaten, so the dive is called here rather
+  // than marched to the cap. Two guards keep that from firing on a route
+  // that still exists: unspent patch cells can open a corridor through slag,
+  // and the verdict has to repeat on the next round before it counts.
+  if (!playerHasRoute(s)) {
+    s.severedStreak++;
+    if (s.severedStreak >= 2) {
+      if (isFinite(routeCost(s, "opp"))) {
+        finishDuel(
+          s,
+          "opp",
+          "severed",
+          "SEVERED. Its territory walls your port off from the core. No rotation and no patch cell opens a route, so the link is already lost.",
+        );
       } else {
-        say(s, "Total gridlock. Neither signal can reach the core. The link collapses in your favor.");
-        finishDuel(s, "player", "cap");
+        finishDuel(
+          s,
+          "player",
+          "gridlock",
+          "Total gridlock. Neither signal can reach the core, so the link collapses in your favor.",
+        );
       }
       return;
     }
+    say(s, "ROUTE LOST. No path from your port to the core. Open one this turn or the link is called.");
+  } else {
+    s.severedStreak = 0;
   }
   s.turn = "player";
   const acts = beginTurnEconomy(s, "player");
@@ -537,6 +596,42 @@ export function endPlayerTurn(s: DuelState): void {
   econ.carry = Math.min(econ.carryCap, Math.max(0, econ.ram));
   emit(s, "endTurn");
   startOppTurn(s);
+}
+
+/**
+ * Depth of the patch-cell rescue search. Two placements cover every real
+ * case (a cell opens reach for the next one); past that the branching cost
+ * outweighs the odds, and the two-round streak guard catches the remainder.
+ */
+const RESCUE_DEPTH = 2;
+
+/**
+ * Can the player still reach the core, counting patch cells they are holding
+ * but have not spent? `routePlan` already prices every rotation, so the only
+ * thing it cannot see is slag turning into a junction. Called only when the
+ * plain route has failed, so the block enumeration stays off the hot path.
+ */
+export function playerHasRoute(s: DuelState): boolean {
+  if (isFinite(routeCost(s, "player"))) return true;
+  return rescueWithCells(s, Math.min(s.patchCells, RESCUE_DEPTH));
+}
+
+function rescueWithCells(s: DuelState, cellsLeft: number): boolean {
+  if (cellsLeft <= 0) return false;
+  for (let i = 0; i < s.cells.length; i++) {
+    if (!canPlace(s, "player", i)) continue;
+    const c = s.cells[i];
+    const prev = { kind: c.kind, base: c.base, rot: c.rot };
+    c.kind = "node";
+    c.base = PIECE_X;
+    c.rot = 0;
+    const ok = isFinite(routeCost(s, "player")) || rescueWithCells(s, cellsLeft - 1);
+    c.kind = prev.kind;
+    c.base = prev.base;
+    c.rot = prev.rot;
+    if (ok) return true;
+  }
+  return false;
 }
 
 /** A trap consumed the player's turn mid-action: nothing carries over. */

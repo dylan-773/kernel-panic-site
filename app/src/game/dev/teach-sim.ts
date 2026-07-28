@@ -373,6 +373,9 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
         cellsUsed: run.patchCells - duel.patchCells,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        scans: duel.econ.player.scansCast,
+        attackCasts: duel.econ.player.attacksCast,
+        defendCasts: duel.econ.player.defendsCast,
       });
       if (s.run && s.run.screen === "result") {
         const draft = s.run.lastResult ? s.run.lastResult.draft : [];
@@ -386,6 +389,7 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
       if (run.patchCells < PATCH_CELL_MAX) d({ type: "buyPatchCell" });
       d({ type: "buyPatch" });
       d({ type: "chooseUpgrade", pick: "ram" });
+      d({ type: "closeNight" });
     } else if (run.screen === "finalePre") {
       d({ type: "startFinale" });
       const duel = createDuel(
@@ -403,6 +407,9 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
         cellsUsed: run.patchCells - duel.patchCells,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        scans: duel.econ.player.scansCast,
+        attackCasts: duel.econ.player.attacksCast,
+        defendCasts: duel.econ.player.defendsCast,
       });
     } else if (run.screen === "runEnd" || run.screen === "finaleWin") {
       d({ type: "storyDone" });
@@ -432,14 +439,15 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
     if (run.screen === "day") {
       d({ type: "pickJob", index: run.jobsDone.findIndex((x) => !x) });
       d({ type: "startDuel" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, cellsUsed: 0, overRotations: 0, trapsFired: 0 });
+      d({ type: "duelFinished", won: true, chip: 0, capWin: false, cellsUsed: 0, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
     } else if (run.screen === "finalePre") {
       d({ type: "startFinale" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, cellsUsed: 0, overRotations: 0, trapsFired: 0 });
+      d({ type: "duelFinished", won: true, chip: 0, capWin: false, cellsUsed: 0, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
     } else if (run.screen === "result") {
       d({ type: "resultNext" });
     } else if (run.screen === "upgrade") {
       d({ type: "chooseUpgrade", pick: "ram" });
+      d({ type: "closeNight" });
     } else {
       d({ type: "storyDone" });
     }

@@ -383,8 +383,12 @@ export function oppStep(s: DuelState): void {
   // walls it off, it stops playing fair and seals the duel on the spot.
   // (An actual player win is impossible - the core seals on contact.)
   if (s.cfg.tutorial && !isFinite(routeCost(s, "opp"))) {
-    say(s, "The machine stops pretending. The door was never really open.");
-    finishDuel(s, "opp", "core");
+    finishDuel(
+      s,
+      "opp",
+      "core",
+      "The machine stopped pretending and sealed itself. The door was never really open.",
+    );
     return;
   }
 
