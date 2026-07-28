@@ -34,8 +34,9 @@ import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed, MAX_OPENING_CLAIM } from "../duel-setup";
 import { BASE_KIT, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
-import { GameState, PATCH_CELL_MAX, RunAction, runReducer } from "../run-reducer";
-import { EMPTY_META, RunKit } from "../save";
+import { GameState, RunAction, runReducer } from "../run-reducer";
+import { PATCH_POUCH_MAX } from "../patch-cells";
+import { duelKitOf, EMPTY_META } from "../save";
 
 const failures: string[] = [];
 
@@ -319,18 +320,6 @@ function playDuelToEnd(duel: DuelState): {
   };
 }
 
-function duelKitOf(kit: RunKit, patchCells: number) {
-  return {
-    scanTier: kit.scanTier,
-    attackTier: kit.attackTier,
-    defendTier: kit.defendTier,
-    attackMode: kit.attackMode,
-    defendMode: kit.defendMode,
-    augments: kit.augments,
-    patchCells,
-  };
-}
-
 const visited = new Set<string>();
 let s: GameState = { meta: { ...EMPTY_META }, run: null };
 const d = (a: RunAction) => {
@@ -361,7 +350,7 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
       const duel = createDuel(
         dayDuelConfig(run.day, job.dominant, job.tier, job.kitSeed),
         mixSeed(run.runSeed, run.day, idx),
-        duelKitOf(run.kit, run.patchCells),
+        duelKitOf(run.kit, run.patchPouch),
         run.ramPerTurn,
       );
       const res = playDuelToEnd(duel);
@@ -370,7 +359,8 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        cellsUsed: run.patchCells - duel.patchCells,
+        gridlockWin: res.won && duel.winKind === "gridlock",
+        pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
         scans: duel.econ.player.scansCast,
@@ -379,14 +369,18 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
       });
       if (s.run && s.run.screen === "result") {
         const draft = s.run.lastResult ? s.run.lastResult.draft : [];
-        if (draft.length > 0) d({ type: "pickAugment", id: draft[0] });
+        if (draft.length > 0) {
+          const id = draft[0];
+          const full = s.run.kit.augments.length >= s.run.boostSlots;
+          d({ type: "pickAugment", id, replace: full ? s.run.kit.augments[0] : undefined });
+        }
       }
     } else if (run.screen === "result") {
       d({ type: "resultNext" });
     } else if (run.screen === "dayOpen") {
       d({ type: "storyDone" });
     } else if (run.screen === "upgrade") {
-      if (run.patchCells < PATCH_CELL_MAX) d({ type: "buyPatchCell" });
+      if (run.patchPouch.length < PATCH_POUCH_MAX) d({ type: "buyDarkPatch" });
       d({ type: "buyPatch" });
       d({ type: "chooseUpgrade", pick: "ram" });
       d({ type: "closeNight" });
@@ -395,7 +389,7 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
       const duel = createDuel(
         finaleConfig(),
         mixSeed(run.runSeed, FINAL_DAY, 9),
-        duelKitOf(run.kit, run.patchCells),
+        duelKitOf(run.kit, run.patchPouch),
         run.ramPerTurn,
       );
       const res = playDuelToEnd(duel);
@@ -404,7 +398,8 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        cellsUsed: run.patchCells - duel.patchCells,
+        gridlockWin: res.won && duel.winKind === "gridlock",
+        pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
         scans: duel.econ.player.scansCast,
@@ -439,10 +434,10 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
     if (run.screen === "day") {
       d({ type: "pickJob", index: run.jobsDone.findIndex((x) => !x) });
       d({ type: "startDuel" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, cellsUsed: 0, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
+      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
     } else if (run.screen === "finalePre") {
       d({ type: "startFinale" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, cellsUsed: 0, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
+      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
     } else if (run.screen === "result") {
       d({ type: "resultNext" });
     } else if (run.screen === "upgrade") {

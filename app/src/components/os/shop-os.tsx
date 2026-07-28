@@ -3,6 +3,7 @@ import { playMusic, playUiPress, setMuted, setMusicOn, sfx, testBeep, unlockAudi
 import {
   ATTACK_MODE_LABEL,
   AUGMENTS,
+  AUGMENT_BY_ID,
   DEFEND_MODE_LABEL,
   MODE_LABEL,
   MODE_TELL,
@@ -23,10 +24,14 @@ import {
 import { mixSeed } from "../../game/duel-setup";
 import { visibleJournal } from "../../game/content/journal";
 import { tip } from "../../game/content/teaching";
-import { PATCH_CELL_MAX, runReducer } from "../../game/run-reducer";
+import { darkPullPrice, runReducer } from "../../game/run-reducer";
+import { PATCH_POUCH_MAX } from "../../game/patch-cells";
+import { PatchGlyph } from "../game/patch-glyph";
+import { BASE_KIT } from "../../game/duel-types";
 import {
   EMPTY_META,
   applyOneTimeSoundReset,
+  duelKitOf,
   loadSlotMeta,
   loadSlotRun,
   migrateLegacySave,
@@ -57,6 +62,7 @@ const WIN_DEFS: WinDef[] = [
   { id: "manual", title: "MANUAL.TXT", x: 120, y: 66, w: 540 },
   { id: "ledger", title: "LEDGER.LOG", x: 500, y: 120, w: 380 },
   { id: "journal", title: "DAD.LOG", x: 200, y: 30, w: 560 },
+  { id: "darknet", title: "DARKNET.LNK", x: 420, y: 150, w: 400 },
 ];
 
 function windowTitle(screen: string | null): string {
@@ -139,6 +145,21 @@ function ManualContent() {
           </p>
         </div>
       </div>
+      <h3>PATCH PIECES</h3>
+      <p>
+        Slag blocks used to take a flat cell. Now they take a shaped piece: straight, elbow, tee,
+        or cross. Whatever arms a piece rolls on pickup are the arms it keeps, nothing rotates
+        once it is in your pouch, and a placed piece is welded where it lands.
+      </p>
+      <p>
+        Craft two pieces at the bench into the union of their arms. Legal only when the result is
+        strictly bigger than both pieces you started with; equal or smaller, the bench will not
+        make the join.
+      </p>
+      <p>
+        Three ways into the pouch: buy blind off the darknet, pull one from a cleared job, or bank
+        a random piece on a clean win. Five pieces, pouch capped.
+      </p>
       <h3>AUGMENTS</h3>
       <div className="kp-manual-abilities">
         {AUGMENTS.map((a) => (
@@ -148,13 +169,95 @@ function ManualContent() {
               <em>{a.kind === "config" ? "config" : "boost"}</em>
             </strong>
             <p>{a.desc}</p>
+            {a.requires?.kind === "augment" && (
+              <p className="kp-rail-dim">Needs {AUGMENT_BY_ID[a.requires.id]?.name ?? a.requires.id}.</p>
+            )}
+            {a.requires?.kind === "pouch" && <p className="kp-rail-dim">Needs a piece in the pouch.</p>}
           </div>
         ))}
       </div>
+      <h3>BOOST BAYS</h3>
+      <p>
+        Boosts install into bays, three of them to start. Configs are not boosts and never count
+        against the cap.
+      </p>
+      <p>
+        A full bay does not block a new boost, it swaps one: take the drop or keep what is already
+        installed. Buy more bays at day close. First one runs 150 cr, the next 300.
+      </p>
       <p className="kp-rail-dim">
         Every cleared job offers a draft of augments; every closed day offers +1 RAM or a program
         tier. Everything resets when the run ends. Only you remember.
       </p>
+    </div>
+  );
+}
+
+/**
+ * DARKNET.LNK: the gray market. Outside the night phase the vendor is
+ * offline and no BUY control exists in the DOM at all; during the night it
+ * sells one blind pull at the day's rate, price and balance on the same
+ * row, and replays the reveal beat for the last pull.
+ */
+function DarknetContent({
+  run,
+  dispatch,
+}: {
+  run: import("../../game/save").RunState | null;
+  dispatch: (a: import("../../game/run-reducer").RunAction) => void;
+}) {
+  const open = run !== null && run.screen === "upgrade";
+  if (!open) {
+    return (
+      <div className="kp-darknet kp-darknet-offline">
+        <p className="kp-darknet-tag">SELLER: SIGNAL SCRAMBLED. NO ID ON FILE.</p>
+        <h3>MARKET OFFLINE.</h3>
+        <p>Signal only holds after the shop shuts. Trades resume at day close.</p>
+      </div>
+    );
+  }
+  const cost = darkPullPrice(run);
+  const full = run.patchPouch.length >= PATCH_POUCH_MAX;
+  const broke = run.credits < cost;
+  return (
+    <div className="kp-darknet">
+      <p className="kp-darknet-tag">SELLER: SIGNAL SCRAMBLED. NO ID ON FILE.</p>
+      <p>Salvage off a hundred dead machines, sorted by nobody.</p>
+      <p>Pay first. Shape is the surprise. That is the whole business model here.</p>
+      <div className="kp-darknet-row">
+        <button
+          type="button"
+          className="kp-btn-ghost"
+          disabled={full || broke}
+          title={full ? `POUCH FULL (${PATCH_POUCH_MAX}/${PATCH_POUCH_MAX})` : broke ? `NEED ${cost} CR` : undefined}
+          onClick={() => {
+            sfx("darknetReveal", { bus: "ui" });
+            dispatch({ type: "buyDarkPatch" });
+          }}
+        >
+          BUY BLIND ({cost} cr)
+        </button>
+        <span className="kp-rail-dim">{run.credits} cr</span>
+      </div>
+      {full && <p className="kp-rail-dim">Dealer is not a storage locker. Pouch is full. Come back with room.</p>}
+      {run.lastDarkBuy !== null && run.darkBuys > 0 && (
+        <div className="kp-darknet-reveal" key={run.darkBuys}>
+          <span className="kp-darknet-reveal-glyph">
+            <PatchGlyph mask={run.lastDarkBuy} size={44} />
+          </span>
+          <div>
+            <p>PIECE ACQUIRED. SHAPE CONFIRMED ON ARRIVAL.</p>
+            <p className="kp-rail-dim">Told you. Never know what you're gonna get.</p>
+          </div>
+        </div>
+      )}
+      <div className="kp-darknet-pouch">
+        <span className="kp-rail-dim">POUCH {run.patchPouch.length}/{PATCH_POUCH_MAX}</span>
+        {run.patchPouch.map((m, i) => (
+          <PatchGlyph key={i} mask={m} size={20} />
+        ))}
+      </div>
+      <p className="kp-rail-dim">No refunds. No complaints line. Close the window if you want a guarantee.</p>
     </div>
   );
 }
@@ -221,7 +324,8 @@ function LedgerContent({
           <div><span>NEURAL STRAIN</span><em>{run.strain}/100</em></div>
           <div><span>CREDITS</span><em>{run.credits} cr</em></div>
           <div><span>RAM / TURN</span><em>{run.ramPerTurn}</em></div>
-          <div><span>PATCH CELLS</span><em>{run.patchCells}/{PATCH_CELL_MAX}</em></div>
+          <div><span>PATCH POUCH</span><em>{run.patchPouch.length}/{PATCH_POUCH_MAX}</em></div>
+          <div><span>BOOST BAYS</span><em>{run.kit.augments.length}/{run.boostSlots}</em></div>
           <div><span>KIT TIERS</span><em>S{run.kit.scanTier} A{run.kit.attackTier} D{run.kit.defendTier}</em></div>
           <div><span>AUGMENTS</span><em>{run.kit.augments.length}/{AUGMENTS.filter((a) => a.kind === "boost").length}</em></div>
         </>
@@ -340,17 +444,7 @@ export function ShopOS() {
       : isFinale
         ? finaleConfig()
         : dayDuelConfig(run.day, job?.dominant ?? "redirect", job?.tier ?? 1, job?.kitSeed ?? run.runSeed);
-    const duelKit = isTutorial
-      ? { scanTier: 1 as const, attackTier: 1 as const, defendTier: 1 as const, attackMode: "redirect" as const, defendMode: "purge" as const, augments: [], patchCells: 0 }
-      : {
-          scanTier: run.kit.scanTier,
-          attackTier: run.kit.attackTier,
-          defendTier: run.kit.defendTier,
-          attackMode: run.kit.attackMode,
-          defendMode: run.kit.defendMode,
-          augments: run.kit.augments,
-          patchCells: run.patchCells,
-        };
+    const duelKit = isTutorial ? BASE_KIT : duelKitOf(run.kit, run.patchPouch);
     return (
       <TeachProvider
         taught={meta.taught}
@@ -395,7 +489,8 @@ export function ShopOS() {
                 won: r.won,
                 chip: r.chip,
                 capWin: r.capWin,
-                cellsUsed: r.cellsUsed,
+                gridlockWin: r.gridlockWin,
+                pouchLeft: r.pouchLeft,
                 overRotations: r.overRotations,
                 trapsFired: r.trapsFired,
                 scans: r.scans,
@@ -526,6 +621,12 @@ export function ShopOS() {
           <DesktopIcon label="DAD.LOG" icon="journal" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("journal"); }} />
           <DesktopIcon label="MANUAL.TXT" icon="manual" hint={tip("manualRef")} onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("manual"); }} />
           <DesktopIcon label="LEDGER.LOG" icon="ledger" onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("ledger"); }} />
+          <DesktopIcon
+            label="DARKNET.LNK"
+            icon="darknet"
+            hint="Gray-market patch pieces, no questions asked. Opens for trade after the shop closes."
+            onOpen={() => { sfx("icon", { bus: "ui" }); wm.toggle("darknet"); }}
+          />
         </IconGrid>
 
         {WIN_DEFS.map((def) => {
@@ -553,6 +654,7 @@ export function ShopOS() {
                   <p className="kp-rail-dim kp-float-pad">No active run. Open the shop first.</p>
                 ))}
               {def.id === "ledger" && <LedgerContent meta={meta} run={run} />}
+              {def.id === "darknet" && <DarknetContent run={run} dispatch={dispatch} />}
             </FloatingWindow>
           );
         })}
@@ -617,7 +719,7 @@ export function ShopOS() {
             <h3>ABANDON THIS RUN?</h3>
             <p>
               This ends attempt {run.runNumber} exactly like a loss. Kit tiers, augments, credits
-              and patch cells all reset for the next attempt. The journal and the ledger keep what
+              and patch pieces all reset for the next attempt. The journal and the ledger keep what
               they already hold.
             </p>
             <div className="kp-modal-actions">

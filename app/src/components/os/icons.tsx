@@ -92,7 +92,21 @@ function BackroomIcon(): ReactElement {
   );
 }
 
-export type IconName = "jobs" | "loadout" | "manual" | "ledger" | "backroom" | "journal";
+export type IconName = "jobs" | "loadout" | "manual" | "ledger" | "backroom" | "journal" | "darknet";
+
+/** Art-lead pixel asset: cracked padlock circuit with the glitch eye. */
+function DarknetIcon(): ReactElement {
+  return (
+    <img
+      src="/assets/px/ui/icon-darknet.png"
+      alt=""
+      width={32}
+      height={32}
+      style={{ imageRendering: "pixelated" }}
+      aria-hidden="true"
+    />
+  );
+}
 
 function JournalIcon(): ReactElement {
   return (
@@ -123,6 +137,7 @@ export const ICONS: Record<IconName, () => ReactElement> = {
   ledger: LedgerIcon,
   backroom: BackroomIcon,
   journal: JournalIcon,
+  darknet: DarknetIcon,
 };
 
 export interface DesktopIconProps {

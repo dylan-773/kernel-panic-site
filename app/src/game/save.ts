@@ -1,4 +1,6 @@
-import { AttackMode, AugmentId, DefendMode, OppMode, Tier } from "./content/kit";
+import { AttackMode, AUGMENT_BY_ID, AugmentId, DefendMode, OppMode, Tier } from "./content/kit";
+import { DuelKit, PIECE_X } from "./duel-types";
+import { PATCH_POUCH_MAX, isPatchMask } from "./patch-cells";
 
 /**
  * Two-layer persistence, both browser-local. Meta survives everything and
@@ -99,6 +101,19 @@ export function baseRunKit(): RunKit {
   };
 }
 
+/** The one RunKit-to-DuelKit mapping. Every dive, real or simulated, uses this. */
+export function duelKitOf(kit: RunKit, patchPouch: number[]): DuelKit {
+  return {
+    scanTier: kit.scanTier,
+    attackTier: kit.attackTier,
+    defendTier: kit.defendTier,
+    attackMode: kit.attackMode,
+    defendMode: kit.defendMode,
+    augments: kit.augments,
+    patchPouch: [...patchPouch],
+  };
+}
+
 /** The one upgrade a closed day buys. Null until the player commits. */
 export type NightPick = "ram" | "scan" | "attack" | "defend" | null;
 
@@ -111,8 +126,12 @@ export interface RunState {
   strain: number;
   ramPerTurn: number;
   credits: number;
-  /** Single-use slag fills bought at day close, carried across the run. */
-  patchCells: number;
+  /** Shaped patch pieces held (4-bit arm masks), carried across the run. */
+  patchPouch: number[];
+  /** Lifetime darknet purchases this run; salts each buy's rng stream. */
+  darkBuys: number;
+  /** The piece the last darknet buy rolled, for the reveal beat. */
+  lastDarkBuy: number | null;
   /** Strain restored by the most recent day-close rest (for the meter fill). */
   lastRegen: number;
   /**
@@ -122,6 +141,8 @@ export interface RunState {
    */
   nightPick: NightPick;
   kit: RunKit;
+  /** Boost bay capacity. Configs never occupy a bay. */
+  boostSlots: number;
   jobs: JobInstance[];
   jobsDone: boolean[];
   screen: RunScreen;
@@ -136,9 +157,16 @@ export interface RunState {
     basePay: number;
     /** Salvage paid in place of an augment when the cache ran dry. */
     salvage: number;
-    /** Did CLEAN RUN fire, and did the pouch have room for the cell? */
-    cleanRun: "banked" | "capped" | null;
+    /** CLEAN RUN's consolation on a trap-free cap win, itemized. */
+    cleanRunBonus: number;
+    /** Did CLEAN RUN fire, and what piece did it bank (pouch permitting)? */
+    cleanRun: { status: "banked"; mask: number } | { status: "capped" } | null;
+    /** Did the job drop a piece, and which? Capped drops still name the
+     * shape that was left on the bench. */
+    patchDrop: { status: "banked" | "capped"; mask: number } | null;
     capWin: boolean;
+    /** Gridlock collapse win: full pay, flat strain chip. */
+    gridlockWin: boolean;
     /** Chip inputs, kept so the result row can show what actually billed. */
     overRotations: number;
     trapsFired: number;
@@ -146,6 +174,8 @@ export interface RunState {
     /** Augment draft offered for this win; empty when the pool ran dry. */
     draft: AugmentId[];
     picked: AugmentId | null;
+    /** Boost ejected by a full-bay swap, for the result stamp. */
+    replaced: AugmentId | null;
   } | null;
 }
 
@@ -212,8 +242,25 @@ function parseRun(raw: string): RunState | null {
   ) {
     return null;
   }
-  // Pre-patch-cell saves resume with an empty pouch.
-  if (typeof p.patchCells !== "number") p.patchCells = 0;
+  // Migration ladder for the pouch. Saves from the integer era held only
+  // crosses (that is literally what 35 cr bought), so N cells become N
+  // cross masks: exact value preserved, deterministic, nothing to scum.
+  const legacyCells = (p as { patchCells?: unknown }).patchCells;
+  if (typeof legacyCells === "number" && isFinite(legacyCells)) {
+    p.patchPouch = Array(Math.max(0, Math.min(Math.floor(legacyCells), PATCH_POUCH_MAX))).fill(PIECE_X);
+  } else if (Array.isArray(p.patchPouch)) {
+    p.patchPouch = p.patchPouch.filter(isPatchMask).slice(0, PATCH_POUCH_MAX);
+  } else {
+    p.patchPouch = [];
+  }
+  if (typeof p.darkBuys !== "number" || !isFinite(p.darkBuys)) p.darkBuys = 0;
+  if (!isPatchMask(p.lastDarkBuy)) p.lastDarkBuy = null;
+  // Pre-bay saves start at base capacity; anything odd clamps into range.
+  if (typeof p.boostSlots !== "number" || !isFinite(p.boostSlots)) p.boostSlots = 3;
+  p.boostSlots = Math.max(3, Math.min(5, Math.floor(p.boostSlots)));
+  // Catalog surgery: ids the catalog no longer knows are no-ops that would
+  // waste a bay; drop them. Over-cap runs are grandfathered, never trimmed.
+  p.kit.augments = p.kit.augments.filter((id) => typeof id === "string" && !!AUGMENT_BY_ID[id]);
   if (typeof p.lastRegen !== "number") p.lastRegen = 0;
   // Pre-night-pick saves resume with the night still undecided.
   if (!NIGHT_PICKS.includes(p.nightPick as Exclude<NightPick, null>)) p.nightPick = null;

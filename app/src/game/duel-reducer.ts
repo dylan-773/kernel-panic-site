@@ -13,6 +13,7 @@ import {
   tierOf,
 } from "./duel-actions";
 import { canPlace, canRotate } from "./duel-power";
+import { PLACE_COST } from "./patch-cells";
 import { DuelState } from "./duel-types";
 import { oppStep } from "./opponent";
 
@@ -24,7 +25,7 @@ import { oppStep } from "./opponent";
 
 export type DuelAction =
   | { type: "rotate"; idx: number }
-  | { type: "place"; idx: number }
+  | { type: "place"; idx: number; pouchIdx: number; mask: number }
   | { type: "cast"; prog: Program; targets: number[] }
   | { type: "endTurn" }
   | { type: "oppStep" }
@@ -38,7 +39,8 @@ function cloneState(s: DuelState): DuelState {
       player: { ...s.econ.player, used: { ...s.econ.player.used } },
       opp: { ...s.econ.opp, used: { ...s.econ.opp.used } },
     },
-    kit: { ...s.kit, augments: [...s.kit.augments] },
+    kit: { ...s.kit, augments: [...s.kit.augments], patchPouch: [...s.kit.patchPouch] },
+    patchPouch: [...s.patchPouch],
     tutFlags: { ...s.tutFlags },
     oppTurn: { ...s.oppTurn },
     fx: [...s.fx],
@@ -68,6 +70,9 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       if (s.econ.player.ram < 1) return deny(s, "No RAM left. End the turn.");
       if (!canRotate(s, "player", action.idx)) {
         const c = s.cells[action.idx];
+        if (c && c.kind === "node" && c.fused) {
+          return deny(s, "That junction is welded. A placed piece never turns.");
+        }
         if (c && c.lockedThroughRound >= s.round && c.lockedBy === "opp") {
           return deny(s, "That junction is clamped frozen.");
         }
@@ -83,13 +88,15 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
     case "place": {
       if (!playerCanAct(state)) return state;
       const s = cloneState(state);
-      if (s.patchCells < 1) return deny(s, "No patch cells left.");
-      if (s.econ.player.placedThisTurn) return deny(s, "One patch cell per turn.");
-      if (s.econ.player.ram < 1) return deny(s, "No RAM left. End the turn.");
+      if (s.patchPouch.length < 1) return deny(s, "The pouch is empty.");
+      if (s.econ.player.placedThisTurn) return deny(s, "One patch piece per turn.");
+      if (s.econ.player.ram < PLACE_COST) return deny(s, "Placing a piece takes 2 RAM.");
+      // Stale-click guard: the action names the piece it thinks it spends.
+      if (s.patchPouch[action.pouchIdx] !== action.mask) return deny(s);
       if (!canPlace(s, "player", action.idx)) {
-        return deny(s, "Patch cells only fill slag within reach of your territory.");
+        return deny(s, "Patch pieces only fill slag within reach of your territory.");
       }
-      applyPlace(s, "player", action.idx);
+      applyPlace(s, "player", action.idx, action.pouchIdx);
       return s;
     }
 

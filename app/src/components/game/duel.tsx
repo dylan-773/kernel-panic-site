@@ -35,6 +35,7 @@ import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
 import { DuelConfig, DuelKit, DuelState, ROUND_CAP } from "../../game/duel-types";
 import { DuelBoard } from "./duel-board";
+import { PatchGlyph } from "./patch-glyph";
 
 interface Targeting {
   prog: "attack" | "defend";
@@ -69,7 +70,10 @@ export interface DuelFinish {
   won: boolean;
   chip: number;
   capWin: boolean;
-  cellsUsed: number;
+  /** Neither side could route; the player won the collapse. */
+  gridlockWin: boolean;
+  /** The pouch as the dive left it (spent pieces already gone). */
+  pouchLeft: number[];
   /** The two inputs behind the chip, so the result row can itemize it. */
   overRotations: number;
   trapsFired: number;
@@ -196,7 +200,7 @@ function fxJuice(kind: string, n: number | undefined, soundOn: boolean): { shake
     case "place":
       // Utility placement, not a combat impact: no shake.
       if (soundOn) sfx("patchPlace");
-      pulse = mk("CELL PLACED", "kp-pulse-info");
+      pulse = mk("PIECE PLACED", "kp-pulse-info");
       break;
     case "lock":
       if (soundOn) sfx("shieldCast");
@@ -219,7 +223,7 @@ export function DuelScreen(props: DuelScreenProps) {
     () => createDuel(cfg, seed, kit, ramPerTurn),
   );
   const [targeting, setTargeting] = useState<Targeting | null>(null);
-  const [placing, setPlacing] = useState(false);
+  const [placing, setPlacing] = useState<number | null>(null);
   const [parPopKey, setParPopKey] = useState(0);
   const prevOverRef = useRef(0);
   const [infoProg, setInfoProg] = useState<Program | null>(null);
@@ -275,7 +279,7 @@ export function DuelScreen(props: DuelScreenProps) {
 
   const playerTurn = state.phase === "playing" && state.turn === "player";
   /** A program is half placed: targets picked but not yet committed. */
-  const arming = targeting !== null || placing;
+  const arming = targeting !== null || placing !== null;
   const econ = state.econ.player;
 
   // Opponent moves on a readable cadence, with a low presence drone.
@@ -395,8 +399,8 @@ export function DuelScreen(props: DuelScreenProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Escape") {
         setTargeting(null);
-        setPlacing(false);
-      } else if (e.code === "KeyE" && playerTurn && !targeting && !placing) {
+        setPlacing(null);
+      } else if (e.code === "KeyE" && playerTurn && !targeting && placing === null) {
         dispatch({ type: "endTurn" });
       }
     };
@@ -408,7 +412,7 @@ export function DuelScreen(props: DuelScreenProps) {
   const legal = useMemo(() => {
     const out = new Set<number>();
     if (!playerTurn) return out;
-    if (placing) {
+    if (placing !== null) {
       if (econ.ram < 1) return out;
       for (let i = 0; i < state.cells.length; i++) {
         if (canPlace(state, "player", i)) out.add(i);
@@ -456,9 +460,9 @@ export function DuelScreen(props: DuelScreenProps) {
 
   const onCell = (idx: number) => {
     if (!playerTurn) return;
-    if (placing) {
-      dispatch({ type: "place", idx });
-      setPlacing(false);
+    if (placing !== null) {
+      dispatch({ type: "place", idx, pouchIdx: placing, mask: state.patchPouch[placing] });
+      setPlacing(null);
       return;
     }
     if (targeting) {
@@ -478,7 +482,7 @@ export function DuelScreen(props: DuelScreenProps) {
     if (!playerTurn || econ.used[prog]) return;
     if (infoProg) closeInfo();
     if (soundOn) playUiPress();
-    setPlacing(false);
+    setPlacing(null);
     // Any program press abandons the one being aimed. Leaving it live meant
     // casting SCAN with ATTACK armed kept the board in attack-target
     // highlighting, which under REDIRECT lights nearly every node and buries
@@ -516,7 +520,8 @@ export function DuelScreen(props: DuelScreenProps) {
       won: state.phase === "won",
       chip: state.strainChip,
       capWin: state.winKind === "cap",
-      cellsUsed: kit.patchCells - state.patchCells,
+      gridlockWin: state.winKind === "gridlock",
+      pouchLeft: state.patchPouch,
       // Mirrors finishDuel's own inputs (duel-actions.ts), so the result
       // screen redisplays the bill rather than re-deriving it.
       overRotations: Math.max(0, state.econ.player.rotations - state.par),
@@ -597,6 +602,7 @@ export function DuelScreen(props: DuelScreenProps) {
             selected={new Set(targeting?.picked ?? [])}
             aimed={aimed}
             traced={traced}
+            ghostMask={placing !== null ? (state.patchPouch[placing] ?? null) : null}
             onCell={onCell}
           />
           {sweep > 0 && <div key={`sw-${sweep}`} className="kp-sweep" aria-hidden="true" />}
@@ -634,15 +640,18 @@ export function DuelScreen(props: DuelScreenProps) {
           {coach && <div className="kp-coach">{coach}</div>}
           <Teach id="par-budget" signals={{ overPar: overPar > 0 }} />
           <Teach id="cascade-bank" signals={{ cascadeBanked: sawCascade }} />
-          <Teach id="patch-cell-use" signals={{ holdingCells: state.patchCells > 0 }} />
-          {placing && (
+          <Teach id="patch-cell-use" signals={{ holdingCells: state.patchPouch.length > 0 }} />
+          {placing !== null && state.patchPouch[placing] !== undefined && (
             <div className="kp-targetbar">
+              <span className="kp-targetbar-glyph">
+                <PatchGlyph mask={state.patchPouch[placing]} size={18} />
+              </span>
               <span>
                 {legal.size > 0
-                  ? "PATCH CELL: pick a slag block within reach (1 RAM)"
-                  : "PATCH CELL: no slag block in reach"}
+                  ? "PATCH PIECE: pick a slag block within reach (2 RAM)"
+                  : "PATCH PIECE: no slag block in reach"}
               </span>
-              <button type="button" onClick={() => setPlacing(false)}>
+              <button type="button" onClick={() => setPlacing(null)}>
                 CANCEL (ESC)
               </button>
             </div>
@@ -758,30 +767,35 @@ export function DuelScreen(props: DuelScreenProps) {
         </div>
 
         {!cfg.tutorial && (
-          <button
-            type="button"
-            className={`kp-ability kp-prog-place ${placing ? "kp-ability-arming" : ""} ${state.patchCells < 1 ? "kp-prog-offline" : ""}`}
-            disabled={
-              !playerTurn ||
-              state.patchCells < 1 ||
-              econ.placedThisTurn ||
-              econ.ram < 1
-            }
-            onClick={() => {
-              if (soundOn) playUiPress();
-              setTargeting(null);
-              setPlacing((p) => !p);
-            }}
+          <div
+            className={`kp-ability kp-prog-place kp-pouch-strip ${placing !== null ? "kp-ability-arming" : ""} ${state.patchPouch.length < 1 ? "kp-prog-offline" : ""}`}
           >
-            <span className="kp-ability-name">PATCH CELL</span>
-            <span className="kp-ability-meta">
-              {state.patchCells < 1
-                ? "NONE HELD"
-                : econ.placedThisTurn
-                  ? `x${state.patchCells} - USED`
-                  : `x${state.patchCells} - 1R`}
+            <span className="kp-ability-name">
+              PATCH {state.patchPouch.length > 0 && <i className="kp-prog-tier">x{state.patchPouch.length}</i>}
             </span>
-          </button>
+            {state.patchPouch.length < 1 ? (
+              <span className="kp-ability-meta">NONE HELD</span>
+            ) : (
+              <span className="kp-pouch-glyphs">
+                {state.patchPouch.map((mask, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    className={`kp-pouch-piece ${placing === i ? "kp-pouch-piece-armed" : ""}`}
+                    disabled={!playerTurn || econ.placedThisTurn || econ.ram < 2}
+                    title={econ.placedThisTurn ? "One piece per turn" : "Place this piece (2 RAM)"}
+                    onClick={() => {
+                      if (soundOn) playUiPress();
+                      setTargeting(null);
+                      setPlacing((p) => (p === i ? null : i));
+                    }}
+                  >
+                    <PatchGlyph mask={mask} size={20} dim={econ.placedThisTurn} />
+                  </button>
+                ))}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Locked out mid cast: ending the turn with a program armed threw

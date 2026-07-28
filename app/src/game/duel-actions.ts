@@ -1,5 +1,6 @@
 import {
   DefendMode,
+  GRIDLOCK_CHIP,
   LOCK_ROUNDS,
   OppMode,
   PAR_STRAIN_PER,
@@ -16,12 +17,16 @@ import { canPlace, computeDuelPower, routeCost, routePlan, runFlood } from "./du
 import {
   DuelEndKind,
   DuelState,
+  PIECE_I,
+  PIECE_L,
+  PIECE_T,
   PIECE_X,
   ROUND_CAP,
   Side,
   TrapKind,
   otherSide,
 } from "./duel-types";
+import { PLACE_COST, armCount, shapeClassOf } from "./patch-cells";
 import { nextU32 } from "./rng";
 
 /**
@@ -104,8 +109,10 @@ export function finishDuel(
     // and dragging the link to the cap. At or under par, clean, zero.
     const over = Math.max(0, s.econ.player.rotations - s.par);
     let chip = PAR_STRAIN_PER * over;
-    chip += 4 * s.econ.player.trapsFired;
+    // First Fault forgives the strain of one sprung trap, never the tempo.
+    chip += 4 * Math.max(0, s.econ.player.trapsFired - (kitHas(s, "firstFault") ? 1 : 0));
     if (kind === "cap") chip += 10;
+    if (kind === "gridlock") chip += GRIDLOCK_CHIP;
     s.strainChip = Math.min(40, chip);
   } else {
     s.strainChip = 0;
@@ -135,7 +142,6 @@ export function settleFloods(s: DuelState, acting: Side): boolean {
     // Cascades bank RAM for the next turn: the chain you set up buys the
     // tempo to keep pushing, without compounding inside one turn.
     let bonus = cascadeRam(f.claimed.length);
-    if (bonus > 0 && side === "player" && kitHas(s, "surge")) bonus += 1;
     if (bonus > 0) {
       s.econ[side].drainNext -= bonus;
       emit(s, side === "player" ? "cascadeRam" : "cascadeRamOpp", bonus);
@@ -219,26 +225,29 @@ export function applyRotate(s: DuelState, side: Side, idx: number): boolean {
 }
 
 /**
- * Spend a patch cell: the slag block becomes an open cross junction.
- * 1 RAM, once per turn, consumes a cell. Does not count against par.
+ * Spend a patch piece: the slag block becomes a live junction with exactly
+ * the piece's arms, at its fixed orientation. PLACE_COST RAM, once per turn,
+ * consumes the piece. Does not count against par. The placed node is an
+ * ordinary neutral junction afterward: it rotates, floods claim it, and
+ * routePlan prices it like anything else.
  */
-export function applyPlace(s: DuelState, side: Side, idx: number): boolean {
+export function applyPlace(s: DuelState, side: Side, idx: number, pouchIdx: number): boolean {
   const econ = s.econ[side];
-  if (econ.ram < 1 || s.patchCells < 1 || econ.placedThisTurn) return false;
+  if (econ.ram < PLACE_COST || econ.placedThisTurn) return false;
+  const mask = s.patchPouch[pouchIdx];
+  if (mask === undefined) return false;
   const c = s.cells[idx];
   c.kind = "node";
-  c.base = PIECE_X;
+  c.base = mask;
   c.rot = 0;
-  // Slag Ward rider: the fresh junction opens under cover.
-  if (side === "player" && kitHas(s, "slagWard")) {
-    c.wardThroughRound = Math.max(c.wardThroughRound, s.round);
-    c.wardBy = "player";
-  }
-  econ.ram -= 1;
+  c.fused = true;
+  econ.ram -= PLACE_COST;
+  // Splice Refund rider: the placement cast is free, the piece is not.
+  if (side === "player" && kitHas(s, "patchRefund")) econ.ram += PLACE_COST;
   econ.placedThisTurn = true;
-  s.patchCells -= 1;
+  s.patchPouch = s.patchPouch.filter((_, i) => i !== pouchIdx);
   emit(s, "place");
-  say(s, "PATCH CELL. The slag melts into a live cross junction.");
+  say(s, "PATCH PIECE. The slag melts into a live junction, arms exactly as held.");
   const trapped = settleFloods(s, side);
   if (trapped && s.phase === "playing") {
     if (side === "player") forceEndPlayerTurn(s);
@@ -263,6 +272,7 @@ export function armTargetLegal(s: DuelState, caster: Side, idx: number): boolean
 export function redirectTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.cells[idx];
   if (!c || c.kind !== "node") return false;
+  if (c.fused) return false; // welded patch pieces never twist, for anyone
   if (c.owner === caster) return false; // own nodes rotate for 1 RAM instead
   if (c.lockedThroughRound >= s.round && c.lockedBy === otherSide(caster)) return false;
   // An enemy ward refuses redirects the same way it refuses traps.
@@ -355,7 +365,8 @@ export function applyCast(
     if (side === "player" && kitHas(s, "tapLine")) {
       const plan = routePlan(s, "opp");
       if (plan) {
-        s.routeTrace = { round: s.round, cells: plan.path.map((p) => p.idx) };
+        // Visible through the next full round, not just the cast round.
+        s.routeTrace = { round: s.round + 1, cells: plan.path.map((p) => p.idx) };
         emit(s, "trace");
       }
     }
@@ -377,9 +388,10 @@ export function applyCast(
         const c = s.cells[idx];
         c.rot = (c.rot + 1) % 4;
         c.spin += 1;
-        // Jam Anchor rider: the twist holds for a round.
+        // Jam Anchor rider: the twist holds through the reply and into
+        // the caster's own next turn.
         if (side === "player" && kitHas(s, "jamAnchor")) {
-          c.lockedThroughRound = Math.max(c.lockedThroughRound, s.round);
+          c.lockedThroughRound = Math.max(c.lockedThroughRound, s.round + 1);
           c.lockedBy = "player";
         }
       }
@@ -396,11 +408,14 @@ export function applyCast(
       const kind: TrapKind = mode === "armSiphon" ? "siphon" : "halt";
       let drain = 0;
       if (kind === "siphon") {
+        // Player-side baseline bonus lives here, never in the shared
+        // SIPHON_STEAL table (which tier 3+ opponents also read).
         drain =
           SIPHON_STEAL[tierOf(s, side, "attack")] +
+          (side === "player" ? 1 : 0) +
           (side === "player" && kitHas(s, "siphonPlus") ? 1 : 0);
       } else if (side === "player" && kitHas(s, "tripwire")) {
-        drain = 2;
+        drain = 3;
       }
       for (const idx of targets) {
         s.cells[idx].trap = { by: side, revealed: side === "player", kind, drain };
@@ -428,9 +443,9 @@ export function applyCast(
         n++;
       }
     }
-    // Sweep Credit: a purge that actually lands pays for itself.
+    // Sweep Credit: a purge that lands pays out per defused trap.
     if (n > 0 && side === "player" && kitHas(s, "sweepCredit")) {
-      econ.ram += PROGRAM_COST;
+      econ.ram += Math.min(n, 3) * PROGRAM_COST;
     }
     emit(s, "purge", n);
     say(
@@ -458,7 +473,7 @@ export function applyCast(
     );
   } else if (mode === "ward") {
     const radius = WARD_RADIUS[tierOf(s, side, "defend")];
-    const through = side === "player" ? s.round + WARD_ROUNDS - 1 : s.round + WARD_ROUNDS;
+    const through = s.round + WARD_ROUNDS;
     const center = s.cells[targets[0]];
     for (const c of s.cells) {
       if (c.kind !== "node" || c.owner === enemy) continue;
@@ -475,16 +490,6 @@ export function applyCast(
     );
   }
 
-  // Bulwark rider: any player DEFEND also bolts its targets for one round.
-  if (side === "player" && kitHas(s, "bulwark")) {
-    for (const idx of targets) {
-      const c = s.cells[idx];
-      if (c.kind !== "node" || c.owner === "opp") continue;
-      if (c.lockedThroughRound >= s.round && c.lockedBy === "opp") continue;
-      c.lockedThroughRound = Math.max(c.lockedThroughRound, s.round);
-      c.lockedBy = "player";
-    }
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -567,14 +572,14 @@ export function endOppTurn(s: DuelState): void {
           s,
           "opp",
           "severed",
-          "SEVERED. Its territory walls your port off from the core. No rotation and no patch cell opens a route, so the link is already lost.",
+          "SEVERED. Its territory walls your port off from the core. No rotation and no patch piece opens a route, so the link is already lost.",
         );
       } else {
         finishDuel(
           s,
           "player",
           "gridlock",
-          "Total gridlock. Neither signal can reach the core, so the link collapses in your favor.",
+          "Total gridlock. Neither signal can reach the core. The link collapses in your favor, and the dead link bites on the way out.",
         );
       }
       return;
@@ -599,37 +604,63 @@ export function endPlayerTurn(s: DuelState): void {
 }
 
 /**
- * Depth of the patch-cell rescue search. Two placements cover every real
- * case (a cell opens reach for the next one); past that the branching cost
+ * Depth of the patch-piece rescue search. Two placements cover every real
+ * case (a piece opens reach for the next one); past that the branching cost
  * outweighs the odds, and the two-round streak guard catches the remainder.
  */
 const RESCUE_DEPTH = 2;
 
 /**
- * Can the player still reach the core, counting patch cells they are holding
- * but have not spent? `routePlan` already prices every rotation, so the only
- * thing it cannot see is slag turning into a junction. Called only when the
- * plain route has failed, so the block enumeration stays off the hot path.
+ * The distinct masks worth trialing from a pouch. Placed pieces are WELDED
+ * (fused, orientation final), so every distinct oriented mask is its own
+ * case; only a held cross dominates everything (all four arms regardless).
+ */
+function rescueMasks(pouch: number[]): number[] {
+  if (pouch.some((m) => armCount(m) >= 4)) return [PIECE_X];
+  return [...new Set(pouch)];
+}
+
+/** Drop one held piece with exactly this mask. */
+function withoutOne(pouch: number[], mask: number): number[] {
+  const idx = pouch.indexOf(mask);
+  return pouch.filter((_, i) => i !== idx);
+}
+
+/**
+ * Can the player still reach the core, counting patch pieces they are
+ * holding but have not spent? `routePlan` already prices every rotation, so
+ * the only thing it cannot see is slag turning into a junction. Placed
+ * pieces are welded, so the trial enumerates the exact held masks at their
+ * fixed orientations. Crafting is impossible mid-dive by design, so the
+ * held pieces are the whole truth. Called only when the plain route has
+ * failed, off the hot path.
  */
 export function playerHasRoute(s: DuelState): boolean {
   if (isFinite(routeCost(s, "player"))) return true;
-  return rescueWithCells(s, Math.min(s.patchCells, RESCUE_DEPTH));
+  return rescueWithPieces(s, s.patchPouch, Math.min(s.patchPouch.length, RESCUE_DEPTH));
 }
 
-function rescueWithCells(s: DuelState, cellsLeft: number): boolean {
-  if (cellsLeft <= 0) return false;
+function rescueWithPieces(s: DuelState, pouch: number[], cellsLeft: number): boolean {
+  if (cellsLeft <= 0 || pouch.length === 0) return false;
+  const masks = rescueMasks(pouch);
   for (let i = 0; i < s.cells.length; i++) {
     if (!canPlace(s, "player", i)) continue;
     const c = s.cells[i];
-    const prev = { kind: c.kind, base: c.base, rot: c.rot };
-    c.kind = "node";
-    c.base = PIECE_X;
-    c.rot = 0;
-    const ok = isFinite(routeCost(s, "player")) || rescueWithCells(s, cellsLeft - 1);
-    c.kind = prev.kind;
-    c.base = prev.base;
-    c.rot = prev.rot;
-    if (ok) return true;
+    const prev = { kind: c.kind, base: c.base, rot: c.rot, fused: c.fused };
+    for (const mask of masks) {
+      c.kind = "node";
+      c.base = mask;
+      c.rot = 0;
+      c.fused = true;
+      const ok =
+        isFinite(routeCost(s, "player")) ||
+        rescueWithPieces(s, withoutOne(pouch, mask), cellsLeft - 1);
+      c.kind = prev.kind;
+      c.base = prev.base;
+      c.rot = prev.rot;
+      c.fused = prev.fused;
+      if (ok) return true;
+    }
   }
   return false;
 }

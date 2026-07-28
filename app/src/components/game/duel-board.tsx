@@ -1,37 +1,10 @@
-import { memo, type ReactElement } from "react";
+import { memo } from "react";
 import { DuelCell, DuelState } from "../../game/duel-types";
 import { rotateArms } from "../../game/types";
+import { armLines } from "./patch-glyph";
 
 const CS = 48;
 const HALF = CS / 2;
-
-/** Arm line endpoints for each direction (local cell coordinates). */
-const ARM_ENDS: Array<[number, number]> = [
-  [0, -HALF],
-  [HALF, 0],
-  [0, HALF],
-  [-HALF, 0],
-];
-
-function armLines(mask: number, className: string, width: number): ReactElement[] {
-  const out: ReactElement[] = [];
-  for (let d = 0; d < 4; d++) {
-    if ((mask & (1 << d)) === 0) continue;
-    const [ex, ey] = ARM_ENDS[d];
-    out.push(
-      <line
-        key={`${className}-${d}`}
-        x1={0}
-        y1={0}
-        x2={ex}
-        y2={ey}
-        className={className}
-        strokeWidth={width}
-      />,
-    );
-  }
-  return out;
-}
 
 interface DuelCellViewProps {
   cell: DuelCell;
@@ -44,6 +17,8 @@ interface DuelCellViewProps {
   aimed: boolean;
   traced: boolean;
   trapVisible: boolean;
+  /** Armed patch piece's arms, ghosted over legal slag on hover. */
+  ghostMask: number | null;
   onCell: (idx: number) => void;
 }
 
@@ -58,6 +33,7 @@ const DuelCellView = memo(function DuelCellView({
   aimed,
   traced,
   trapVisible,
+  ghostMask,
   onCell,
 }: DuelCellViewProps) {
   const cx = cell.x * CS + HALF;
@@ -129,6 +105,12 @@ const DuelCellView = memo(function DuelCellView({
         <g className="kp-dblock">
           <polygon points="-14,-8 -4,-15 9,-12 15,-2 10,10 -2,14 -13,7" className="kp-dblock-body" />
           <path d="M -6 -4 L 4 5 M 2 -7 L -2 2" className="kp-dblock-crack" />
+          {legal && ghostMask !== null && (
+            <g className="kp-dghost" aria-hidden="true">
+              <g>{armLines(ghostMask, "kp-dghost-arm", 5)}</g>
+              <circle r={4} className="kp-dghost-node" />
+            </g>
+          )}
         </g>
       )}
 
@@ -148,6 +130,7 @@ const DuelCellView = memo(function DuelCellView({
             }
             r={mine || theirs ? 6.5 : 5}
           />
+          {cell.fused && <rect x={-3} y={-3} width={6} height={6} className="kp-dweld" aria-hidden="true" />}
           {locked && (
             <g className="kp-dshield">
               <path d="M -13 -9 L -13 -14 L -8 -14 M 8 -14 L 13 -14 L 13 -9" className="kp-dshield-b" />
@@ -231,10 +214,12 @@ export interface DuelBoardProps {
   aimed: Set<number>;
   /** TAP LINE: the intrusion's traced route. */
   traced: Set<number>;
+  /** Armed patch piece's arms, or null when nothing is armed. */
+  ghostMask?: number | null;
   onCell: (idx: number) => void;
 }
 
-export function DuelBoard({ state, legal, selected, aimed, traced, onCell }: DuelBoardProps) {
+export function DuelBoard({ state, legal, selected, aimed, traced, ghostMask = null, onCell }: DuelBoardProps) {
   const { w, h, cells } = state;
   const vw = w * CS;
   const vh = h * CS;
@@ -273,6 +258,7 @@ export function DuelBoard({ state, legal, selected, aimed, traced, onCell }: Due
             aimed={aimed.has(idx)}
             traced={traced.has(idx)}
             trapVisible={trapVisible}
+            ghostMask={cell.kind === "block" ? ghostMask : null}
             onCell={onCell}
           />
         );

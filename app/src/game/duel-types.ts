@@ -41,6 +41,9 @@ export interface DuelCell {
   rot: number;
   /** Cumulative quarter turns for monotonic spin animation. */
   spin: number;
+  /** Welded: a placed patch piece. Its orientation is final; nothing
+   * rotates or redirects it, ever. */
+  fused: boolean;
   /** Claimed territory. Ports are owned by their side; core stays "none". */
   owner: "none" | Side;
   /** Global claim sequence number (0 = never claimed), for ordering. */
@@ -70,8 +73,8 @@ export interface DuelKit {
   attackMode: AttackMode;
   defendMode: DefendMode;
   augments: AugmentId[];
-  /** Single-use slag fills carried into the dive. */
-  patchCells: number;
+  /** Single-use shaped slag fills carried into the dive: 4-bit arm masks. */
+  patchPouch: number[];
 }
 
 export const BASE_KIT: DuelKit = {
@@ -81,7 +84,7 @@ export const BASE_KIT: DuelKit = {
   attackMode: "redirect",
   defendMode: "purge",
   augments: [],
-  patchCells: 0,
+  patchPouch: [],
 };
 
 export interface DuelConfig {
@@ -94,6 +97,13 @@ export interface DuelConfig {
   abilityFreq: number;
   /** Target route cost (rotation RAM) the board generator aims both sides at. */
   minCost: number;
+  /**
+   * Hard floor on the player's opening route cost. The old guarantee was
+   * only "more than one turn of RAM"; boosts, cascade banking, and a patch
+   * piece shortcut can beat that. Raise it where opening bursts must not
+   * close a board. Defaults to playerRamPerTurn.
+   */
+  minPd?: number;
   /** Neutral nodes pre-claimed along the intrusion's route at dive start. */
   headStart: number;
   /** Attack/defend modes the machine may run, and how wide it casts. */
@@ -104,6 +114,10 @@ export interface DuelConfig {
   dominant: OppMode;
   /** Per-day override of the par margin's flat term (defaults to PAR_FLAT). */
   parFlat?: number;
+  /** Slag density at board generation (defaults to 0.18, tutorial 0.12). */
+  slag?: number;
+  /** The machine takes the first turn. Finale only: it was already inside. */
+  oppOpens?: boolean;
   tutorial?: boolean;
 }
 
@@ -182,8 +196,8 @@ export interface DuelState {
   oppStartCost: number;
   /** Rotation budget for a clean win; going over chips strain. */
   par: number;
-  /** Patch cells still unspent this dive. */
-  patchCells: number;
+  /** Shaped patch pieces still unspent this dive: 4-bit arm masks. */
+  patchPouch: number[];
   /**
    * Consecutive round-ends where the player had no route to the core. The
    * severed verdict needs two, so a one-round planner blindspot cannot end

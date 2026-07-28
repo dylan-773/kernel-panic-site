@@ -15,23 +15,29 @@ export interface DayConfig {
   greed: number;
   abilityFreq: number;
   minCost: number;
+  /** Floor on the player's opening route cost (see DuelConfig.minPd). */
+  minPd?: number;
   headStart: number;
   /** Flat term of the par margin for this day (tapers late; see kit.ts). */
   parFlat: number;
+  /** Slag density at board generation. */
+  slag: number;
+  /** Chance a cleared job drops a random patch piece. */
+  patchDrop: number;
   /** Opponent difficulty tier of the day's three jobs. */
   jobTiers: [number, number, number];
 }
 
 export const DAY_CONFIGS: Record<number, DayConfig> = {
-  1: { grid: [9, 7], oppRam: 6, greed: 0.7, abilityFreq: 0.2, minCost: 16, headStart: 0, parFlat: 6, jobTiers: [1, 1, 1] },
-  2: { grid: [9, 7], oppRam: 6, greed: 0.73, abilityFreq: 0.25, minCost: 16, headStart: 0, parFlat: 5, jobTiers: [1, 1, 2] },
-  3: { grid: [9, 9], oppRam: 6, greed: 0.86, abilityFreq: 0.45, minCost: 18, headStart: 1, parFlat: 5, jobTiers: [1, 2, 2] },
-  4: { grid: [9, 9], oppRam: 6, greed: 0.89, abilityFreq: 0.45, minCost: 18, headStart: 2, parFlat: 4, jobTiers: [2, 2, 3] },
-  5: { grid: [11, 9], oppRam: 7, greed: 0.92, abilityFreq: 0.55, minCost: 20, headStart: 2, parFlat: 4, jobTiers: [2, 3, 3] },
-  6: { grid: [11, 9], oppRam: 7, greed: 0.98, abilityFreq: 0.6, minCost: 20, headStart: 2, parFlat: 3, jobTiers: [3, 3, 3] },
-  7: { grid: [11, 9], oppRam: 7, greed: 0.99, abilityFreq: 0.65, minCost: 21, headStart: 3, parFlat: 2, jobTiers: [3, 3, 4] },
-  8: { grid: [11, 11], oppRam: 8, greed: 0.97, abilityFreq: 0.7, minCost: 22, headStart: 3, parFlat: 2, jobTiers: [4, 4, 4] },
-  9: { grid: [11, 11], oppRam: 9, greed: 0.96, abilityFreq: 0.75, minCost: 22, headStart: 4, parFlat: 1, jobTiers: [4, 4, 5] },
+  1: { grid: [9, 7], oppRam: 6, greed: 0.7, abilityFreq: 0.2, minCost: 16, headStart: 0, parFlat: 6, slag: 0.18, patchDrop: 0.35, jobTiers: [1, 1, 1] },
+  2: { grid: [9, 7], oppRam: 6, greed: 0.76, abilityFreq: 0.32, minCost: 16, headStart: 0, parFlat: 5, slag: 0.18, patchDrop: 0.35, jobTiers: [1, 1, 2] },
+  3: { grid: [9, 9], oppRam: 6, greed: 0.88, abilityFreq: 0.45, minCost: 18, headStart: 1, parFlat: 5, slag: 0.19, patchDrop: 0.24, jobTiers: [1, 2, 2] },
+  4: { grid: [9, 9], oppRam: 6, greed: 0.91, abilityFreq: 0.45, minCost: 18, headStart: 2, parFlat: 4, slag: 0.2, patchDrop: 0.22, jobTiers: [2, 2, 3] },
+  5: { grid: [11, 9], oppRam: 7, greed: 0.94, abilityFreq: 0.55, minCost: 20, minPd: 9, headStart: 2, parFlat: 4, slag: 0.21, patchDrop: 0.18, jobTiers: [2, 3, 3] },
+  6: { grid: [11, 9], oppRam: 7, greed: 0.98, abilityFreq: 0.6, minCost: 20, minPd: 10, headStart: 2, parFlat: 3, slag: 0.22, patchDrop: 0.16, jobTiers: [3, 3, 3] },
+  7: { grid: [11, 11], oppRam: 7, greed: 0.99, abilityFreq: 0.65, minCost: 21, minPd: 10, headStart: 3, parFlat: 2, slag: 0.23, patchDrop: 0.13, jobTiers: [3, 3, 4] },
+  8: { grid: [13, 11], oppRam: 8, greed: 0.98, abilityFreq: 0.7, minCost: 22, minPd: 10, headStart: 3, parFlat: 2, slag: 0.24, patchDrop: 0.12, jobTiers: [4, 4, 4] },
+  9: { grid: [13, 11], oppRam: 10, greed: 0.97, abilityFreq: 0.75, minCost: 24, minPd: 12, headStart: 4, parFlat: 1, slag: 0.25, patchDrop: 0.11, jobTiers: [4, 4, 5] },
 };
 
 export const FINAL_DAY = 10;
@@ -92,12 +98,14 @@ export function dayDuelConfig(
     greed: d.greed,
     abilityFreq: d.abilityFreq,
     minCost: d.minCost,
+    minPd: d.minPd,
     headStart: d.headStart,
     oppAttackModes: kit.attackModes,
     oppDefendModes: kit.defendModes,
     oppTier: kit.oppTier,
     dominant,
     parFlat: d.parFlat,
+    slag: d.slag,
   };
 }
 
@@ -108,17 +116,24 @@ export function dayDuelConfig(
  */
 export function finaleConfig(): DuelConfig {
   return {
-    w: 13,
-    h: 11,
-    oppRam: 10,
+    w: 17,
+    h: 13,
+    oppRam: 11,
     greed: 1,
-    abilityFreq: 0.8,
-    minCost: 24,
-    headStart: 4,
+    abilityFreq: 0.9,
+    minCost: 34,
+    minPd: 18,
+    headStart: 1,
     oppAttackModes: [...ATTACK_ALL],
     oppDefendModes: [...DEFEND_ALL],
     oppTier: 3,
     dominant: "redirect",
+    // Tighter than day 9 on purpose: the finale pays for every wasted turn.
+    parFlat: 0,
+    slag: 0.27,
+    // It was already inside. The machine opens the duel, so no kit, however
+    // stacked, ever closes the back room before it has moved.
+    oppOpens: true,
   };
 }
 

@@ -114,6 +114,18 @@ export function scanDesc(tier: Tier): string {
 
 export type AugmentId = string;
 
+/** Flat strain chip on a gridlock win: the dead link bites on the way out. */
+export const GRIDLOCK_CHIP = 6;
+
+/**
+ * Draft gate, declarative so the UI, the MANUAL, and the sims can all
+ * render and verify it: "augment" needs another augment owned first,
+ * "pouch" needs the patch pouch to hold at least one piece at roll time.
+ */
+export type AugmentRequire =
+  | { kind: "augment"; id: AugmentId }
+  | { kind: "pouch" };
+
 export interface AugmentDef {
   id: AugmentId;
   name: string;
@@ -122,6 +134,10 @@ export interface AugmentDef {
   /** Config augments unlock a mode on a program. */
   attackMode?: AttackMode;
   defendMode?: DefendMode;
+  /** Offered in a draft only when this passes. */
+  requires?: AugmentRequire;
+  /** Draft weight. Defaults: config 3, boost 1. */
+  weight?: number;
 }
 
 export const AUGMENTS: AugmentDef[] = [
@@ -137,7 +153,7 @@ export const AUGMENTS: AugmentDef[] = [
     name: "SIPHON DRIVER",
     kind: "config",
     attackMode: "armSiphon",
-    desc: "ATTACK config: plant siphon traps. A sprung trap drains RAM from its next turn into yours, more at higher ATTACK tiers.",
+    desc: "ATTACK config: plant siphon traps. A sprung trap drains RAM from its next turn into yours, more at higher ATTACK tiers, and more again when you are the one springing it.",
   },
   {
     id: "cfgLock",
@@ -151,31 +167,27 @@ export const AUGMENTS: AugmentDef[] = [
     name: "WARD DRIVER",
     kind: "config",
     defendMode: "ward",
-    desc: "DEFEND config: ward an area so no new traps can land in it, and REDIRECT cannot touch anything inside it either.",
+    desc: "DEFEND config: ward an area so no new traps can land in it, and REDIRECT cannot touch anything inside it either, for the full duration on both sides.",
   },
   {
     id: "longArms",
     name: "LONG ARMS",
     kind: "boost",
-    desc: "Rotate open junctions up to 3 steps from your territory instead of 2. Bigger setups, bigger cascades.",
-  },
-  {
-    id: "surge",
-    name: "SURGE CACHE",
-    kind: "boost",
-    desc: "Every cascade big enough to bank RAM banks +1 extra.",
+    desc: "Rotate open junctions up to 4 steps from your territory instead of 2, and place patch pieces just as far. Bigger setups, bigger cascades.",
   },
   {
     id: "siphonPlus",
     name: "DEEP SIPHON",
     kind: "boost",
+    requires: { kind: "augment", id: "cfgArmSiphon" },
     desc: "Your siphon traps steal 1 extra RAM.",
   },
   {
     id: "tripwire",
     name: "TRIPWIRE",
     kind: "boost",
-    desc: "Your halt traps also burn 2 RAM off the victim's next active turn.",
+    requires: { kind: "augment", id: "cfgArmHalt" },
+    desc: "Your halt traps also burn 3 RAM off the victim's next active turn.",
   },
   {
     id: "cheapShot",
@@ -187,25 +199,13 @@ export const AUGMENTS: AugmentDef[] = [
     id: "hotBoot",
     name: "HOT BOOT",
     kind: "boost",
-    desc: "Start every dive with +2 RAM on your first turn.",
-  },
-  {
-    id: "bulwark",
-    name: "BULWARK",
-    kind: "boost",
-    desc: "DEFEND also freezes its target junctions for 1 round, whatever mode it runs.",
+    desc: "Start every dive with +1 RAM on your first turn.",
   },
   {
     id: "tapLine",
     name: "TAP LINE",
     kind: "boost",
-    desc: "SCAN also traces the intrusion's planned route to the core for one round.",
-  },
-  {
-    id: "carryCache",
-    name: "CARRY CACHE",
-    kind: "boost",
-    desc: "Carry up to 4 unspent RAM between turns instead of 2.",
+    desc: "SCAN also traces the intrusion's planned route to the core, visible for 2 rounds.",
   },
   {
     id: "echoTap",
@@ -217,25 +217,44 @@ export const AUGMENTS: AugmentDef[] = [
     id: "jamAnchor",
     name: "JAM ANCHOR",
     kind: "boost",
-    desc: "Your REDIRECT also freezes the junction it twists for 1 round. Nothing rotates or redirects it back while it holds.",
+    desc: "Your REDIRECT also freezes the junction it twists through the reply and into your next turn. Nothing rotates or redirects it back while it holds.",
   },
   {
     id: "sweepCredit",
     name: "SWEEP CREDIT",
     kind: "boost",
-    desc: "PURGE refunds its own RAM cost whenever it defuses at least one trap.",
+    desc: "PURGE refunds 1 RAM per trap it defuses, up to 3 per cast.",
   },
   {
     id: "cleanRun",
     name: "CLEAN RUN",
     kind: "boost",
-    desc: "Win a dive at or under par with no traps sprung, and bank one patch cell. The pouch still holds 3 at most, so a clean win on a full pouch banks nothing.",
+    desc: "Win a dive with zero strain billed and bank one random patch piece. A trap-free win that only misses at the round cap pays 15 credits instead.",
   },
   {
-    id: "slagWard",
-    name: "SLAG WARD",
+    id: "patchRefund",
+    name: "SPLICE REFUND",
     kind: "boost",
-    desc: "Every patch cell you place also wards that new junction for 1 round. Nothing can trap it the instant it opens.",
+    requires: { kind: "pouch" },
+    desc: "Placing a patch piece refunds its full RAM cost the instant it lands. The pouch still spends the piece itself.",
+  },
+  {
+    id: "firstFault",
+    name: "FIRST FAULT",
+    kind: "boost",
+    desc: "The first trap that fires on you each dive bills zero Neural Strain. Every trap after that costs full.",
+  },
+  {
+    id: "overtimeClause",
+    name: "OVERTIME CLAUSE",
+    kind: "boost",
+    desc: "Cap wins pay 75 percent of the ticket instead of 50. The client eats every hour past the deadline, not half.",
+  },
+  {
+    id: "darkDiscount",
+    name: "DARKNET RATE",
+    kind: "boost",
+    desc: "Dark web patch piece pulls cost 15 percent less. The vendor still only takes credits and the roll stays blind.",
   },
 ];
 

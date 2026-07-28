@@ -1,7 +1,15 @@
 import { DAY_CONFIGS, FINAL_DAY, jobPay } from "./content/arc";
 import { CUSTOMERS } from "./content/customers";
-import { AUGMENTS, AttackMode, AugmentId, DefendMode } from "./content/kit";
+import { AUGMENTS, AttackMode, AugmentDef, AugmentId, DefendMode } from "./content/kit";
 import { mixSeed } from "./duel-setup";
+import {
+  CRAFT_COST,
+  PATCH_DROP_TIER_BONUS,
+  PATCH_POUCH_MAX,
+  armUnionCraft,
+  darkPatchCost,
+  rollPatchMask,
+} from "./patch-cells";
 import { Rng } from "./rng";
 import {
   JobInstance,
@@ -42,19 +50,24 @@ export type RunAction =
       won: boolean;
       chip: number;
       capWin: boolean;
-      cellsUsed: number;
+      /** Neither side could route; the player won the collapse. */
+      gridlockWin: boolean;
+      /** The pouch as the dive left it (spent pieces already gone). */
+      pouchLeft: number[];
       overRotations: number;
       trapsFired: number;
       scans: number;
       attackCasts: number;
       defendCasts: number;
     }
-  | { type: "pickAugment"; id: AugmentId }
+  | { type: "pickAugment"; id: AugmentId; replace?: AugmentId }
   | { type: "resultNext" }
   | { type: "chooseUpgrade"; pick: Exclude<NightPick, null> }
   | { type: "closeNight" }
   | { type: "buyPatch" }
-  | { type: "buyPatchCell" }
+  | { type: "buySlot" }
+  | { type: "buyDarkPatch" }
+  | { type: "craftPatch"; a: number; b: number }
   | { type: "startFinale" }
   | { type: "endRunAck" }
   | { type: "taught"; id: string }
@@ -63,15 +76,33 @@ export type RunAction =
 
 export const BASE_RAM = 5;
 export const START_STRAIN = 100;
-export const PATCH_COST = 60;
 export const PATCH_HEAL = 12;
 export const MAX_RAM = 9;
 /** Strain restored for free when a day closes. */
 export const DAY_REST_REGEN = 10;
-export const PATCH_CELL_COST = 35;
-export const PATCH_CELL_MAX = 3;
 /** Paid in place of an augment once the draft pool is exhausted. */
 export const SALVAGE_PAY = 25;
+/** Boost bays: base capacity, ceiling, and the price of each expansion. */
+export const BOOST_SLOTS_BASE = 3;
+export const BOOST_SLOTS_MAX = 5;
+export const BOOST_SLOT_COSTS = [150, 300];
+
+/** Price of the NEXT bay, or null at the ceiling. */
+export function slotCost(run: RunState): number | null {
+  if (run.boostSlots >= BOOST_SLOTS_MAX) return null;
+  return BOOST_SLOT_COSTS[Math.min(run.boostSlots - BOOST_SLOTS_BASE, BOOST_SLOT_COSTS.length - 1)];
+}
+
+/** Night patch price scales with the day so the heal stays a decision. */
+export function nightPatchCost(day: number): number {
+  return 45 + 5 * day;
+}
+
+/** The darknet's live price for this run: day rate, minus DARKNET RATE. */
+export function darkPullPrice(run: RunState): number {
+  const base = darkPatchCost(run.day);
+  return run.kit.augments.includes("darkDiscount") ? Math.round(base * 0.85) : base;
+}
 
 function genDayJobs(runSeed: number, day: number): JobInstance[] {
   const cfg = DAY_CONFIGS[day];
@@ -101,20 +132,54 @@ export function ownsAugment(kit: RunKit, id: AugmentId): boolean {
   return kit.augments.includes(id);
 }
 
+function requireMet(req: NonNullable<AugmentDef["requires"]>, run: RunState): boolean {
+  switch (req.kind) {
+    case "augment":
+      return ownsAugment(run.kit, req.id);
+    case "pouch":
+      return run.patchPouch.length > 0;
+  }
+}
+
+/** May this augment appear in a draft for this run right now? Full bays do
+ * NOT exclude boosts: a full-bay pick is a swap, decided at pick time. */
+export function draftEligible(run: RunState, a: AugmentDef): boolean {
+  if (ownsAugment(run.kit, a.id)) return false;
+  if (a.requires && !requireMet(a.requires, run)) return false;
+  return true;
+}
+
+const draftWeight = (a: AugmentDef): number => a.weight ?? (a.kind === "config" ? 3 : 1);
+
+function weightedTake(rng: Rng, pool: AugmentDef[]): AugmentDef {
+  const total = pool.reduce((n, a) => n + draftWeight(a), 0);
+  let roll = rng.int(total);
+  for (const a of pool) {
+    roll -= draftWeight(a);
+    if (roll < 0) return a;
+  }
+  return pool[pool.length - 1];
+}
+
 /**
- * Draft three augments the run does not own yet, configs guaranteed a slot
- * while any remain. Deterministic per (run, day, job).
+ * Draft three augments the run does not own yet, requires-gated and
+ * weighted (configs heavy, so drivers land before the boosts that need
+ * them). Slot 0 is ALWAYS a config while any is unowned. Deterministic
+ * per (run, day, job).
  */
 export function rollDraft(run: RunState): AugmentId[] {
-  const remaining = AUGMENTS.filter((a) => !ownsAugment(run.kit, a.id));
-  if (remaining.length === 0) return [];
+  const pool = AUGMENTS.filter((a) => draftEligible(run, a));
+  if (pool.length === 0) return [];
   const rng = new Rng(mixSeed(run.runSeed, run.day, run.activeJob ?? 0, 0x991));
-  const picks = rng.shuffle(remaining.map((a) => a.id)).slice(0, 3);
-  const configs = remaining.filter((a) => a.kind === "config").map((a) => a.id);
-  if (configs.length > 0 && !picks.some((id) => configs.includes(id))) {
-    picks[0] = configs[rng.int(configs.length)];
+  const picks: AugmentDef[] = [];
+  const configs = pool.filter((a) => a.kind === "config");
+  if (configs.length > 0) picks.push(weightedTake(rng, configs));
+  while (picks.length < 3) {
+    const rest = pool.filter((a) => !picks.includes(a));
+    if (rest.length === 0) break;
+    picks.push(weightedTake(rng, rest));
   }
-  return picks;
+  return picks.map((a) => a.id);
 }
 
 function bump(counts: Record<string, number>, key: string, by = 1): Record<string, number> {
@@ -149,7 +214,9 @@ export function jobPayFor(run: RunState, capWin: boolean): number {
   const job = run.activeJob !== null ? run.jobs[run.activeJob] : null;
   if (!job) return 0;
   const pay = jobPay(job.tier);
-  return capWin ? Math.floor(pay / 2) : pay;
+  // Overtime Clause: the client eats more of a deadline overrun.
+  const capRate = run.kit.augments.includes("overtimeClause") ? 0.75 : 0.5;
+  return capWin ? Math.floor(pay * capRate) : pay;
 }
 
 export function runReducer(state: GameState, action: RunAction): GameState {
@@ -180,10 +247,13 @@ export function runReducer(state: GameState, action: RunAction): GameState {
         strain: START_STRAIN,
         ramPerTurn: BASE_RAM,
         credits: 0,
-        patchCells: 0,
+        patchPouch: [],
+        darkBuys: 0,
+        lastDarkBuy: null,
         lastRegen: 0,
         nightPick: null,
         kit: baseRunKit(),
+        boostSlots: BOOST_SLOTS_BASE,
         jobs: genDayJobs(action.seed, 1),
         jobsDone: [false, false, false],
         screen: "opener",
@@ -286,17 +356,46 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       // match the rate printed on the ticket.
       const salvage = draft.length === 0 ? SALVAGE_PAY : 0;
       const ticketPay = jobPayFor(run, action.capWin);
-      const pay = ticketPay + salvage;
+      // Clean Run's consolation: a trap-free win that only missed the
+      // chip-zero payout by running to the cap still pays a little.
+      const cleanRunBonus =
+        action.capWin && action.trapsFired === 0 && action.chip !== 0 && run.kit.augments.includes("cleanRun")
+          ? 15
+          : 0;
+      const pay = ticketPay + salvage + cleanRunBonus;
       const jobsDone = run.jobsDone.map((d, i) => (i === run.activeJob ? true : d));
-      const cellsLeft = Math.max(0, run.patchCells - action.cellsUsed);
-      // Clean Run: a chip-zero win banks a patch cell, up to the pouch cap.
+      let pouch = [...action.pouchLeft];
+
+      // Clean Run banks first (it was earned by play), then the job's drop
+      // roll; each reports "capped" and discards when the pouch is full.
+      // Separate salts so owning the augment never shifts the drop stream.
       const cleanRunFired = action.chip === 0 && run.kit.augments.includes("cleanRun");
-      const cleanRun: "banked" | "capped" | null = !cleanRunFired
-        ? null
-        : cellsLeft >= PATCH_CELL_MAX
-          ? "capped"
-          : "banked";
-      const patchCells = cleanRunFired ? Math.min(PATCH_CELL_MAX, cellsLeft + 1) : cellsLeft;
+      let cleanRun: { status: "banked"; mask: number } | { status: "capped" } | null = null;
+      if (cleanRunFired) {
+        if (pouch.length >= PATCH_POUCH_MAX) {
+          cleanRun = { status: "capped" };
+        } else {
+          const mask = rollPatchMask(new Rng(mixSeed(run.runSeed, run.day, run.activeJob ?? 0, 0xc1ea)));
+          pouch = [...pouch, mask];
+          cleanRun = { status: "banked", mask };
+        }
+      }
+      const job = run.jobs[run.activeJob ?? 0];
+      const dropRng = new Rng(mixSeed(run.runSeed, run.day, run.activeJob ?? 0, 0x9d0b));
+      const dropChance =
+        DAY_CONFIGS[run.day].patchDrop + PATCH_DROP_TIER_BONUS * ((job?.tier ?? 1) - 1);
+      let patchDrop: { status: "banked" | "capped"; mask: number } | null = null;
+      if (dropRng.next() < dropChance) {
+        // Roll the shape either way: a capped drop still shows what was
+        // left on the bench.
+        const mask = rollPatchMask(dropRng);
+        if (pouch.length >= PATCH_POUCH_MAX) {
+          patchDrop = { status: "capped", mask };
+        } else {
+          pouch = [...pouch, mask];
+          patchDrop = { status: "banked", mask };
+        }
+      }
 
       // Zero by any means ends the run, a bled-out win included.
       const screen = strain <= 0 ? "runEnd" : "result";
@@ -306,7 +405,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
           ...run,
           credits: run.credits + pay,
           strain,
-          patchCells,
+          patchPouch: pouch,
           jobsDone,
           screen,
           lastResult: {
@@ -316,12 +415,16 @@ export function runReducer(state: GameState, action: RunAction): GameState {
             basePay: jobPay(run.jobs[run.activeJob ?? 0]?.tier ?? 1),
             salvage,
             cleanRun,
+            cleanRunBonus,
+            patchDrop,
             capWin: action.capWin,
+            gridlockWin: action.gridlockWin,
             overRotations: action.overRotations,
             trapsFired: action.trapsFired,
             jobIndex: run.activeJob ?? 0,
             draft,
             picked: null,
+            replaced: null,
           },
         },
       };
@@ -334,6 +437,7 @@ export function runReducer(state: GameState, action: RunAction): GameState {
       const def = AUGMENTS.find((a) => a.id === action.id);
       if (!def || ownsAugment(run.kit, action.id)) return state;
       const kit = { ...run.kit };
+      let replaced: AugmentId | null = null;
       // A drafted config is unlocked, never equipped. Swapping the live mode
       // on pickup meant walking into the next dive with WARD instead of the
       // PURGE that was deliberately set, and no sign it had changed.
@@ -341,12 +445,19 @@ export function runReducer(state: GameState, action: RunAction): GameState {
         kit.attackModes = [...kit.attackModes, def.attackMode];
       } else if (def.defendMode) {
         kit.defendModes = [...kit.defendModes, def.defendMode];
+      } else if (kit.augments.length >= run.boostSlots) {
+        // Full bays: the pick must name an installed boost to eject. Keeps
+        // length constant, which also lets an over-cap grandfathered run
+        // swap one for one without ever growing.
+        if (!action.replace || !kit.augments.includes(action.replace)) return state;
+        replaced = action.replace;
+        kit.augments = [...kit.augments.filter((a) => a !== replaced), action.id];
       } else {
         kit.augments = [...kit.augments, action.id];
       }
       return {
         ...state,
-        run: { ...run, kit, lastResult: { ...run.lastResult, picked: action.id } },
+        run: { ...run, kit, lastResult: { ...run.lastResult, picked: action.id, replaced } },
       };
     }
 
@@ -413,27 +524,62 @@ export function runReducer(state: GameState, action: RunAction): GameState {
 
     case "buyPatch": {
       if (!run || run.screen !== "upgrade") return state;
-      if (run.credits < PATCH_COST || run.strain >= 100) return state;
+      const patchCost = nightPatchCost(run.day);
+      if (run.credits < patchCost || run.strain >= 100) return state;
       return {
         ...state,
         run: {
           ...run,
-          credits: run.credits - PATCH_COST,
+          credits: run.credits - patchCost,
           strain: Math.min(100, run.strain + PATCH_HEAL),
         },
       };
     }
 
-    case "buyPatchCell": {
+    case "buySlot": {
       if (!run || run.screen !== "upgrade") return state;
-      if (run.credits < PATCH_CELL_COST || run.patchCells >= PATCH_CELL_MAX) return state;
+      const cost = slotCost(run);
+      if (cost === null || run.credits < cost) return state;
+      return {
+        ...state,
+        run: { ...run, credits: run.credits - cost, boostSlots: run.boostSlots + 1 },
+      };
+    }
+
+    case "buyDarkPatch": {
+      if (!run || run.screen !== "upgrade") return state;
+      const cost = darkPullPrice(run);
+      if (run.credits < cost || run.patchPouch.length >= PATCH_POUCH_MAX) return state;
+      // Each buy is its own deterministic stream, salted by the lifetime
+      // purchase count: reload and reroll land the same piece.
+      const mask = rollPatchMask(new Rng(mixSeed(run.runSeed, run.day, run.darkBuys, 0xd47b)));
       return {
         ...state,
         run: {
           ...run,
-          credits: run.credits - PATCH_CELL_COST,
-          patchCells: run.patchCells + 1,
+          credits: run.credits - cost,
+          darkBuys: run.darkBuys + 1,
+          patchPouch: [...run.patchPouch, mask],
+          lastDarkBuy: mask,
         },
+      };
+    }
+
+    case "craftPatch": {
+      // Crafting happens at the bench, never mid-dive: the severed verdict
+      // enumerates held pieces and must stay the whole truth during a dive.
+      if (!run || run.screen === "duel" || run.screen === "tutorial") return state;
+      if (action.a === action.b) return state;
+      const ma = run.patchPouch[action.a];
+      const mb = run.patchPouch[action.b];
+      if (ma === undefined || mb === undefined) return state;
+      const crafted = armUnionCraft(ma, mb);
+      if (crafted === null || run.credits < CRAFT_COST) return state;
+      const patchPouch = run.patchPouch.filter((_, i) => i !== action.a && i !== action.b);
+      patchPouch.push(crafted);
+      return {
+        ...state,
+        run: { ...run, credits: run.credits - CRAFT_COST, patchPouch },
       };
     }
 

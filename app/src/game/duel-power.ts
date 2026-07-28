@@ -124,6 +124,10 @@ export function computeDuelPower(s: DuelState): DuelPower {
 
 /** Min quarter-turns so the cell's arms cover `needed` (Infinity if never). */
 export function rotCostFor(c: DuelCell, needed: number): number {
+  if (c.fused) {
+    // Welded patch piece: its orientation is the only orientation.
+    return (rotateArms(c.base, c.rot) & needed) === needed ? 0 : Infinity;
+  }
   for (let k = 0; k < 4; k++) {
     if ((rotateArms(c.base, (c.rot + k) % 4) & needed) === needed) return k;
   }
@@ -322,7 +326,7 @@ export function isFrontier(s: DuelState, side: Side, idx: number): boolean {
 
 /** How many steps out from its territory a side may rotate open junctions. */
 export function reachOf(s: DuelState, side: Side): number {
-  if (side === "player" && s.kit.augments.includes("longArms")) return BASE_REACH + 1;
+  if (side === "player" && s.kit.augments.includes("longArms")) return BASE_REACH + 2;
   return BASE_REACH;
 }
 
@@ -376,6 +380,7 @@ function withinReachWalk(s: DuelState, side: Side, idx: number, reach: number): 
 export function canRotate(s: DuelState, side: Side, idx: number): boolean {
   const c = s.cells[idx];
   if (!c || c.kind !== "node") return false;
+  if (c.fused) return false;
   const enemy = otherSide(side);
   if (c.lockedThroughRound >= s.round && c.lockedBy === enemy) return false;
   if (c.owner === side) return true;

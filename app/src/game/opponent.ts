@@ -11,11 +11,12 @@ import {
   redirectTargetLegal,
   roll,
   say,
+  tierOf,
   tutorialLessonDone,
   wardTargetLegal,
 } from "./duel-actions";
 import { canRotate, isFrontier, routeCost, routePlan } from "./duel-power";
-import { DuelState, Side } from "./duel-types";
+import { DuelState, Side, otherSide } from "./duel-types";
 
 /**
  * The scripted opponent, v3: it plans with the same rotation-cost Dijkstra
@@ -135,54 +136,56 @@ function computeIntent(s: DuelState): void {
   else s.oppNextIntent = "Aligning junctions toward the core";
 }
 
-type CastAim = { kind: "cast"; prog: "attack" | "defend"; mode: OppMode; targets: number[] };
+export type CastAim = { kind: "cast"; prog: "attack" | "defend"; mode: OppMode; targets: number[] };
 
 /**
- * Resolve the pending program into a telegraphed cast: targets chosen now,
- * shown to the player for one beat, applied on the next step.
+ * Choose targets for a program cast, side-generic. Pure targeting: no RNG,
+ * no state mutation. Returns null when no legal target exists. Width comes
+ * from the caster's own tier (kit for the player, cfg for the machine).
  */
-function prepareCast(s: DuelState): CastAim | null {
-  const pc = s.oppTurn.pendingCast;
-  if (!pc) return null;
-  s.oppTurn.pendingCast = null;
-  const econ = s.econ.opp;
-  if (econ.used[pc.prog] || econ.ram < 1) return null;
-  const width = pc.prog === "attack" ? ATTACK_WIDTH[s.cfg.oppTier] : DEFEND_WIDTH[s.cfg.oppTier];
+export function prepareCastFor(
+  s: DuelState,
+  side: Side,
+  prog: "attack" | "defend",
+  mode: OppMode,
+): CastAim | null {
+  const enemy = otherSide(side);
+  const width = prog === "attack" ? ATTACK_WIDTH[tierOf(s, side, "attack")] : DEFEND_WIDTH[tierOf(s, side, "defend")];
   const targets: number[] = [];
 
-  switch (pc.mode) {
+  switch (mode) {
     case "armHalt":
     case "armSiphon": {
-      // Trap the player's predicted route. Normally deep, so they commit
+      // Trap the enemy's predicted route. Normally deep, so they commit
       // before it fires; in the tutorial shallow, so Scan can catch it.
-      const plan = routePlan(s, "player");
+      const plan = routePlan(s, enemy);
       let pool = (plan ? plan.path.map((p) => p.idx) : []).filter((i) =>
-        armTargetLegal(s, "opp", i),
+        armTargetLegal(s, side, i),
       );
       if (!s.cfg.tutorial) pool = pool.reverse();
       if (pool.length === 0) {
         pool = s.cells
           .map((_, i) => i)
-          .filter((i) => armTargetLegal(s, "opp", i) && isFrontier(s, "player", i));
+          .filter((i) => armTargetLegal(s, side, i) && isFrontier(s, enemy, i));
       }
       targets.push(...pool.slice(0, width));
       if (targets.length === 0) return null;
       break;
     }
     case "redirect": {
-      // Pick the twist that raises the player's route cost the most.
+      // Pick the twist that raises the enemy's route cost the most.
       const candidates = s.cells
         .map((_, i) => i)
-        .filter((i) => redirectTargetLegal(s, "opp", i) && s.cells[i].owner === "player")
+        .filter((i) => redirectTargetLegal(s, side, i) && s.cells[i].owner === enemy)
         .sort((a, b) => coreDist(s, a) - coreDist(s, b))
         .slice(0, 6);
       let best = -1;
       let bestGain = -1;
-      const before = routeCost(s, "player");
+      const before = routeCost(s, enemy);
       for (const i of candidates) {
         const c = s.cells[i];
         c.rot = (c.rot + 1) % 4;
-        const after = routeCost(s, "player");
+        const after = routeCost(s, enemy);
         c.rot = (c.rot + 3) % 4;
         const gain = (isFinite(after) ? after : 99) - (isFinite(before) ? before : 99);
         if (gain > bestGain) {
@@ -196,24 +199,24 @@ function prepareCast(s: DuelState): CastAim | null {
       break;
     }
     case "purge": {
-      const plan = routePlan(s, "opp");
+      const plan = routePlan(s, side);
       const onRoute = (plan ? plan.path.map((p) => p.idx) : []).filter((i) =>
-        purgeTargetLegal(s, "opp", i),
+        purgeTargetLegal(s, side, i),
       );
-      const anywhere = s.cells.map((_, i) => i).filter((i) => purgeTargetLegal(s, "opp", i));
+      const anywhere = s.cells.map((_, i) => i).filter((i) => purgeTargetLegal(s, side, i));
       const pool = [...new Set([...onRoute, ...anywhere])];
       targets.push(...pool.slice(0, width));
       if (targets.length === 0) return null;
       break;
     }
     case "lock": {
-      // Freeze the player's next junctions when they threaten, else armor
-      // its own chain nearest the core.
-      const playerCost = routeCost(s, "player");
-      if (isFinite(playerCost) && playerCost <= 4) {
-        const plan = routePlan(s, "player");
+      // Freeze the enemy's next junctions when they threaten, else armor
+      // the caster's own chain nearest the core.
+      const enemyCost = routeCost(s, enemy);
+      if (isFinite(enemyCost) && enemyCost <= 4) {
+        const plan = routePlan(s, enemy);
         const chokes = (plan?.path ?? [])
-          .filter((p) => s.cells[p.idx].owner === "none" && lockTargetLegal(s, "opp", p.idx))
+          .filter((p) => s.cells[p.idx].owner === "none" && lockTargetLegal(s, side, p.idx))
           .map((p) => p.idx);
         targets.push(...chokes.slice(0, width));
       }
@@ -222,7 +225,7 @@ function prepareCast(s: DuelState): CastAim | null {
           .map((_, i) => i)
           .filter(
             (i) =>
-              s.cells[i].owner === "opp" && lockTargetLegal(s, "opp", i) && !targets.includes(i),
+              s.cells[i].owner === side && lockTargetLegal(s, side, i) && !targets.includes(i),
           )
           .sort((a, b) => coreDist(s, a) - coreDist(s, b));
         targets.push(...own.slice(0, width - targets.length));
@@ -231,17 +234,30 @@ function prepareCast(s: DuelState): CastAim | null {
       break;
     }
     case "ward": {
-      // Ward the unclaimed lane ahead of it - the nodes a trapper wants.
-      const plan = routePlan(s, "opp");
+      // Ward the unclaimed lane ahead - the nodes a trapper wants.
+      const plan = routePlan(s, side);
       const ahead = plan?.path.find(
-        (p) => s.cells[p.idx].owner === "none" && wardTargetLegal(s, "opp", p.idx),
+        (p) => s.cells[p.idx].owner === "none" && wardTargetLegal(s, side, p.idx),
       );
       if (!ahead) return null;
       targets.push(ahead.idx);
       break;
     }
   }
-  return { kind: "cast", prog: pc.prog, mode: pc.mode, targets };
+  return { kind: "cast", prog, mode, targets };
+}
+
+/**
+ * Resolve the pending program into a telegraphed cast: targets chosen now,
+ * shown to the player for one beat, applied on the next step.
+ */
+function prepareCast(s: DuelState): CastAim | null {
+  const pc = s.oppTurn.pendingCast;
+  if (!pc) return null;
+  s.oppTurn.pendingCast = null;
+  const econ = s.econ.opp;
+  if (econ.used[pc.prog] || econ.ram < 1) return null;
+  return prepareCastFor(s, "opp", pc.prog, pc.mode);
 }
 
 /** Land a telegraphed cast. Conditions cannot change between the beats. */

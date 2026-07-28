@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { sfx } from "../../game/audio";
-import { DAY_CONFIGS, FINAL_DAY } from "../../game/content/arc";
+import { DAY_CONFIGS, FINAL_DAY, jobPay } from "../../game/content/arc";
 import { CUSTOMERS, CustomerProfile } from "../../game/content/customers";
 import {
   ATTACK_MODE_LABEL,
@@ -8,6 +8,7 @@ import {
   AttackMode,
   DEFEND_MODE_LABEL,
   DefendMode,
+  GRIDLOCK_CHIP,
   MODE_LABEL,
   MODE_TELL,
   attackModeDesc,
@@ -16,26 +17,130 @@ import {
 } from "../../game/content/kit";
 import { Scene } from "../../game/content/story";
 import {
+  BOOST_SLOTS_MAX,
   DAY_REST_REGEN,
   GameState,
   MAX_RAM,
-  PATCH_CELL_COST,
-  PATCH_CELL_MAX,
-  PATCH_COST,
   PATCH_HEAL,
   RunAction,
+  darkPullPrice,
+  nightPatchCost,
+  slotCost,
 } from "../../game/run-reducer";
+import { PATCH_POUCH_MAX, armUnionCraft, shapeClassOf } from "../../game/patch-cells";
 import { tip } from "../../game/content/teaching";
 import { MetaState, NightPick, RunState } from "../../game/save";
 import { VERSION_LABEL } from "../../game/version";
 import { Teach } from "./teach";
 import { TapTip } from "./tap-tip";
+import { PatchGlyph } from "./patch-glyph";
+
+/** Result-screen flavor for a dropped piece, by shape class. */
+const DROP_LINES: Record<"I" | "L" | "T" | "X", string> = {
+  I: "A straight run pulled from the wreck. Two arms, dead opposite.",
+  L: "An elbow pulled from the wreck. Bent, but sound.",
+  T: "A tee pulled from the wreck. Three arms, rare enough to notice.",
+  X: "A cross pulled from the wreck. Four arms. Somebody's whole day, salvaged.",
+};
+
+const SHAPE_NOUN: Record<"I" | "L" | "T" | "X", string> = {
+  I: "Straight",
+  L: "Elbow",
+  T: "Tee",
+  X: "Cross",
+};
 
 export function customerById(id: string): CustomerProfile {
   return CUSTOMERS.find((c) => c.id === id) ?? CUSTOMERS[0];
 }
 
 type Dispatch = (a: RunAction) => void;
+
+/**
+ * The patch pouch with the crafting bench. Select a piece, legal partners
+ * light up, pick one, confirm: the pair fuses into the union of their
+ * arms. Never available mid dive; the reducer enforces the same.
+ */
+function PouchCard({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
+  const [sel, setSel] = useState<number | null>(null);
+  const [pair, setPair] = useState<number | null>(null);
+  useEffect(() => {
+    if (sel !== null && sel >= run.patchPouch.length) {
+      setSel(null);
+      setPair(null);
+    }
+  }, [run.patchPouch.length, sel]);
+  const pouch = run.patchPouch;
+  const union = sel !== null && pair !== null ? armUnionCraft(pouch[sel], pouch[pair]) : null;
+  const partners = sel === null ? new Set<number>() : new Set(
+    pouch.map((_, i) => i).filter((i) => i !== sel && armUnionCraft(pouch[sel], pouch[i]) !== null),
+  );
+  const noPartner = sel !== null && pair === null && partners.size === 0;
+  return (
+    <div className="kp-kit-card kp-kit-cells">
+      <header>
+        <strong>PATCH POUCH</strong>
+        <em>
+          {pouch.length} / {PATCH_POUCH_MAX}
+        </em>
+      </header>
+      <div className="kp-pieces">
+        {pouch.map((m, i) => (
+          <button
+            key={i}
+            type="button"
+            className={`kp-piece-slot ${i === sel || i === pair ? "kp-pp-hi" : ""} ${sel !== null && i !== sel && pair === null && !partners.has(i) ? "kp-piece-dim" : ""}`}
+            onClick={() => {
+              if (sel === null) setSel(i);
+              else if (i === sel) {
+                setSel(null);
+                setPair(null);
+              } else if (pair === null && partners.has(i)) setPair(i);
+              else if (i === pair) setPair(null);
+            }}
+          >
+            <PatchGlyph mask={m} size={34} />
+            <span>{SHAPE_NOUN[shapeClassOf(m)]}</span>
+          </button>
+        ))}
+        {Array.from({ length: PATCH_POUCH_MAX - pouch.length }).map((_, i) => (
+          <span key={`e${i}`} className="kp-piece-slot kp-piece-empty" aria-hidden="true">
+            <span className="kp-piece-hole" />
+          </span>
+        ))}
+      </div>
+      {union !== null && sel !== null && pair !== null && (
+        <div className="kp-craft-stage kp-piece-actions">
+          <span className="kp-rail-dim">
+            JOIN: <PatchGlyph mask={pouch[sel]} size={16} /> + <PatchGlyph mask={pouch[pair]} size={16} /> {"->"} <PatchGlyph mask={union} size={20} /> {SHAPE_NOUN[shapeClassOf(union)]}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              sfx("pieceFuse", { bus: "ui" });
+              dispatch({ type: "craftPatch", a: sel, b: pair });
+              setSel(null);
+              setPair(null);
+            }}
+          >
+            CRAFT
+          </button>
+          <button type="button" onClick={() => { setSel(null); setPair(null); }}>
+            CANCEL
+          </button>
+        </div>
+      )}
+      {noPartner && (
+        <p className="kp-rail-dim">No legal join for that piece. The result must be strictly bigger than both.</p>
+      )}
+      <p>
+        A piece fills one slag block with exactly the arms it shows, welded where it lands.
+        2 RAM, one per turn, single use. Pieces come off the darknet, drop from cleared jobs,
+        or bank on clean wins; the pouch holds {PATCH_POUCH_MAX}.
+      </p>
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Story scene player                                                  */
@@ -132,7 +237,7 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
                     {"□".repeat(5 - job.tier)}
                   </span>
                 </TapTip>
-                <span className="kp-job-pay">{done ? "CLEARED" : `${40 + 25 * job.tier} cr`}</span>
+                <span className="kp-job-pay">{done ? "CLEARED" : `${jobPay(job.tier)} cr`}</span>
               </div>
             </button>
           );
@@ -146,7 +251,14 @@ export function JobBoard({ run, dispatch }: { run: RunState; dispatch: Dispatch 
         <TapTip text={tip("ram")}>
           <span>RAM {run.ramPerTurn}/turn</span>
         </TapTip>
-        {run.patchCells > 0 && <span>CELLS x{run.patchCells}</span>}
+        {run.patchPouch.length > 0 && (
+          <span className="kp-foot-pouch">
+            POUCH{" "}
+            {run.patchPouch.map((m, i) => (
+              <PatchGlyph key={i} mask={m} size={14} />
+            ))}
+          </span>
+        )}
         <span>
           KIT S{run.kit.scanTier}/A{run.kit.attackTier}/D{run.kit.defendTier}
         </span>
@@ -316,31 +428,26 @@ export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dis
 
         {/* The pouch used to be readable only from the job board footer, so
             a player checking their kit before a dive could not see it. */}
-        <div className="kp-kit-card kp-kit-cells">
-          <header>
-            <strong>PATCH CELLS</strong>
-            <em>
-              {run.patchCells} / {PATCH_CELL_MAX}
-            </em>
-          </header>
-          <span className="kp-cell-pips" aria-hidden="true">
-            {Array.from({ length: PATCH_CELL_MAX }).map((_, i) => (
-              <span key={i} className={i < run.patchCells ? "kp-pip kp-cell-pip-on" : "kp-pip"} />
-            ))}
-          </span>
-          <p>
-            One slag block becomes a live cross junction. 1 RAM, one per turn, single use. Bought
-            at day close, and the pouch never holds more than {PATCH_CELL_MAX}.
-          </p>
-        </div>
+        <PouchCard run={run} dispatch={dispatch} />
 
         <div className="kp-kit-card kp-kit-augs">
           <header>
-            <strong>AUGMENTS</strong>
-            <em>{kit.augments.length} installed</em>
+            <TapTip text={tip("boostSlots")}>
+              <strong>BOOST BAYS</strong>
+            </TapTip>
+            <em>
+              {kit.augments.length} / {run.boostSlots}
+            </em>
           </header>
+          <span className="kp-cell-pips" aria-hidden="true">
+            {Array.from({ length: run.boostSlots }).map((_, i) => (
+              <span key={i} className={i < kit.augments.length ? "kp-pip kp-cell-pip-on" : "kp-pip"} />
+            ))}
+          </span>
           {kit.augments.length === 0 ? (
-            <p className="kp-rail-dim">Nothing yet. Every cleared job offers a draft.</p>
+            <p className="kp-rail-dim">
+              Three bays to start, more are sold at day close. Every cleared job offers a draft.
+            </p>
           ) : (
             <ul className="kp-aug-list">
               {kit.augments.map((id) => {
@@ -352,8 +459,24 @@ export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dis
                   </li>
                 );
               })}
+              {Array.from({ length: Math.max(0, run.boostSlots - kit.augments.length) }).map((_, i) => (
+                <li key={`empty-${i}`} className="kp-bay-empty">
+                  <strong>EMPTY BAY</strong>
+                </li>
+              ))}
             </ul>
           )}
+        </div>
+
+        <div className="kp-kit-card kp-kit-configs">
+          <header>
+            <strong>CONFIGS</strong>
+            <em>{kit.attackModes.length - 1 + kit.defendModes.length - 1} / 4</em>
+          </header>
+          <p className="kp-rail-dim">
+            Mode unlocks live outside the bays and never count against the cap. Switch modes on the
+            program cards above.
+          </p>
         </div>
       </div>
       <div className="kp-screen-actions">
@@ -381,10 +504,17 @@ export function KitScreen({ state, dispatch }: { state: GameState; dispatch: Dis
 
 export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
   const r = run.lastResult;
+  const [pendingSwap, setPendingSwap] = useState<string | null>(null);
   useEffect(() => {
     if (r && r.draft.length > 0) sfx("unlock", { at: 0.3 });
   }, [r]);
+  useEffect(() => {
+    if (r?.picked) setPendingSwap(null);
+  }, [r?.picked]);
   if (!r) return null;
+  const baysFull = run.kit.augments.length >= run.boostSlots;
+  const swapOffered =
+    r.picked === null && baysFull && r.draft.some((id) => AUGMENT_BY_ID[id]?.kind === "boost");
   const job = run.jobs[r.jobIndex];
   const c = job ? customerById(job.customerId) : null;
   return (
@@ -401,7 +531,7 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
         {/* Itemized because the ticket rate on the job board is not what
             lands: a cap win halves it, a dry augment cache adds salvage on
             top, and a bare total made both look like a miscount. */}
-        {(r.capWin || r.salvage > 0) && (
+        {(r.capWin || r.salvage > 0 || r.cleanRunBonus > 0) && (
           <ul className="kp-chip-breakdown">
             <li>
               <span>ticket rate</span>
@@ -409,8 +539,14 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
             </li>
             {r.capWin && (
               <li>
-                <span>half rate, you hit the turn cap</span>
-                <em>-{r.basePay - Math.floor(r.basePay / 2)} cr</em>
+                <span>reduced rate, you hit the turn cap</span>
+                <em>-{r.basePay - (r.pay - r.salvage - r.cleanRunBonus)} cr</em>
+              </li>
+            )}
+            {r.cleanRunBonus > 0 && (
+              <li>
+                <span>clean run, trap free to the cap</span>
+                <em>+{r.cleanRunBonus} cr</em>
               </li>
             )}
             {r.salvage > 0 && (
@@ -453,7 +589,13 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
                 <em>-10</em>
               </li>
             )}
-            {r.overRotations * 2 + r.trapsFired * 4 + (r.capWin ? 10 : 0) > 40 && (
+            {r.gridlockWin && (
+              <li>
+                <span>link collapsed in gridlock</span>
+                <em>-{GRIDLOCK_CHIP}</em>
+              </li>
+            )}
+            {r.overRotations * 2 + r.trapsFired * 4 + (r.capWin ? 10 : 0) + (r.gridlockWin ? GRIDLOCK_CHIP : 0) > 40 && (
               <li className="kp-chip-capped">
                 <span>strain billed, capped</span>
                 <em>-40 max</em>
@@ -468,9 +610,29 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
           <div className="kp-cleanrun">
             <span>CLEAN RUN</span>
             <em>
-              {r.cleanRun === "banked"
-                ? "At or under par, no traps sprung. One patch cell banked."
-                : `At or under par, no traps sprung. Pouch already holds the maximum of ${PATCH_CELL_MAX}.`}
+              {r.cleanRun.status === "banked" ? (
+                <>
+                  Zero strain billed. Banked a random {SHAPE_NOUN[shapeClassOf(r.cleanRun.mask)].toLowerCase()}.{" "}
+                  <PatchGlyph mask={r.cleanRun.mask} size={16} />
+                </>
+              ) : (
+                `Zero strain billed. Pouch already holds the maximum of ${PATCH_POUCH_MAX}.`
+              )}
+            </em>
+          </div>
+        )}
+        {r.patchDrop !== null && (
+          <div className="kp-cleanrun kp-droprow">
+            <span>PATCH PIECE RECOVERED</span>
+            <em>
+              {r.patchDrop.status === "banked" ? (
+                <>
+                  {DROP_LINES[shapeClassOf(r.patchDrop.mask)]}{" "}
+                  <PatchGlyph mask={r.patchDrop.mask} size={16} />
+                </>
+              ) : (
+                `${SHAPE_NOUN[shapeClassOf(r.patchDrop.mask)]} piece pulled from the wreck, but the pouch already holds the maximum of ${PATCH_POUCH_MAX}. Left on the bench.`
+              )}
             </em>
           </div>
         )}
@@ -484,19 +646,27 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
               const a = AUGMENT_BY_ID[id];
               if (!a) return null;
               const picked = r.picked === id;
-              const dimmed = r.picked !== null && !picked;
+              const dimmed = (r.picked !== null && !picked) || (pendingSwap !== null && pendingSwap !== id);
+              const needsSwap = a.kind === "boost" && baysFull;
               return (
                 <button
                   key={id}
                   type="button"
-                  className={`kp-draft-card ${picked ? "kp-draft-picked" : ""} ${dimmed ? "kp-draft-dim" : ""} ${a.kind === "config" ? "kp-draft-config" : ""}`}
+                  className={`kp-draft-card ${picked ? "kp-draft-picked" : ""} ${dimmed ? "kp-draft-dim" : ""} ${a.kind === "config" ? "kp-draft-config" : ""} ${pendingSwap === id ? "kp-draft-swapping" : ""}`}
                   disabled={r.picked !== null}
                   onClick={() => {
+                    if (needsSwap) {
+                      sfx("press", { bus: "ui" });
+                      setPendingSwap((p) => (p === id ? null : id));
+                      return;
+                    }
                     sfx("granted", { bus: "ui" });
                     dispatch({ type: "pickAugment", id });
                   }}
                 >
-                  <span className="kp-draft-kind">{a.kind === "config" ? "CONFIG" : "BOOST"}</span>
+                  <span className="kp-draft-kind">
+                    {a.kind === "config" ? "CONFIG" : needsSwap && !picked ? "BOOST. BAYS FULL, PICK TO SWAP" : "BOOST"}
+                  </span>
                   <strong>{a.name}</strong>
                   <p>{a.desc}</p>
                   {a.kind === "config" && (
@@ -510,6 +680,37 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
               );
             })}
           </div>
+          {pendingSwap !== null && r.picked === null && (
+            <div className="kp-swap-panel">
+              <h4>EJECT WHICH BOOST FOR {AUGMENT_BY_ID[pendingSwap]?.name}?</h4>
+              <div className="kp-draft-grid">
+                {run.kit.augments.map((id) => {
+                  const a = AUGMENT_BY_ID[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="kp-draft-card kp-swap-card"
+                      onClick={() => {
+                        sfx("granted", { bus: "ui" });
+                        dispatch({ type: "pickAugment", id: pendingSwap, replace: id });
+                      }}
+                    >
+                      <span className="kp-draft-kind">EJECT</span>
+                      <strong>{a?.name ?? id}</strong>
+                      <p>{a?.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              <button type="button" className="kp-btn-ghost" onClick={() => setPendingSwap(null)}>
+                CANCEL THE SWAP
+              </button>
+            </div>
+          )}
+          {r.picked !== null && r.replaced !== null && (
+            <p className="kp-rail-dim">EJECTED: {AUGMENT_BY_ID[r.replaced]?.name ?? r.replaced}</p>
+          )}
         </div>
       ) : (
         <p className="kp-rail-dim">Augment cache is dry. Salvage credited instead.</p>
@@ -526,6 +727,7 @@ export function ResultScreen({ run, dispatch }: { run: RunState; dispatch: Dispa
       </div>
       <Teach id="strain-chip" />
       <Teach id="augment-draft" signals={{ draftOffered: r.draft.length > 0 }} />
+      <Teach id="boost-swap" signals={{ swapOffered }} />
     </div>
   );
 }
@@ -619,13 +821,13 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         <button
           type="button"
           className="kp-btn-ghost"
-          disabled={run.credits < PATCH_COST || run.strain >= 100}
+          disabled={run.credits < nightPatchCost(run.day) || run.strain >= 100}
           onClick={() => {
             sfx("granted", { bus: "ui" });
             dispatch({ type: "buyPatch" });
           }}
         >
-          NIGHT PATCH: +{PATCH_HEAL} STRAIN ({PATCH_COST} cr)
+          NIGHT PATCH: +{PATCH_HEAL} STRAIN ({nightPatchCost(run.day)} cr)
         </button>
         <span className="kp-rail-dim">
           STRAIN {run.strain}/100 - {run.credits} cr - rest restored +{DAY_REST_REGEN}
@@ -635,30 +837,66 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
         <button
           type="button"
           className="kp-btn-ghost"
-          disabled={run.credits < PATCH_CELL_COST || run.patchCells >= PATCH_CELL_MAX}
+          disabled={run.credits < darkPullPrice(run) || run.patchPouch.length >= PATCH_POUCH_MAX}
           title={
-            run.patchCells >= PATCH_CELL_MAX
-              ? `HOLDING MAX (${PATCH_CELL_MAX})`
-              : run.credits < PATCH_CELL_COST
-                ? `NEED ${PATCH_CELL_COST} CR`
+            run.patchPouch.length >= PATCH_POUCH_MAX
+              ? `POUCH FULL (${PATCH_POUCH_MAX}/${PATCH_POUCH_MAX})`
+              : run.credits < darkPullPrice(run)
+                ? `NEED ${darkPullPrice(run)} CR`
                 : undefined
           }
           onClick={() => {
             sfx("granted", { bus: "ui" });
-            dispatch({ type: "buyPatchCell" });
+            dispatch({ type: "buyDarkPatch" });
           }}
         >
-          BUY PATCH CELL ({PATCH_CELL_COST} cr)
+          BUY BLIND ({darkPullPrice(run)} cr)
         </button>
         <span className="kp-rail-dim">
-          PATCH CELLS {run.patchCells}/{PATCH_CELL_MAX} - {run.credits} cr
+          POUCH {run.patchPouch.length}/{PATCH_POUCH_MAX} - {run.credits} cr
         </span>
         <span className="kp-cell-pips" aria-hidden="true">
-          {Array.from({ length: PATCH_CELL_MAX }).map((_, i) => (
-            <span key={i} className={i < run.patchCells ? "kp-pip kp-cell-pip-on" : "kp-pip"} />
+          {run.patchPouch.map((m, i) => (
+            <PatchGlyph key={i} mask={m} size={18} />
           ))}
         </span>
-        <span className="kp-rail-dim">One slag block becomes a live cross junction. Single use.</span>
+        <span className="kp-rail-dim">
+          Pay first. Shape is the surprise.
+          {run.lastDarkBuy !== null && run.patchPouch.length > 0 && (
+            <>
+              {" "}LAST PULL: <PatchGlyph mask={run.lastDarkBuy} size={14} />
+            </>
+          )}
+        </span>
+      </div>
+      <div className="kp-patchrow kp-bayrow">
+        <button
+          type="button"
+          className="kp-btn-ghost"
+          disabled={slotCost(run) === null || run.credits < (slotCost(run) ?? 0)}
+          title={
+            slotCost(run) === null
+              ? `ALL ${BOOST_SLOTS_MAX} BAYS INSTALLED`
+              : run.credits < (slotCost(run) ?? 0)
+                ? `NEED ${slotCost(run)} CR`
+                : undefined
+          }
+          onClick={() => {
+            sfx("granted", { bus: "ui" });
+            dispatch({ type: "buySlot" });
+          }}
+        >
+          INSTALL BOOST BAY ({slotCost(run) ?? "MAX"}{slotCost(run) !== null ? " cr" : ""})
+        </button>
+        <span className="kp-rail-dim">
+          BAYS {run.kit.augments.length}/{run.boostSlots} - {run.credits} cr
+        </span>
+        <span className="kp-cell-pips" aria-hidden="true">
+          {Array.from({ length: BOOST_SLOTS_MAX }).map((_, i) => (
+            <span key={i} className={i < run.boostSlots ? "kp-pip kp-cell-pip-on" : "kp-pip"} />
+          ))}
+        </span>
+        <span className="kp-rail-dim">A full bay drafts as a swap. More bays, more boosts held.</span>
       </div>
       <div className="kp-screen-actions kp-nightclose">
         <span className="kp-rail-dim">
@@ -677,6 +915,14 @@ export function UpgradeScreen({ run, dispatch }: { run: RunState; dispatch: Disp
       </div>
       <Teach id="day-upgrade" />
       <Teach id="night-shop" />
+      <Teach
+        id="patch-craft"
+        signals={{
+          craftReady: run.patchPouch.some((a, i) =>
+            run.patchPouch.some((b, j) => j > i && armUnionCraft(a, b) !== null),
+          ),
+        }}
+      />
     </div>
   );
 }

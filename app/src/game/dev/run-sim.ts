@@ -27,13 +27,14 @@ import { botPlayTurn, oppStep } from "../opponent";
 import {
   DAY_REST_REGEN,
   GameState,
+  darkPullPrice,
   ownsAugment,
-  PATCH_CELL_COST,
-  PATCH_CELL_MAX,
   runReducer,
   RunAction,
+  slotCost,
 } from "../run-reducer";
-import { EMPTY_META, RunKit } from "../save";
+import { PATCH_POUCH_MAX, armUnionCraft, isPatchMask } from "../patch-cells";
+import { duelKitOf, EMPTY_META } from "../save";
 
 let dispatchCount = 0;
 
@@ -50,6 +51,7 @@ function playDuelToEnd(duel: DuelState): {
   won: boolean;
   chip: number;
   capWin: boolean;
+  gridlockWin: boolean;
   overRotations: number;
   trapsFired: number;
 } {
@@ -80,24 +82,16 @@ function playDuelToEnd(duel: DuelState): {
   if (duel.winKind === "gridlock") {
     must(duel.phase === "won", "a deadlocked board resolves in the player's favor");
   }
+  if (duel.winKind === "gridlock" && duel.phase === "won") {
+    must(duel.strainChip >= 6, "gridlock wins carry the flat chip");
+  }
   return {
     won: duel.phase === "won",
     chip: duel.strainChip,
     capWin: duel.winKind === "cap",
+    gridlockWin: duel.winKind === "gridlock",
     overRotations: Math.max(0, duel.econ.player.rotations - duel.par),
     trapsFired: duel.econ.player.trapsFired,
-  };
-}
-
-function duelKitOf(kit: RunKit, patchCells: number) {
-  return {
-    scanTier: kit.scanTier,
-    attackTier: kit.attackTier,
-    defendTier: kit.defendTier,
-    attackMode: kit.attackMode,
-    defendMode: kit.defendMode,
-    augments: kit.augments,
-    patchCells,
   };
 }
 
@@ -145,21 +139,31 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       const duel = createDuel(
         dayDuelConfig(run.day, job.dominant, job.tier, job.kitSeed),
         mixSeed(run.runSeed, run.day, idx),
-        duelKitOf(s.run!.kit, s.run!.patchCells),
+        duelKitOf(s.run!.kit, s.run!.patchPouch),
         s.run!.ramPerTurn,
       );
       must(duel.par > 0, "par computed for every dive");
       const res = playDuelToEnd(duel);
-      const cellsUsed = s.run!.patchCells - duel.patchCells;
+      const pouchLeft = duel.patchPouch;
       const strainBefore = s.run!.strain;
-      const cellsBefore = s.run!.patchCells;
-      const ownsCleanRun = s.run!.kit.augments.includes("cleanRun");
+      const pouchBefore = s.run!.patchPouch;
+      // The dive can only SPEND pieces: what is left is a sub-multiset of
+      // what went in.
+      {
+        const before = [...pouchBefore];
+        for (const m of pouchLeft) {
+          const at = before.indexOf(m);
+          must(at !== -1, "dive never mints pieces");
+          before.splice(at, 1);
+        }
+      }
       s = d(s, {
         type: "duelFinished",
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        cellsUsed,
+        gridlockWin: res.gridlockWin,
+        pouchLeft,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
         scans: duel.econ.player.scansCast,
@@ -167,10 +171,25 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         defendCasts: duel.econ.player.defendsCast,
       });
       if (res.won && s.run) {
-        const spent = cellsBefore - cellsUsed;
-        const expected =
-          res.chip === 0 && ownsCleanRun ? Math.min(PATCH_CELL_MAX, spent + 1) : spent;
-        must(s.run.patchCells === expected, "patch cells consumed on win (clean-run bank included)");
+        // Conservation at the run layer: end pouch = pouchLeft + banked
+        // channels reported on the result, cap respected, all masks valid.
+        const lr = s.run.lastResult!;
+        const banked: number[] = [];
+        if (lr.cleanRun?.status === "banked") banked.push(lr.cleanRun.mask);
+        if (lr.patchDrop?.status === "banked") banked.push(lr.patchDrop.mask);
+        must(
+          s.run.patchPouch.length === pouchLeft.length + banked.length,
+          "pouch is dive leftovers plus banked channels exactly",
+        );
+        must(s.run.patchPouch.length <= PATCH_POUCH_MAX, "pouch capped after banking");
+        must(s.run.patchPouch.every(isPatchMask), "every held piece is a valid mask");
+        if (lr.cleanRun?.status === "capped" || lr.patchDrop?.status === "capped") {
+          must(pouchLeft.length + banked.length === PATCH_POUCH_MAX, "capped means the pouch was full");
+        }
+        must(
+          !(res.chip === 0 && s.run.kit.augments.includes("cleanRun")) || lr.cleanRun !== null,
+          "clean run always reports on a chip-zero win",
+        );
       }
       if (!res.won) {
         must(s.run!.screen === "runEnd", "loss ends run");
@@ -183,15 +202,37 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         );
         if (s.run!.screen === "result") {
           const draft = s.run!.lastResult!.draft;
+          must(new Set(draft).size === draft.length, "draft never repeats a card");
           for (const id of draft) {
-            must(AUGMENTS.some((a) => a.id === id), "draft ids exist");
+            const def = AUGMENTS.find((a) => a.id === id);
+            must(!!def, "draft ids exist");
             must(!ownsAugment(s.run!.kit, id), "draft never offers owned augments");
+            if (def?.requires?.kind === "augment") {
+              must(ownsAugment(s.run!.kit, def.requires.id), "requires-gated cards only appear once their driver is owned");
+            }
+            if (def?.requires?.kind === "pouch") {
+              must(s.run!.patchPouch.length > 0, "pouch-gated cards only appear while holding a piece");
+            }
           }
           if (draft.length > 0) {
             const pick = draft[picks++ % draft.length];
-            s = d(s, { type: "pickAugment", id: pick });
+            const def = AUGMENTS.find((a) => a.id === pick)!;
+            const boosts = s.run!.kit.augments;
+            const full = def.kind === "boost" && boosts.length >= s.run!.boostSlots;
+            if (full) {
+              const eject = boosts[0];
+              s = d(s, { type: "pickAugment", id: pick, replace: eject });
+              must(!s.run!.kit.augments.includes(eject), "swap ejects the named boost");
+              must(s.run!.lastResult!.replaced === eject, "swap records the ejected boost");
+            } else {
+              s = d(s, { type: "pickAugment", id: pick });
+            }
             must(ownsAugment(s.run!.kit, pick), "picked augment owned");
             must(s.run!.lastResult!.picked === pick, "pick recorded");
+            must(
+              s.run!.kit.augments.length <= s.run!.boostSlots || s.run!.boostSlots === 0,
+              "boosts never exceed the bays",
+            );
           }
         }
       }
@@ -213,14 +254,48 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         "morning scene lands on the board",
       );
     } else if (run.screen === "upgrade") {
-      // Exercise the shop: buy a patch cell when affordable, then close.
+      // Exercise the shop: a blind darknet pull when affordable, then a
+      // craft when a legal pair sits in the pouch, then close.
       const creditsBefore = run.credits;
-      s = d(s, { type: "buyPatchCell" });
-      if (creditsBefore >= PATCH_CELL_COST && run.patchCells < PATCH_CELL_MAX) {
-        must(s.run!.patchCells === run.patchCells + 1, "patch cell bought");
-        must(s.run!.credits === creditsBefore - PATCH_CELL_COST, "patch cell paid for");
+      const pouchBefore = run.patchPouch.length;
+      const pullCost = darkPullPrice(run);
+      s = d(s, { type: "buyDarkPatch" });
+      if (creditsBefore >= pullCost && pouchBefore < PATCH_POUCH_MAX) {
+        must(s.run!.patchPouch.length === pouchBefore + 1, "dark patch bought");
+        must(isPatchMask(s.run!.patchPouch[pouchBefore]), "dark patch is a valid piece");
+        must(s.run!.credits === creditsBefore - pullCost, "dark patch paid for");
+        must(s.run!.lastDarkBuy === s.run!.patchPouch[pouchBefore], "reveal shows the rolled piece");
       }
-      must(s.run!.patchCells <= PATCH_CELL_MAX, "patch cell pouch capped");
+      must(s.run!.patchPouch.length <= PATCH_POUCH_MAX, "pouch capped");
+      {
+        // A bay when affordable: credits debit, cap respected.
+        const slots = s.run!.boostSlots;
+        const credits = s.run!.credits;
+        const bayCost = slotCost(s.run!);
+        s = d(s, { type: "buySlot" });
+        if (bayCost !== null && credits >= bayCost) {
+          must(s.run!.boostSlots === slots + 1, "bay installed");
+          must(s.run!.credits === credits - bayCost, "bay paid for");
+        } else {
+          must(s.run!.boostSlots === slots, "no bay past the cap or without credits");
+        }
+        must(s.run!.boostSlots >= 3 && s.run!.boostSlots <= 5, "bays stay in range");
+      }
+      {
+        // Craft the first legal pair, if any: two pieces become their union.
+        const pouch = s.run!.patchPouch;
+        outer: for (let i = 0; i < pouch.length; i++) {
+          for (let j = i + 1; j < pouch.length; j++) {
+            const union = armUnionCraft(pouch[i], pouch[j]);
+            if (union === null) continue;
+            const lenBefore = pouch.length;
+            s = d(s, { type: "craftPatch", a: i, b: j });
+            must(s.run!.patchPouch.length === lenBefore - 1, "craft turns two pieces into one");
+            must(s.run!.patchPouch.includes(union), "crafted piece is the union of its inputs");
+            break outer;
+          }
+        }
+      }
       const strainBeforeClose = s.run!.strain;
       const cycle = ["ram", "scan", "attack", "defend"] as const;
       // The night is two steps now: picking must NOT end the day, so the
@@ -244,17 +319,17 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
       const duel = createDuel(
         finaleConfig(),
         mixSeed(run.runSeed, FINAL_DAY, 9),
-        duelKitOf(s.run!.kit, s.run!.patchCells),
+        duelKitOf(s.run!.kit, s.run!.patchPouch),
         s.run!.ramPerTurn,
       );
       const res = playDuelToEnd(duel);
-      const cellsUsed = s.run!.patchCells - duel.patchCells;
       s = d(s, {
         type: "duelFinished",
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        cellsUsed,
+        gridlockWin: res.gridlockWin,
+        pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
         scans: duel.econ.player.scansCast,

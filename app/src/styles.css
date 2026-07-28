@@ -3376,3 +3376,219 @@ img {
   background: var(--kp-gold, #d9a53f);
   border-color: var(--kp-gold, #d9a53f);
 }
+
+/* ------------------------------------------------------------------ */
+/* Patch pieces: glyphs, pouch strip, craft bench, darknet             */
+/* ------------------------------------------------------------------ */
+
+.kp-patch-glyph {
+  vertical-align: middle;
+  flex: none;
+}
+
+.kp-patch-glyph .kp-pp-arm {
+  stroke-linecap: square;
+}
+
+.kp-patch-glyph-dim {
+  opacity: 0.35;
+}
+
+.kp-pouch-strip {
+  cursor: default;
+  gap: 3px;
+  max-width: 120px;
+}
+
+.kp-pouch-glyphs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  justify-content: center;
+}
+
+.kp-pouch-piece {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 1px;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.kp-pouch-piece:hover:not(:disabled) {
+  border-color: var(--kp-signal);
+}
+
+.kp-pouch-piece:disabled {
+  cursor: not-allowed;
+}
+
+.kp-pouch-piece-armed {
+  border-color: var(--kp-gold);
+  background: rgba(255, 233, 196, 0.08);
+}
+
+.kp-pouch-piece-armed .kp-pp-arm {
+  stroke: var(--kp-gold);
+}
+
+.kp-pouch-piece-armed .kp-pp-node {
+  fill: var(--kp-gold);
+}
+
+.kp-targetbar-glyph {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+}
+
+.kp-piece-dim {
+  opacity: 0.35;
+}
+
+.kp-piece-empty .kp-piece-hole {
+  width: 34px;
+  height: 34px;
+  border: 2px dashed var(--kp-line);
+  display: block;
+  opacity: 0.5;
+}
+
+.kp-piece-slot {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 3px;
+  cursor: pointer;
+}
+
+.kp-piece-slot:is(button):hover {
+  border-color: var(--kp-signal);
+}
+
+.kp-pp-hi {
+  border-color: var(--kp-gold);
+}
+
+.kp-pp-hi .kp-pp-arm {
+  stroke: var(--kp-gold);
+}
+
+.kp-pp-hi .kp-pp-node {
+  fill: var(--kp-gold);
+}
+
+.kp-craft-stage {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kp-dweld {
+  fill: var(--kp-gold);
+  opacity: 0.85;
+}
+
+.kp-foot-pouch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.kp-darknet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  font-size: 12px;
+}
+
+.kp-darknet-tag {
+  color: var(--kp-crimson);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.kp-darknet-offline h3 {
+  color: var(--kp-dim);
+  letter-spacing: 0.12em;
+}
+
+.kp-darknet-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kp-darknet-reveal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--kp-line);
+  padding: 10px;
+  animation: kp-reveal-pop 480ms steps(6);
+}
+
+.kp-darknet-reveal-glyph {
+  line-height: 0;
+  animation: kp-reveal-spin 420ms steps(4);
+}
+
+@keyframes kp-reveal-pop {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: none; }
+}
+
+@keyframes kp-reveal-spin {
+  0% { transform: rotate(270deg) scale(0.6); opacity: 0.2; }
+  100% { transform: none; opacity: 1; }
+}
+
+.kp-darknet-pouch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Teach anchor for the crafting bench moment. */
+.kp-teach-craft {
+  left: 50%;
+  top: 46%;
+  transform: translateX(-50%);
+}
+
+/* Boost bays and the pick-to-swap flow */
+.kp-bay-empty {
+  opacity: 0.4;
+}
+
+.kp-bay-empty strong {
+  letter-spacing: 0.14em;
+}
+
+.kp-kit-configs p {
+  margin: 0;
+}
+
+.kp-draft-swapping {
+  border-color: var(--kp-gold);
+}
+
+.kp-swap-panel {
+  margin-top: 10px;
+  border: 1px solid var(--kp-line);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kp-swap-panel h4 {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--kp-gold);
+}
+
+.kp-swap-card .kp-draft-kind {
+  color: var(--kp-crimson);
+}

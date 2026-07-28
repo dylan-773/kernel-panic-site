@@ -39,7 +39,11 @@ export type TeachWhen =
   | "overPar"
   | "holdingCells"
   | "cascadeBanked"
-  | "draftOffered";
+  | "draftOffered"
+  /** The pouch holds a pair whose union is strictly bigger than both. */
+  | "craftReady"
+  /** A drafted BOOST would exceed the bay cap: taking it means benching one. */
+  | "swapOffered";
 
 export type TeachSignals = Partial<Record<TeachWhen, boolean>>;
 
@@ -111,7 +115,9 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
   { id: "telegraph", label: "The machine aims a beat before it strikes", firstContact: "tutorial" },
   { id: "cascade", label: "Cascade banking", firstContact: "duel" },
   { id: "par", label: "Par, the rotation budget", firstContact: "duel" },
-  { id: "patchCellUse", label: "Spending a patch cell mid dive", firstContact: "duel" },
+  { id: "patchCellUse", label: "Spending a patch piece mid dive", firstContact: "duel" },
+  { id: "patchShapes", label: "Pieces roll a fixed shape and orientation, never rotating in hand", firstContact: "duel" },
+  { id: "patchCraft", label: "Combine two pieces into the union of their arms at the bench", firstContact: "upgrade" },
   { id: "strainChip", label: "Neural Strain as run health", firstContact: "result" },
   { id: "manualRef", label: "MANUAL.TXT as the full reference", firstContact: "desktop" },
   // The kit header carries the basics, so the coachmark went; the locked-mode
@@ -125,7 +131,10 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
   { id: "ramCarry", label: "Unspent RAM carries into the next turn, capped", firstContact: "duel" },
   { id: "dayUpgrade", label: "One upgrade per closed day", firstContact: "upgrade" },
   { id: "nightPatch", label: "Buying strain back with credits", firstContact: "upgrade" },
-  { id: "patchCellBuy", label: "Buying a patch cell", firstContact: "upgrade" },
+  { id: "darkWebBuy", label: "Buying a random patch piece on the darknet", firstContact: "upgrade" },
+  { id: "slotBuy", label: "Buying an extra boost bay at night", firstContact: "upgrade" },
+  { id: "boostSlots", label: "Boost bays cap ownership at 3, buyable to 5; configs exempt", firstContact: "result" },
+  { id: "boostSwap", label: "A full bay swaps a new boost in for one installed", firstContact: "result" },
 
   // Deliberately untaught. Each waiver is a claim that the interface
   // already carries the mechanic; if that stops being true, delete the
@@ -186,10 +195,26 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
     waiver: "Day 10 replaces the job board with the door, and the morning scene frames it.",
   },
   {
-    id: "augmentPoolDry",
-    label: "The augment cache empties late in a run",
+    id: "finaleOppOpens",
+    label: "The finale machine takes the first turn",
+    firstContact: "duel",
+    waiver: "The player watches it happen: the IT IS MOVING turnlight runs before their first input, at the only dive that opens this way.",
+  },
+  {
+    // Both reward channels land through the same named, glyphed result row,
+    // the only screen they can occur on: the turnCap precedent.
+    id: "patchDrop",
+    label: "Post dive piece rewards, the job drop and the CLEAN RUN bank",
     firstContact: "result",
-    waiver: "The result screen says so in place of the draft, at the exact moment it happens, and pays salvage visibly.",
+    waiver: "The drop row names the recovered shape in text with its glyph inline, on the only screen a piece can arrive.",
+  },
+  {
+    // Same shape as runReset: the end overlay states the cost the instant
+    // it happens, and the strain breakdown itemizes the exact number.
+    id: "gridlockChip",
+    label: "Gridlock wins chip 6 strain at full pay",
+    firstContact: "duel",
+    waiver: "The gridlock end overlay says the dead link bites, and the result breakdown itemizes the 6 as its own row.",
   },
   // Blanket waivers over whole content types. Individual entries explain
   // themselves through their own copy, so teaching each one would be noise.
@@ -290,11 +315,11 @@ export const TEACHING: TeachingMoment[] = [
     notBeforeDay: 1,
     title: "AUGMENT DRAFT",
     copyOrder: "copy-augment-draft",
-    // Cadence is per TICKET, not per day. Three tickets a day means a clean
-    // day banks three, and the 18-augment pool empties around day 6.
+    // Cadence is per TICKET, not per day. With bays capping boosts the
+    // pool never runs dry; a full bay drafts as a swap instead.
     lines: [
       "Clearing a ticket offers three augments. Pick one and it holds for the rest of the run.",
-      "Three tickets a day, so a clean day banks three picks. CONFIG unlocks a mode. BOOST bends the economy.",
+      "Three tickets a day, so a clean day banks three picks. CONFIG unlocks a mode, BOOST bends the economy. A full bay swaps instead of blocking.",
     ],
   },
   {
@@ -316,7 +341,7 @@ export const TEACHING: TeachingMoment[] = [
   },
   {
     id: "night-shop",
-    teaches: ["nightPatch", "patchCellBuy"],
+    teaches: ["nightPatch", "darkWebBuy", "slotBuy"],
     surface: "upgrade",
     when: "firstSight",
     anchor: "patch",
@@ -325,23 +350,53 @@ export const TEACHING: TeachingMoment[] = [
     title: "NIGHT SHOP",
     copyOrder: "copy-night-shop",
     lines: [
-      "Credits buy two things here tonight. A night patch puts strain back on the meter.",
-      "A patch cell rides along into tomorrow's dive and turns one dead slag block into a live junction.",
+      "You can no longer choose a shape. DARKNET.LNK sells one blind pull, price climbing by the day.",
+      "Night patch still buys your strain back. Buy an extra boost bay tonight to raise your cap above 3.",
+    ],
+  },
+  {
+    id: "patch-craft",
+    teaches: ["patchCraft"],
+    surface: "upgrade",
+    when: "craftReady",
+    anchor: "craft",
+    order: 75,
+    notBeforeDay: 1,
+    title: "PATCH CRAFT",
+    copyOrder: "copy-patch-craft",
+    lines: [
+      "Craft two pieces at night or from the loadout bench: free, and you get the union of both pieces' arms.",
+      "You only get the craft when the union beats both inputs outright. Equal or smaller spends both pieces for nothing.",
     ],
   },
   {
     id: "patch-cell-use",
-    teaches: ["patchCellUse"],
+    teaches: ["patchCellUse", "patchShapes"],
     surface: "duel",
     when: "holdingCells",
     anchor: "screen",
     order: 80,
     notBeforeDay: 1,
-    title: "PATCH CELL",
+    title: "PATCH PIECE",
     copyOrder: "copy-patch-cell-use",
     lines: [
-      "You are carrying a cell. Click a slag block within reach to burn it into a live junction for 1 RAM.",
-      "One use, then it is gone. Save it for the wall you cannot route around, not the first slag you see.",
+      "You are carrying a piece. Click a slag block within reach to fuse it in for 2 RAM. One use, then it is gone.",
+      "Arms land exactly as held, never rotating once placed. Fit it to the wall you cannot route around, not the first slag you see.",
+    ],
+  },
+  {
+    id: "boost-swap",
+    teaches: ["boostSwap"],
+    surface: "result",
+    when: "swapOffered",
+    anchor: "draft",
+    order: 62,
+    notBeforeDay: 1,
+    title: "BAY FULL",
+    copyOrder: "copy-boost-swap",
+    lines: [
+      "Boost bays are full. Take this pick and you choose one installed boost to bench in its place.",
+      "CONFIGS never count against the cap and are never affected by a swap.",
     ],
   },
 ];
@@ -377,7 +432,7 @@ export const TEACH_TIPS: TeachTip[] = [
     id: "ram",
     teaches: ["ram", "ramCarry"],
     control: "the RAM readout in the dive dock, and the day board's per turn summary",
-    text: "Refills every turn. A rotation or a cast costs 1. Up to 2 unspent carries over, 4 with CARRY CACHE. The rest is lost.",
+    text: "Refills every turn. A rotation or a cast costs 1. Up to 2 unspent carries over. The rest is lost.",
   },
   {
     id: "manualRef",
@@ -390,6 +445,12 @@ export const TEACH_TIPS: TeachTip[] = [
     teaches: ["threatTier"],
     control: "the THREAT pips on a ticket",
     text: "Threat tier, 1 to 5. Higher tiers field a wider kit and push harder from the first round.",
+  },
+  {
+    id: "boostSlots",
+    teaches: ["boostSlots"],
+    control: "the boost bay counter on the LOADOUT.CFG bay card",
+    text: "Boost bays hold 3 at once. Buy more at night, up to 5. Configs never count against this cap.",
   },
   {
     id: "modeLocked",
