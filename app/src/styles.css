@@ -2820,6 +2820,18 @@ img {
 
 /* ---------- login ---------- */
 
+/* Corner build stamp on the login screen. Pinned rather than in the flow so
+   it survives the slot list growing and never competes with the wordmark. */
+.kp-build-stamp {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--kp-dim);
+}
+
 .kp-login {
   position: fixed;
   inset: 0;

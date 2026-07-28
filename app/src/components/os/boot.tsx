@@ -1,3 +1,5 @@
+import { VERSION_LABEL } from "../../game/version";
+
 /**
  * The BIOS boot screen. This is the entire server-rendered surface: static,
  * deterministic markup with zero client state, so hydration always matches.
@@ -6,6 +8,9 @@
 export function BootScreen({ onSkip }: { onSkip?: () => void }) {
   const lines = [
     "OVERBY REPAIR BENCH BIOS v9.2",
+    // Static, so it stays part of the server-rendered surface: this is the
+    // one place the build stamp lands in the HTML itself.
+    `KERNEL PANIC ${VERSION_LABEL}`,
     "640K NEURAL BUFFER ... OK",
     "SIGNAL BUS ........... OK",
     "BACK ROOM LOCK ....... ENGAGED",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { audioDebug, playUiPress, playUiTick, sfx, testBeep } from "../../game/audio";
 import { SlotSummary, deleteSlot, slotSummaries } from "../../game/save";
+import { VERSION_LABEL } from "../../game/version";
 
 /**
  * KP/OS user login: three save slots, picked from a CRT login prompt. The
@@ -71,6 +72,10 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
         </pre>
         <p className="kp-login-sub">KP/OS v9.2 - SELECT USER</p>
       </div>
+      {/* The in-fiction "KP/OS v9.2" above is set dressing. This is the real
+          build, parked in a corner so a playtest screenshot always carries
+          it no matter which screen the shot was taken on. */}
+      <p className="kp-build-stamp">BUILD {VERSION_LABEL}</p>
 
       {!login && (
         <div className="kp-login-slots">
