@@ -28,6 +28,7 @@ const DEVICE_ART: Record<string, string> = {
   "sable-okonkwo": `${W}/card-sable-okonkwo-device.png`,
   "aldous-wick": `${W}/card-aldous-wick-device.png`,
   "dex-marlowe": `${W}/card-dex-marlowe-device.png`,
+  "wren-tallis": `${W}/card-wren-tallis-device.png`,
 };
 
 export function deviceArtFor(c: CustomerProfile): string {
