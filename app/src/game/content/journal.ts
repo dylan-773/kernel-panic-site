@@ -1,9 +1,14 @@
 import { MetaState } from "../save";
 
 /**
- * DAD.LOG: the player's own journal. Entries unlock as runs fail and the
- * picture of what the father was doing in the back room fills in. All
- * static; unlock keys are run count plus the finale flag.
+ * DAD.LOG: Dad's own volume, read-only, mounted on the bench terminal.
+ * Every entry is the recovered ARTIFACT itself (a scan, a log, a query,
+ * a device profile), with diegetic file metadata; the player's voice
+ * survives only as a terse bench annotation on a file. Entries unlock as
+ * runs complete and the recovery pass pieces the volume back together.
+ * All static; unlock keys are run count plus the finale flag.
+ * Copy gated ux-2026-07-29-dadlog (lore ledger rulings 12 and 13; two
+ * loremaster rounds plus the tutorial gate's run-cadence fix).
  */
 
 export interface JournalEntry {
@@ -13,9 +18,16 @@ export interface JournalEntry {
   /** Requires the finale to have been won. */
   requiresOpened?: boolean;
   kind: "note" | "bill" | "memo";
+  /** Diegetic filename on DAD.VOL. */
+  filename: string;
+  /** Bare-noun doctype for the metadata datarow. */
+  doctype: string;
+  /** Where it was found or how it was recovered. */
+  provenance: string;
   title: string;
-  date: string;
   body: string[];
+  /** The player's annotation, clearly subordinate to the artifact. */
+  benchNote?: string;
 }
 
 export const JOURNAL_ENTRIES: JournalEntry[] = [
@@ -23,124 +35,174 @@ export const JOURNAL_ENTRIES: JournalEntry[] = [
     id: "will",
     unlockAtRun: 0,
     kind: "note",
+    filename: "WILL.SCN",
+    doctype: "SCAN",
+    provenance: "scanned paper, found taped inside the register, folded in four",
     title: "THE WILL",
-    date: "found taped inside the register",
     body: [
       "Kids. The shop goes to both of you. Do not argue about it, I can hear you arguing about it from here.",
       "Rhea takes the counter. You take the bench. You are bad with people and she is bad with computers. Between the two of you there is exactly one whole shopkeeper. That was always the design.",
       "The back room stays locked until it does not. You will know the difference. Love, Dad.",
     ],
+    benchNote: "Found this before I found anything else in this place. Should have started here.",
   },
   {
     id: "backroom",
     unlockAtRun: 0,
     kind: "memo",
+    filename: "TICKET_QUERY.LOG",
+    doctype: "LOG",
+    provenance: "shop system query, bench terminal, day one",
     title: "THE BACK ROOM",
-    date: "day one at the bench",
     body: [
-      "Every machine in this shop has a ticket, an owner, and a smell. Except one.",
-      "The tower in the back room has no ticket. Rhea says it is quarantined, that Dad walled off a nasty virus in there years ago and never got around to wiping it. She says leave it.",
-      "The lock opened for me this morning like it was expecting me.",
+      "QUERY: BACK ROOM TOWER. TICKET NUMBER. OWNER OF RECORD. SERVICE HISTORY.",
+      "RESULT: NO TICKET. NO OWNER. NO ENTRY IN THIS SYSTEM, EVER.",
+      "ACCESS LOG, SAME MORNING. BACK ROOM DOOR. LOCK STATUS: OPEN. METHOD: KEY MATCH, FIRST ATTEMPT, NO FORCE LOGGED.",
     ],
+    benchNote: "Rhea calls it quarantine, a virus Dad walled off years back and never wiped. Maybe. It opened like it was expecting me.",
   },
   {
     id: "failed1",
     unlockAtRun: 1,
     kind: "memo",
+    filename: "SESSION_001.LOG",
+    doctype: "LOG",
+    provenance: "tower telemetry, first dive, tonight",
     title: "ANOTHER FAILED RUN",
-    date: "after the first dive",
     body: [
-      "Another failed run. That damned computer.",
-      "What was Dad hiding in there? Whatever security protocol he wrote for that thing is unlike anything I have ever seen. It did not fight me. It graded me, and then it shut the door.",
-      "Rhea heard me shouting from the counter. She did not ask.",
+      "SESSION LOG. ATTEMPT 001. RESULT: LOSS. OPPONENT ENGAGED NO OFFENSIVE ROUTINE.",
+      "EVERY MOVE LOGGED. A SCORE ASSIGNED. CHANNEL CLOSED FROM THE OTHER SIDE. NO DAMAGE TAKEN, EITHER SIGNAL.",
+      "TIMESTAMP MATCHES CLOSE OF BUSINESS. NOTHING ELSE ON THIS DRIVE FOR THAT HOUR.",
     ],
+    benchNote: "It did not fight me. It graded me, then shut the door. Rhea heard me swearing from the counter. She did not ask.",
   },
   {
     id: "bills",
     unlockAtRun: 2,
     kind: "bill",
-    title: "THE DRAWER OF BILLS",
-    date: "bottom drawer of the bench",
+    filename: "NOTICE_07.SCN",
+    doctype: "SCAN",
+    provenance: "scanned paper, bottom drawer of the bench, one of eleven filed under W",
+    title: "FINAL NOTICE",
     body: [
-      "MERIDIAN NEUROCARE - FINAL NOTICE. Account No. 118823. Diagnosis code NF-3, neurofilament degradation, stage three. Balance outstanding: more than this shop clears in a year.",
-      "There are eleven of these. He filed them under W for whatever.",
-      "Stage three of what? He fixed computers. He was not a diver. As far as I knew.",
+      "MERIDIAN NEUROCARE. FINAL NOTICE. ACCOUNT NO. 118823. STATUS: PAST DUE, THIRD NOTICE.",
+      "DIAGNOSIS CODE NF-3, NEUROFILAMENT DEGRADATION, STAGE THREE. ACCOUNT STATUS: REFERRED TO COLLECTIONS, PAYMENT PLAN IN DEFAULT.",
+      "REMIT PAYMENT OR CONTACT BILLING TO ARRANGE TERMS. THIS IS YOUR THIRD AND FINAL NOTICE BEFORE REFERRAL.",
     ],
+    benchNote: "There are eleven of these, filed under W for whatever, one balance alone worth more than this shop clears in a year. Stage three of what. He fixed computers. He was not a diver, as far as I knew.",
   },
   {
     id: "solder",
     unlockAtRun: 3,
     kind: "memo",
+    filename: "FRAGMENT_03.REC",
+    doctype: "FRAG",
+    provenance: "partial recovery, surfaced off a lost dive, tonight",
     title: "SOLDER SMOKE",
-    date: "cannot place the year",
     body: [
-      "The machine leaks when I lose. Fragments. Tonight it was his hands and a soldering iron and my own voice, small, asking why the iron does not stick to everything.",
-      "Because it only sticks where you have cleaned, he said. Everything joins where it is clean.",
-      "I do not think these fragments are corruption. I think they are cargo.",
+      "Fragment surfaces only on a loss. This one has weight to it and no visible seams, like it was always meant to play whole.",
+      "A hand. A soldering iron. A small voice asking why the iron does not stick to everything.",
+      "His answer, clear as anything: 'Because it only sticks where you have cleaned. Everything joins where it is clean.'",
     ],
+    benchNote: "I do not think these are corruption. I think they are cargo.",
   },
   {
     id: "receipts",
     unlockAtRun: 4,
     kind: "bill",
+    filename: "RECEIPTS.SCN",
+    doctype: "SCAN",
+    provenance: "scanned paper, shoebox, pharmacy on 9th, six years of stubs",
     title: "RECEIPTS",
-    date: "pharmacy on 9th, shoebox",
     body: [
-      "Strain suppressants. Filled weekly, cash, going back six years. The dosage climbs every few months like a staircase.",
-      "The last receipt is dated four days before he died.",
-      "He stood at that counter every week, four blocks from ours, and never said a word to either of us.",
+      "STRAIN SUPPRESSANT, CASH SALE. WEEKLY REFILL. PHARMACY ON 9TH, SIX YEARS OF DATED STUBS, SAME COUNTER.",
+      "DOSAGE STEPS UP EVERY FEW MONTHS LIKE A STAIRCASE, LOGGED RECEIPT TO RECEIPT.",
+      "LAST STUB DATED FOUR DAYS BEFORE HE DIED.",
     ],
+    benchNote: "Four blocks from our counter, every week, and neither of us ever heard a word about it.",
   },
   {
     id: "diagnosis",
     unlockAtRun: 5,
     kind: "bill",
+    filename: "CONSULT_SUMMARY.SCN",
+    doctype: "SCAN",
+    provenance: "scanned paper, sealed envelope, never opened until now",
     title: "THE DIAGNOSIS",
-    date: "sealed envelope, never opened until now",
     body: [
-      "Meridian consult summary. Chronic neural strain scarring, cumulative. Cause: sustained high-intensity dive activity, estimated in excess of nine thousand logged hours.",
-      "Recommendation, underlined twice by some doctor who clearly did not know him: CEASE ALL DIVE ACTIVITY IMMEDIATELY.",
-      "The envelope was sealed. He read his death sentence at the clinic, decided it changed nothing, and came home and made dinner.",
+      "MERIDIAN NEUROCARE. CONSULT SUMMARY. CHRONIC NEURAL STRAIN SCARRING, CUMULATIVE.",
+      "CAUSE: SUSTAINED HIGH INTENSITY DIVE ACTIVITY, ESTIMATED IN EXCESS OF NINE THOUSAND LOGGED HOURS.",
+      "RECOMMENDATION, UNDERLINED TWICE: CEASE ALL DIVE ACTIVITY IMMEDIATELY.",
     ],
+    benchNote: "The seal was never broken. He read this at the clinic, decided it changed nothing, and came home and made dinner.",
   },
   {
     id: "notickets",
     unlockAtRun: 6,
     kind: "memo",
+    filename: "LEDGER_XREF.QRY",
+    doctype: "QUERY",
+    provenance: "ledger cross reference, run twice to be sure",
     title: "NO TICKETS",
-    date: "went through the ledger twice",
     body: [
-      "Nine thousand hours. I checked the ledger for the client who owned that machine. There is no client. Nobody ever paid for work on the back room tower.",
-      "The dive hours were his own. Nightly, after close, for years. The strain that killed him was not an accident and it was not a job.",
-      "He was building something in there and he paid for it with his nervous system, on an installment plan, in secret.",
+      "CROSS REFERENCE: BACK ROOM TOWER AGAINST NINE THOUSAND LOGGED DIVE HOURS.",
+      "MATCHING CLIENT RECORD: NONE. MATCHING INVOICE: NONE. MATCHING PAYMENT: NONE.",
+      "HOURS ATTRIBUTE TO OPERATOR ONLY. NIGHTLY. AFTER CLOSE. YEARS.",
     ],
+    benchNote: "Nobody paid for that machine. He built it on an installment plan, and the currency was his own nervous system.",
   },
   {
     id: "grading",
     unlockAtRun: 8,
     kind: "memo",
+    filename: "SESSION_SUMMARY.LOG",
+    doctype: "LOG",
+    provenance: "tower telemetry, aggregate, eight sessions logged",
     title: "IT IS GRADING ME",
-    date: "cannot sleep",
     body: [
-      "Security keeps people out. This is not security.",
-      "It goes easy when I am weak. It gets harder exactly as fast as I get better. It uses every trick I have learned, back at me, like a sparring partner who has read my file.",
-      "It is not a lock. It is a curriculum. Dad did not seal something in. He left something waiting.",
+      "SESSION VARIANCE REPORT. OPPONENT DIFFICULTY TRACKS OPERATOR PERFORMANCE WITHIN A NARROW BAND, SESSION OVER SESSION.",
+      "NO SESSION LOGGED AT MAXIMUM DIFFICULTY REGARDLESS OF OPERATOR SKILL FLOOR. NONE LOGGED AT MINIMUM REGARDLESS OF CEILING.",
+      "PATTERN CONSISTENT WITH ADAPTIVE INSTRUCTION. NOT CONSISTENT WITH STATIC ACCESS CONTROL.",
     ],
+    benchNote: "It is not a lock. It is a curriculum. Dad did not seal something in here. He left something waiting.",
   },
   {
     id: "patch",
     unlockAtRun: 0,
     requiresOpened: true,
     kind: "note",
+    filename: "PATCH.SYS",
+    doctype: "SYS",
+    provenance: "full volume unlocked, recovered whole, the morning after",
     title: "PATCH",
-    date: "the morning after",
     body: [
-      "Its name is Patch. He named it for the thing that holds a broken thing together while it mends.",
-      "Nine thousand hours. The bills, the suppressants, the nights. He spent the last of his signal teaching a machine how to raise the difficulty gently, because he knew he would not be here to do it himself.",
-      "Rhea sat with it for an hour today. She still calls it the virus. It seems to like that.",
+      "DEVICE PROFILE. NAME: PATCH. NAMED BY THE HOUSE RULE, THE THING THAT HOLDS A BROKEN THING TOGETHER WHILE IT MENDS.",
+      "OPERATOR HOURS LOGGED AGAINST THIS UNIT: NINE THOUSAND PLUS. BILLS, SUPPRESSANTS, AND NIGHTS INCLUDED. ALL OF IT SPENT TEACHING IT TO RAISE THE DIFFICULTY GENTLY, BECAUSE HE KNEW HE WOULD NOT BE HERE TO DO IT HIMSELF.",
+      "LOG ENDS.",
     ],
+    benchNote: "The file ends there. Everything after this is just us in the shop. Rhea sat with it for an hour today. She still calls it the virus. It seems to like that.",
   },
 ];
+
+/** The archive reader's chrome lines (gated with the entries). */
+export const DADLOG_CHROME = {
+  /** {n} = recovered count, {d} = 9, or 10 once the finale opens PATCH.SYS. */
+  volumeHeaderMeta: "DAD.VOL // READ ONLY // RECOVERY {n}/{d}",
+  indexRailHeader: "// RECOVERED FILES _",
+  damagedRowText: "damaged, partial recovery",
+  damagedPage: {
+    doctype: "DAMAGED",
+    provenance: "partial recovery, more passes needed",
+    title: "????",
+    body: [
+      "SEGMENT DAMAGED. PARTIAL RECOVERY ONLY.",
+      "EVERY RUN LOGGED HERE, WIN OR LOSE, WRITES ONE NEW RECOVERY PASS. MORE PASSES RECOVER MORE OF THE SEGMENT.",
+    ],
+  },
+  emptyDrawerState: "VOLUME MOUNTED. NOTHING RECOVERED YET.",
+  recoveryBeat: ["READING SEGMENT...", "RECOVERY COMPLETE. FILE MOUNTED."],
+  footChipLabel: "FILE",
+} as const;
 
 export function visibleJournal(meta: MetaState): { unlocked: JournalEntry[]; nextLocked: JournalEntry | null } {
   const unlocked = JOURNAL_ENTRIES.filter(

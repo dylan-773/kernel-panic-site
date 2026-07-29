@@ -59,6 +59,11 @@ export type RunAction =
       scans: number;
       attackCasts: number;
       defendCasts: number;
+      /** REPAIR.LOG telemetry, optional so headless dives stay unchanged. */
+      rounds?: number;
+      trapRounds?: number[];
+      parRounds?: number[];
+      log?: string[];
     }
   | { type: "pickAugment"; id: AugmentId; replace?: AugmentId }
   | { type: "resultNext" }
@@ -425,6 +430,10 @@ export function runReducer(state: GameState, action: RunAction): GameState {
             draft,
             picked: null,
             replaced: null,
+            rounds: action.rounds,
+            trapRounds: action.trapRounds,
+            parRounds: action.parRounds,
+            log: action.log,
           },
         },
       };

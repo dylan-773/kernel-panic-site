@@ -58,8 +58,8 @@ export function PatchGlyph({
       className={`kp-patch-glyph${dim ? " kp-patch-glyph-dim" : ""}`}
       aria-hidden="true"
     >
-      {armLines(mask, "kp-patch-glyph-arm", 3.5, 10)}
-      <circle cx={0} cy={0} r={3} className="kp-patch-glyph-hub" />
+      {armLines(mask, "kp-pp-arm", 3.5, 10)}
+      <circle cx={0} cy={0} r={3} className="kp-pp-node" />
     </svg>
   );
 }

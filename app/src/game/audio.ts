@@ -95,6 +95,9 @@ const P: Record<string, SfxrParams> = {
   deny: preset({ wave: 1, baseFreq: 0.16, sustain: 0.06, decay: 0.14, freqSlide: -0.05, volume: 0.42 }),
   winOpen: preset({ wave: 0, baseFreq: 0.3, duty: 0.2, freqSlide: 0.24, sustain: 0.05, decay: 0.13, volume: 0.4 }),
   winClose: preset({ wave: 0, baseFreq: 0.42, duty: 0.2, freqSlide: -0.24, sustain: 0.05, decay: 0.13, volume: 0.4 }),
+  /** Retired as the chrome catch-all (ux-2026-07-29-v2-sound): windows now
+   * voice their own open/close and teach has its own chime. Kept as a plain
+   * generic click for any future surface that wants one. */
   icon: preset({ wave: 0, baseFreq: 0.5, duty: 0.2, arpMod: 0.45, arpSpeed: 0.6, sustain: 0.03, decay: 0.14, punch: 0.3, volume: 0.36 }),
   story: preset({ wave: 2, baseFreq: 0.5, sustain: 0.02, decay: 0.08, volume: 0.32 }),
   granted: preset({ wave: 0, duty: 0.15, baseFreq: 0.44, freqSlide: 0.18, arpMod: 0.35, arpSpeed: 0.55, sustain: 0.08, decay: 0.25, punch: 0.4, volume: 0.48 }),
@@ -131,6 +134,46 @@ const P: Record<string, SfxrParams> = {
   darknetReveal: preset({ wave: 0, duty: 0.35, baseFreq: 0.2, freqSlide: 0.14, arpMod: 0.55, arpSpeed: 0.32, vibDepth: 0.08, vibSpeed: 0.5, sustain: 0.14, decay: 0.4, punch: 0.3, lpfCutoff: 0.5, volume: 0.5 }),
   /** Two pieces fusing at the bench: distinct from granted, heavier landing. */
   pieceFuse: preset({ wave: 2, baseFreq: 0.26, freqSlide: 0.3, arpMod: 0.5, arpSpeed: 0.6, sustain: 0.1, decay: 0.3, punch: 0.55, lpfCutoff: 0.55, volume: 0.52 }),
+
+  // SOLDER.BAY bench (gate-cleared with the solder-bay-window spec)
+  solderPickup: preset({ wave: 0, baseFreq: 0.42, duty: 0.25, sustain: 0.012, decay: 0.07, punch: 0.25, volume: 0.4 }),
+  solderHoverLegal: preset({ wave: 2, baseFreq: 0.58, freqSlide: 0.12, sustain: 0.01, decay: 0.06, arpMod: 0.3, arpSpeed: 0.7, volume: 0.32 }),
+  solderHoverIllegal: preset({ wave: 1, baseFreq: 0.2, sustain: 0.012, decay: 0.05, freqSlide: -0.05, lpfCutoff: 0.3, volume: 0.24 }),
+  solderArc: preset({ wave: 3, baseFreq: 0.7, sustain: 0.006, decay: 0.05, punch: 0.5, hpfCutoff: 0.35, volume: 0.42 }),
+  solderReject: preset({ wave: 1, baseFreq: 0.18, sustain: 0.03, decay: 0.1, freqSlide: -0.12, hpfCutoff: 0.15, punch: 0.2, volume: 0.4 }),
+
+  // KP/OS v2 shell cues (kpos-shell): paging and window refocus
+  pageFlip: preset({ wave: 3, baseFreq: 0.5, sustain: 0.02, decay: 0.07, punch: 0.25, hpfCutoff: 0.4, volume: 0.28 }),
+  /** DAD.LOG recovery beat (ux-2026-07-29-dadlog): the mount confirm,
+   * a clean small upward resolve, quieter than granted/unlock since
+   * opening a file you own is a routine confirm, not a reward. */
+  segmentMount: preset({ wave: 0, baseFreq: 0.4, duty: 0.2, arpMod: 0.35, arpSpeed: 0.55, sustain: 0.05, decay: 0.16, punch: 0.3, lpfCutoff: 0.62, volume: 0.36 }),
+  /** DAD.LOG damaged-row click: a low soft-register thud, informational
+   * (still sealed), deliberately not the friction register. */
+  segmentDamaged: preset({ wave: 2, baseFreq: 0.22, sustain: 0.02, decay: 0.14, lpfCutoff: 0.3, volume: 0.26 }),
+  winFocus: preset({ wave: 0, baseFreq: 0.22, duty: 0.5, sustain: 0.015, decay: 0.05, punch: 0.15, volume: 0.22 }),
+
+  // v2 sound pass (ux-2026-07-29-v2-sound): the staged INBOX choreography,
+  // one cue per axis, then the card genie and the file-away collapse
+  inboxGrow: preset({ wave: 0, baseFreq: 0.22, duty: 0.3, arpMod: 0.4, arpSpeed: 0.55, sustain: 0.05, decay: 0.13, punch: 0.2, hpfCutoff: 0.08, volume: 0.3 }),
+  inboxWide: preset({ wave: 0, baseFreq: 0.3, duty: 0.16, arpMod: 0.4, arpSpeed: 0.68, sustain: 0.04, decay: 0.12, punch: 0.2, hpfCutoff: 0.1, volume: 0.3 }),
+  inboxGenie: preset({ wave: 0, baseFreq: 0.36, duty: 0.22, arpMod: 0.45, arpSpeed: 0.6, sustain: 0.07, decay: 0.16, punch: 0.4, lpfCutoff: 0.65, volume: 0.42 }),
+  inboxFile: preset({ wave: 0, baseFreq: 0.34, duty: 0.22, arpMod: -0.22, arpSpeed: 0.55, sustain: 0.05, decay: 0.18, punch: 0.2, lpfCutoff: 0.6, volume: 0.34 }),
+  /** Teaching callout arrival: soft sine chime, supportive, never a warning. */
+  teachIn: preset({ wave: 2, baseFreq: 0.42, arpMod: 0.3, arpSpeed: 0.5, sustain: 0.04, decay: 0.14, punch: 0.15, volume: 0.3 }),
+  // LEDGER.LOG print moment: dot-matrix head strikes, then the sheet drops
+  ledgerTick: preset({ wave: 3, baseFreq: 0.75, sustain: 0.008, decay: 0.025, punch: 0.15, hpfCutoff: 0.55, volume: 0.22 }),
+  ledgerSettle: preset({ wave: 3, baseFreq: 0.22, sustain: 0.02, decay: 0.12, punch: 0.4, lpfCutoff: 0.45, volume: 0.4 }),
+  // DARKNET.LNK storefront: static resolving into a link, and the clean cut
+  darknetLinkUp: preset({ wave: 3, baseFreq: 0.35, freqSlide: 0.18, sustain: 0.05, decay: 0.16, hpfCutoff: 0.3, vibDepth: 0.1, vibSpeed: 0.45, volume: 0.34 }),
+  darknetLinkDown: preset({ wave: 3, baseFreq: 0.4, freqSlide: -0.22, sustain: 0.04, decay: 0.14, hpfCutoff: 0.3, volume: 0.3 }),
+  /** BUS.LOG boot-line arrival: the quietest cue in the palette, a texture. */
+  busLogArrival: preset({ wave: 2, baseFreq: 0.5, sustain: 0.006, decay: 0.02, volume: 0.14 }),
+  hueSwap: preset({ wave: 0, baseFreq: 0.4, duty: 0.25, arpMod: 0.5, arpSpeed: 0.7, sustain: 0.03, decay: 0.1, punch: 0.25, volume: 0.34 }),
+  /** Day close: a mechanism sealing shut, not a reward chime. */
+  dayClose: preset({ wave: 0, baseFreq: 0.26, duty: 0.18, freqSlide: -0.08, sustain: 0.06, decay: 0.28, punch: 0.4, lpfCutoff: 0.45, volume: 0.46 }),
+  /** LOADOUT.CFG "DIVE KIT READY." resolve: nominal, plainer than granted. */
+  loadoutReady: preset({ wave: 0, baseFreq: 0.42, duty: 0.18, arpMod: 0.35, arpSpeed: 0.55, sustain: 0.05, decay: 0.2, punch: 0.3, lpfCutoff: 0.6, volume: 0.4 }),
 };
 
 export type SfxName = keyof typeof P;
@@ -256,6 +299,15 @@ export function playCascade(n: number): void {
 
 export function playBoom(): void {
   sfx("trapFire");
+}
+
+/** LEDGER.LOG's statement printing: six print-head strikes, then the sheet
+ * drops into the tray. Timed to the dotmatrix strip's visual stagger. */
+export function playLedgerPrint(): void {
+  for (let i = 0; i < 6; i++) {
+    sfx("ledgerTick", { bus: "ui", at: i * 0.032, rate: 0.9 + Math.random() * 0.3 });
+  }
+  sfx("ledgerSettle", { bus: "ui", at: 0.24 });
 }
 
 export function playStinger(won: boolean): void {

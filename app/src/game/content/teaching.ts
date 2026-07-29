@@ -16,13 +16,14 @@
  * trigger). The Narrative Director owns the words. See tutorial/ledger.md.
  */
 
-/** Surfaces a moment can attach to. Run screens plus two window surfaces. */
+/** Surfaces a moment can attach to. Run screens plus the window surfaces. */
 export type TeachSurface =
   | "tutorial"
   | "duel"
   | "day"
   | "analyze"
   | "loadout"
+  | "solder"
   | "result"
   | "upgrade"
   | "finalePre"
@@ -117,7 +118,16 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
   { id: "par", label: "Par, the rotation budget", firstContact: "duel" },
   { id: "patchCellUse", label: "Spending a patch piece mid dive", firstContact: "duel" },
   { id: "patchShapes", label: "Pieces roll a fixed shape and orientation, never rotating in hand", firstContact: "duel" },
-  { id: "patchCraft", label: "Combine two pieces into the union of their arms at the bench", firstContact: "upgrade" },
+  {
+    // The coachmark retired 2026-07-29: SOLDER.BAY's own status line states
+    // the outgrow rule on every pickup, and the rack physically disables
+    // illegal partners, which outranks a once-ever callout.
+    id: "patchCraft",
+    label: "Combine two patch pieces into the union of their arms, at the SOLDER.BAY bench",
+    firstContact: "solder",
+    waiver:
+      "SOLDER.BAY's status line states the outgrow rule every time a piece is picked up (PICK A PARTNER. THE WELD MUST OUTGROW BOTH.), the schematic blinks the arms a partner would add, and the rack marks non-outgrowing partners dead and disabled, so an illegal weld cannot be attempted at all. CRAFT shows no price inline, matching the convention that every paid action states its cost on its own row.",
+  },
   { id: "strainChip", label: "Neural Strain as run health", firstContact: "result" },
   { id: "manualRef", label: "MANUAL.TXT as the full reference", firstContact: "desktop" },
   // The kit header carries the basics, so the coachmark went; the locked-mode
@@ -165,13 +175,16 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
     id: "jobBoard",
     label: "Three tickets, shared strain",
     firstContact: "day",
-    waiver: "The job board header states it every visit: three tickets, strain shared across all of them, order is yours.",
+    // Narrowed 2026-07-29 when the INBOX absorb dropped the sentence;
+    // restored the same cycle by inbox-collapsed-row-parity.
+    waiver: "INBOX's collapsed header states it every visit: three tickets, strain shared across all of them, order is yours.",
   },
   {
     id: "programTiers",
     label: "Program tiers widen a cast",
     firstContact: "loadout",
-    waiver: "The same kit header names where tiers and configs come from, and each card draws its own tier.",
+    // Re-cited 2026-07-29: the old kit header is gone; the numbers teach it.
+    waiver: "LOADOUT.CFG's program rows show each program's live RANGE or WIDTH number directly beside its TIER meter, every visit: the widening effect is the two numbers sitting next to each other.",
   },
   {
     id: "saveSlots",
@@ -354,21 +367,9 @@ export const TEACHING: TeachingMoment[] = [
       "Night patch still buys your strain back. Buy an extra boost bay tonight to raise your cap above 3.",
     ],
   },
-  {
-    id: "patch-craft",
-    teaches: ["patchCraft"],
-    surface: "upgrade",
-    when: "craftReady",
-    anchor: "craft",
-    order: 75,
-    notBeforeDay: 1,
-    title: "PATCH CRAFT",
-    copyOrder: "copy-patch-craft",
-    lines: [
-      "Craft two pieces at night or from the loadout bench: free, and you get the union of both pieces' arms.",
-      "You only get the craft when the union beats both inputs outright. Equal or smaller spends both pieces for nothing.",
-    ],
-  },
+  // patch-craft retired 2026-07-29: SOLDER.BAY carries the outgrow rule at
+  // tier 0 (see the patchCraft waiver above); the coachmark was also mounted
+  // on NIGHT.SYS while the crafting interface lives in SOLDER.BAY.
   {
     id: "patch-cell-use",
     teaches: ["patchCellUse", "patchShapes"],

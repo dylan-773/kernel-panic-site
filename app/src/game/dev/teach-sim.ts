@@ -51,7 +51,7 @@ const CORE_VERBS = ["rotate", "scan", "defend", "attack"];
  * Surfaces that are windows or shells rather than run screens. The run walk
  * cannot visit them, so they are reachable by construction.
  */
-const WINDOW_SURFACES: TeachSurface[] = ["loadout", "desktop", "tutorial"];
+const WINDOW_SURFACES: TeachSurface[] = ["loadout", "solder", "desktop", "tutorial"];
 
 /** An unconditional callout is the intrusive kind; conditional ones self-limit. */
 const MAX_FIRST_SIGHT_PER_SURFACE = 2;

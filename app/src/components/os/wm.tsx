@@ -11,10 +11,15 @@ import {
 
 export interface WinDef {
   id: string;
-  title: string; // e.g. "JOBS.QUE"
+  title: string; // e.g. "INBOX"
   x: number;
   y: number; // px offsets within the desktop area
-  w: number; // px width (height auto, max-height internal scroll)
+  w: number; // px width (height sizes to content under the .kp-fw ceiling; no internal scroll)
+  /** DARKNET.LNK only: stepped-notch title bar + void chevron. */
+  notched?: boolean;
+  /** Study-grade windows run full height: only the viewport caps them,
+   * never the utility-window ceiling. */
+  tall?: boolean;
 }
 
 export interface WindowManager {
@@ -127,7 +132,7 @@ export interface FloatingWindowProps {
 
 /** Minimum px of the title bar that must stay inside the parent's bounds while dragging. */
 const TITLE_MIN_VISIBLE = 40;
-const MIN_WIDTH = 220;
+const MIN_WIDTH = 420;
 
 function clampAxis(value: number, min: number, max: number): number {
   if (min >= max) return min;
@@ -156,10 +161,31 @@ export function FloatingWindow({
   const barRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [pulsing, setPulsing] = useState(false);
+  const wasFocused = useRef(focused);
 
+  // Every window voices its own lifecycle here, so no opener or closer
+  // needs a cue of its own (ux-2026-07-29-v2-sound centralization).
   useEffect(() => {
     void import("../../game/audio").then((a) => a.sfx("winOpen", { bus: "ui" }));
+    return () => {
+      void import("../../game/audio").then((a) => a.sfx("winClose", { bus: "ui" }));
+    };
   }, []);
+
+  // FOCUS-PULSE: refocusing an already-open background window flashes the
+  // border 220ms steps(4) and voices winFocus; the initial open stays silent
+  // here (winOpen covers it).
+  useEffect(() => {
+    if (focused && !wasFocused.current) {
+      setPulsing(true);
+      void import("../../game/audio").then((a) => a.sfx("winFocus", { bus: "ui" }));
+      const t = setTimeout(() => setPulsing(false), 240);
+      wasFocused.current = focused;
+      return () => clearTimeout(t);
+    }
+    wasFocused.current = focused;
+  }, [focused]);
 
   const clampAndMove = useCallback(
     (rawX: number, rawY: number) => {
@@ -235,7 +261,13 @@ export function FloatingWindow({
   );
 
   const width = Math.max(def.w, MIN_WIDTH);
-  const className = ["kp-fw", focused ? "kp-fw-focused" : "", dragging ? "kp-fw-dragging" : ""]
+  const className = [
+    "kp-fw",
+    def.tall ? "kp-fw-tall" : "",
+    focused ? "kp-fw-focused" : "",
+    dragging ? "kp-fw-dragging" : "",
+    pulsing ? "kp-fw-refocus" : "",
+  ]
     .filter(Boolean)
     .join(" ");
 
@@ -243,7 +275,7 @@ export function FloatingWindow({
     <div
       ref={rootRef}
       className={className}
-      style={{ left: def.x, top: def.y, width, zIndex: z }}
+      style={{ left: def.x, top: def.y, width: `min(${width}px, 96vw)`, zIndex: z }}
       onPointerDownCapture={handleActivate}
       onKeyDown={handleKeyDown}
       tabIndex={-1}
@@ -252,16 +284,23 @@ export function FloatingWindow({
     >
       <div
         ref={barRef}
-        className="kp-fw-bar"
+        className={def.notched ? "kp-fw-bar kp-frame-notched-bar" : "kp-fw-bar"}
         onPointerDown={handleBarPointerDown}
         onPointerMove={handleBarPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
         <span className="kp-fw-title">{def.title}</span>
+        {def.notched && (
+          <span className="kp-bar-chevron" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
         {closable && (
           <button type="button" className="kp-fw-close" onClick={onClose} aria-label={`Close ${def.title}`}>
-            <span aria-hidden="true">X</span>
+            <i aria-hidden="true" />
           </button>
         )}
       </div>

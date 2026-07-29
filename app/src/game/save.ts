@@ -176,6 +176,12 @@ export interface RunState {
     picked: AugmentId | null;
     /** Boost ejected by a full-bay swap, for the result stamp. */
     replaced: AugmentId | null;
+    /** REPAIR.LOG telemetry: how the dive actually went, for the strain
+     * trace, sparklines, and the dive log rail. Absent on older saves. */
+    rounds?: number;
+    trapRounds?: number[];
+    parRounds?: number[];
+    log?: string[];
   } | null;
 }
 

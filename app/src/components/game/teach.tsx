@@ -90,7 +90,7 @@ export function Teach({ id, signals }: { id: string; signals?: TeachSignals }) {
 
   const showing = eligible && ctx!.activeId === id;
   useEffect(() => {
-    if (showing) sfx("icon", { bus: "ui" });
+    if (showing) sfx("teachIn", { bus: "ui" });
   }, [showing]);
 
   if (!m || !showing) return null;

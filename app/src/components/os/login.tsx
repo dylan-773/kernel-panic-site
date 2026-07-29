@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { audioDebug, playUiPress, playUiTick, sfx, testBeep } from "../../game/audio";
 import { SlotSummary, deleteSlot, slotSummaries } from "../../game/save";
 import { VERSION_LABEL } from "../../game/version";
+import { DataRows, KpLockup, Nodes } from "./kp-ui";
 
 /**
  * KP/OS user login: three save slots, picked from a CRT login prompt. The
@@ -67,9 +68,7 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
   return (
     <div className="kp-login">
       <div className="kp-login-head">
-        <pre className="kp-boot-mark" aria-hidden="true">
-          {"KERNEL PANIC"}
-        </pre>
+        <KpLockup cell={7} wordPx={38} />
         <p className="kp-login-sub">KP/OS v9.2 - SELECT USER</p>
       </div>
       {/* The in-fiction "KP/OS v9.2" above is set dressing. This is the real
@@ -83,7 +82,7 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
             <div key={s.slot} className="kp-slotwrap" style={{ animationDelay: `${i * 120}ms` }}>
               <button
                 type="button"
-                className={s.empty ? "kp-slot kp-slot-empty" : "kp-slot"}
+                className={s.empty ? "kp-slot kp-slot-empty" : "kp-slot kp-frame-nodes"}
                 onClick={() => pick(s.slot)}
               >
                 {s.empty ? (
@@ -96,17 +95,22 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
                   </>
                 ) : (
                   <>
+                    <Nodes />
                     <span className="kp-slot-avatar" aria-hidden="true">
                       {s.machineOpened ? ":)" : ">_"}
                     </span>
                     <strong>USER 0{s.slot}</strong>
-                    <span className="kp-slot-line">
-                      {s.machineOpened
-                        ? "machine opened"
-                        : s.day !== null
-                          ? `attempt ${s.runCount} - day ${s.day} - strain ${s.strain}`
-                          : `${s.runCount} attempt${s.runCount === 1 ? "" : "s"} logged`}
-                    </span>
+                    <DataRows
+                      rows={
+                        s.day !== null
+                          ? [
+                              { label: "ATTEMPT", value: String(s.runCount) },
+                              { label: "DAY", value: String(s.day) },
+                              { label: "STRAIN", value: String(s.strain) },
+                            ]
+                          : [{ label: "ATTEMPTS", value: String(s.runCount) }]
+                      }
+                    />
                     <span className="kp-slot-line kp-slot-dim">
                       {s.machineOpened ? "the door is open" : "back room sealed"}
                     </span>
