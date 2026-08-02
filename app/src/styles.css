@@ -3728,10 +3728,42 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
    ============================================================ */
 
 :root {
-  /* the intrusion's tone: the scheme's support ink, never a second hue */
-  --ch2-hot: color-mix(in srgb, var(--ch2) 55%, var(--ch-hot));
-  --ch2-dimm: color-mix(in srgb, var(--ch2) 55%, var(--px-void));
-  --ch2-glow: color-mix(in srgb, var(--ch2) 50%, transparent);
+  /* the intrusion's tone: the support ink by default; --r-hazard, its
+   * structural identity, the moment a scheme is set. */
+  --dv-o: var(--ch2);
+  --dv-o-hot: color-mix(in srgb, var(--ch2) 55%, var(--ch-hot));
+  --dv-o-dim: color-mix(in srgb, var(--ch2) 55%, var(--px-void));
+  --dv-o-glow: color-mix(in srgb, var(--ch2) 50%, transparent);
+  /* legacy aliases still read by a few rules below */
+  --ch2-hot: var(--dv-o-hot);
+  --ch2-dimm: var(--dv-o-dim);
+  --ch2-glow: var(--dv-o-glow);
+}
+:root[data-scheme] {
+  --dv-o: var(--r-hazard);
+  --dv-o-hot: color-mix(in srgb, var(--r-hazard) 55%, var(--ch-hot));
+  --dv-o-dim: color-mix(in srgb, var(--r-hazard) 55%, var(--px-void));
+  --dv-o-glow: color-mix(in srgb, var(--r-hazard) 50%, transparent);
+}
+
+/* the SCHEMATIC channel: the board's unclaimed fabric (grid, arms, hubs,
+ * rulers, hex block, slag) reads as a BLUEPRINT under a scheme, while the
+ * DIVE.EXE watermark, the frame ticks, the core and every live claim keep
+ * the accent. Default collapses the channel onto the accent, so
+ * SCHEME=DEFAULT is unchanged.
+ *
+ * These MUST be defined: every board rule reaches them through color-mix,
+ * and an undefined token makes the whole declaration invalid, which drops
+ * the stroke off the arms and hubs and leaves the board unreadable. */
+:root {
+  --dv-sch: var(--ch);
+  --dv-sch-dim: var(--ch-dim);
+  --dv-sch-faint: var(--ch-faint);
+}
+:root[data-scheme] {
+  --dv-sch: var(--r-note);
+  --dv-sch-dim: color-mix(in srgb, var(--r-note) 55%, var(--px-void));
+  --dv-sch-faint: color-mix(in srgb, var(--r-note) 30%, var(--px-void));
 }
 
 /* ================= shell frame ================= */
@@ -5597,7 +5629,7 @@ html[data-scheme] .kp-ticker .ds-tickval { color: color-mix(in srgb, var(--r-lin
 .ib-grid {
   display: grid;
   gap: 10px 12px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "mast" "list" "foot";
   /* cqi, never vw: a tiled window scales to ITS tile. cqi inside a custom
    * property resolves at the USE SITE, so a token used inside .ib-pane
@@ -5949,7 +5981,7 @@ html[data-scheme] .kp-ticker .ds-tickval { color: color-mix(in srgb, var(--r-lin
 .lo-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "mast" "trinity" "gutter" "support" "foot";
   /* the fluid ramp. cqi, never vw: a tiled window scales to its own tile.
    * cqi in a custom property resolves at the USE SITE, so a description
@@ -6374,7 +6406,7 @@ html[data-scheme] .kp-ticker .ds-tickval { color: color-mix(in srgb, var(--r-lin
 .sv-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "read" "deck" "status" "caption";
   --sv-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
   --sv-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
@@ -6723,7 +6755,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 .rl-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "mast" "bill" "trace" "cache" "cam" "gutter";
   --rl-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
   --rl-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
@@ -7303,7 +7335,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 .dl-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "mast" "main" "foot";
   --dl-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
   --dl-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
@@ -7644,6 +7676,9 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 /* ---------- Z2 media: the attachment ---------- */
 
 .dl-media { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 0; }
+/* the cell is narrower than the column it sits in, so it centres in the
+ * slack instead of hanging off the left edge */
+.dl-scan, .dl-nopay { align-self: center; }
 
 /* 1:1, never downscaled: the source is 240x320 exactly, so one dither dot is
  * one CSS pixel. 244x324 outer, because box-sizing is border-box repo wide:
@@ -7742,7 +7777,11 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 }
 .dl-foot button:hover:not(:disabled) { background: var(--ch); color: var(--px-void); }
 .dl-foot button:disabled { border-style: dashed; color: var(--ch-faint); border-color: var(--ch-faint); cursor: not-allowed; }
-.dl-banks { margin-left: auto; display: flex; gap: 12px; min-width: 0; overflow: hidden; }
+/* flex: 1 1 0, not just min-width: 0. As a non-shrinking flex item the
+ * bank rows took their max-content width (1039px in a 1034px body) and
+ * that set the GRID's width, pushing the masthead and the main row past
+ * the window edge. They are ambient furniture: they shrink and clip. */
+.dl-banks { margin-left: auto; display: flex; gap: 12px; flex: 1 1 0; min-width: 0; overflow: hidden; }
 .dl-banks div { display: flex; gap: 7px; align-items: baseline; }
 .dl-banks b { font-family: var(--kp-display); font-size: 8px; letter-spacing: 0.14em; color: var(--r-note); font-weight: 400; }
 .dl-banks span { font-family: var(--kp-mono); font-size: 10px; color: var(--ch-faint); white-space: nowrap; }
@@ -7750,7 +7789,10 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 /* ================= WIDE TIER ================= */
 
 @container dl (min-width: 700px) {
-  .dl-main { grid-template-columns: var(--dl-rail) minmax(0, 1fr) var(--dl-media); }
+  /* minmax(0, Npx): fixed tracks that can still give ground. At their
+   * bare px value the rail and the media column cannot shrink, so any
+   * container narrower than their sum pushes the row off the window. */
+  .dl-main { grid-template-columns: minmax(0, var(--dl-rail)) minmax(0, 1fr) minmax(0, var(--dl-media)); }
 }
 
 /* the tight end of WIDE: the rail gives back 20px and the media column keeps
@@ -7792,7 +7834,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 .dn-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "focal" "status" "log" "prompt" "cmds" "foot";
   /* cqi in a custom property resolves at the USE SITE, so the focal tokens
    * land against .dn-focal's own container and everything else against the
@@ -8263,7 +8305,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 .nt-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "top" "hero" "strip" "shop" "foot";
   --nt-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
   --nt-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
@@ -8901,3 +8943,33 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
   .ml-plate { animation: none; }
   .ml-regchip.is-warn .ml-riskflash { animation: none; opacity: 0; }
 }
+
+
+/* ==========================================================================
+   LAW 5 GUARD: 1:1 crop cells are never resampled.
+
+   Tailwind's preflight ships `img, video { max-width: 100%; height: auto }`,
+   which silently DOWNSCALES every one of these prints to its bezel: the
+   LOADOUT bench feed came out 196x146 against a native 304x227, and a
+   downscaled dither mushes its dots into grey noise, which is the exact
+   failure law 5 exists to prevent. The demos never hit this because they do
+   not load Tailwind.
+
+   Each of these cells is `overflow: hidden` with its image absolutely
+   positioned at negative offsets: the BOX does the cropping and the image
+   must stay at the size it was cut at.
+   ========================================================================== */
+
+.lo-mon img,
+.dv-mon img,
+.ml-stage img,
+.dl-scan img,
+.ib-cell img,
+.rl-cam img {
+  max-width: none;
+  max-height: none;
+  height: auto;
+}
+/* REPAIR.LOG's still is the one cell that fills its box and crops via
+ * object-fit, so it keeps the stretch it asks for. */
+.rl-cam img { width: 100%; height: 100%; }

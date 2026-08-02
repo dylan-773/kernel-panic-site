@@ -274,11 +274,13 @@ function DocView({ entry }: { entry: JournalEntry | null }) {
         </div>
       )}
       <div className="dl-metarow">
+        {/* FILENAME and DOCTYPE only: provenance is the .dl-prov line below
+            the hero, and a chip carrying the same sentence both duplicated
+            it and blew the metarow's width. */}
         {(
           [
             ["FILENAME", meta.filename],
             ["DOCTYPE", meta.doctype],
-            ["PROVENANCE", meta.provenance],
           ] as const
         ).map(([label, value]) => (
           <span key={label} className="dl-chip">
