@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,12 +13,14 @@ import {
 export interface WinDef {
   id: string;
   title: string; // e.g. "INBOX"
-  x: number;
-  y: number; // px offsets within the desktop area
+  /** Explicit spawn point. Omit both and the window lands CENTERED on the
+   * desk (v3 review round 3: a plain open is centered, never cascaded). */
+  x?: number;
+  y?: number;
   w: number; // px width (height sizes to content under the .kp-fw ceiling; no internal scroll)
   /** DARKNET.LNK only: stepped-notch title bar + void chevron. */
   notched?: boolean;
-  /** Study-grade windows run full height: only the viewport caps them,
+  /** Study-grade windows run full height: only the desk caps them,
    * never the utility-window ceiling. */
   tall?: boolean;
 }
@@ -29,7 +32,8 @@ export interface WindowManager {
   toggle: (id: string) => void;
   isOpen: (id: string) => boolean;
   zIndexOf: (id: string) => number;
-  posOf: (id: string) => { x: number; y: number };
+  /** null until the window has been placed (a centered spawn measures itself). */
+  posOf: (id: string) => { x: number; y: number } | null;
   move: (id: string, x: number, y: number) => void;
   openIds: string[];
 }
@@ -44,9 +48,13 @@ const BASE_Z = 100;
 export function useWindowManager(defs: WinDef[]): WindowManager {
   const [openSet, setOpenSet] = useState<Set<string>>(() => new Set());
   const [zOrder, setZOrder] = useState<string[]>(() => []);
+  // A def with no explicit spawn point starts unplaced; FloatingWindow
+  // measures itself against the desk and centers on its first layout.
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(() => {
     const initial: Record<string, { x: number; y: number }> = {};
-    for (const def of defs) initial[def.id] = { x: def.x, y: def.y };
+    for (const def of defs) {
+      if (def.x != null && def.y != null) initial[def.id] = { x: def.x, y: def.y };
+    }
     return initial;
   });
 
@@ -65,14 +73,33 @@ export function useWindowManager(defs: WinDef[]): WindowManager {
     [bringToFront],
   );
 
-  const close = useCallback((id: string) => {
-    setOpenSet((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
+  const centered = useMemo(
+    () => new Set(defs.filter((d) => d.x == null || d.y == null).map((d) => d.id)),
+    [defs],
+  );
+
+  const close = useCallback(
+    (id: string) => {
+      setOpenSet((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      // A centered window re-centers on its next open (the demo's
+      // placeWindow runs on every open); a dragged one would otherwise
+      // reopen wherever it was last left.
+      if (centered.has(id)) {
+        setPositions((prev) => {
+          if (!(id in prev)) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    },
+    [centered],
+  );
 
   const focus = useCallback(
     (id: string) => {
@@ -107,7 +134,7 @@ export function useWindowManager(defs: WinDef[]): WindowManager {
     [zOrder],
   );
 
-  const posOf = useCallback((id: string) => positions[id] ?? { x: 0, y: 0 }, [positions]);
+  const posOf = useCallback((id: string) => positions[id] ?? null, [positions]);
 
   const move = useCallback((id: string, x: number, y: number) => {
     setPositions((prev) => ({ ...prev, [id]: { x, y } }));
@@ -187,6 +214,40 @@ export function FloatingWindow({
     wasFocused.current = focused;
   }, [focused]);
 
+  // v3 review round 3: a window with no explicit spawn point lands CENTERED
+  // on the desk. Centering an auto-height window needs live layout, so it
+  // measures itself in a layout effect (before paint, so nothing flashes at
+  // the origin) and reports the position back to the manager.
+  const placed = def.x != null && def.y != null;
+  useLayoutEffect(() => {
+    if (placed) return;
+    const root = rootRef.current;
+    const parent = root?.parentElement;
+    if (!root || !parent) return;
+    const x = Math.max(0, Math.round((parent.clientWidth - root.offsetWidth) / 2));
+    const y = Math.max(4, Math.round((parent.clientHeight - root.offsetHeight) / 2));
+    onMove(x, y);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placed]);
+
+  // The desk's usable height changes with the browser and with the CRT
+  // switch (both chrome bands are tokens). Pull any window that now hangs
+  // off the edge back inside it.
+  useEffect(() => {
+    const onResize = () => {
+      const root = rootRef.current;
+      const parent = root?.parentElement;
+      if (!root || !parent || def.x == null || def.y == null) return;
+      const maxX = Math.max(0, parent.clientWidth - root.offsetWidth);
+      const maxY = Math.max(4, parent.clientHeight - root.offsetHeight - 6);
+      const nx = clampAxis(def.x, 0, maxX);
+      const ny = clampAxis(def.y, 4, maxY);
+      if (nx !== def.x || ny !== def.y) onMove(nx, ny);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [def.x, def.y, onMove]);
+
   const clampAndMove = useCallback(
     (rawX: number, rawY: number) => {
       const root = rootRef.current;
@@ -222,8 +283,8 @@ export function FloatingWindow({
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        originX: def.x,
-        originY: def.y,
+        originX: def.x ?? 0,
+        originY: def.y ?? 0,
       };
       setDragging(true);
     },
@@ -275,7 +336,14 @@ export function FloatingWindow({
     <div
       ref={rootRef}
       className={className}
-      style={{ left: def.x, top: def.y, width: `min(${width}px, 96vw)`, zIndex: z }}
+      style={{
+        left: def.x ?? 0,
+        top: def.y ?? 0,
+        width: `min(${width}px, 96cqi)`,
+        zIndex: z,
+        // hidden for exactly one layout pass while it measures itself
+        visibility: placed ? undefined : "hidden",
+      }}
       onPointerDownCapture={handleActivate}
       onKeyDown={handleKeyDown}
       tabIndex={-1}

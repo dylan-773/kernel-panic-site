@@ -4,17 +4,27 @@ import { PATCH_POUCH_MAX, armUnionCraft, shapeClassOf } from "../../../game/patc
 import type { RunAction } from "../../../game/run-reducer";
 import type { RunState } from "../../../game/save";
 import { PatchGlyph } from "../../game/patch-glyph";
-import { Chip, Hero, Ticks } from "../kp-ui";
+import { Chip } from "../kp-ui";
 
 /**
- * SOLDER.BAY: the patch crafting bench. Left column is the SCHEMATIC
- * magnifier (the held piece drawn large on a blueprint grid; during a join
- * candidate the arms the partner contributes blink hot) over the typed
- * dialogue box. Right column is the deck: JOIN hero while holding, the
- * five-slot rack (tap a piece then a partner, or drag one onto another),
- * join preview with CRAFT / CANCEL, and the boxed POUCH counter plus the
- * inverse-video LAST WELD box. Pieces that cannot join the held one go
- * DEAD; with a pair locked the rest of the rack goes inert. ESC cancels.
+ * SOLDER.BAY as a KP/OS v3 instrument panel (ui-demos/solder-v3, cycle
+ * ux-2026-07-31-solder-v3). System: ../RULINGS.md.
+ *
+ * GLANCE ORDER: 1st THE READ, a single hero glyph that answers the same
+ * question in all four interaction states ("what shape is the reading in
+ * front of you"), which is what keeps it focal rather than merely big;
+ * 2nd the rack, where the hands go; 3rd the bench status line. The
+ * schematic is demoted from a full column to an --r-aux satellite plate.
+ *
+ * RISK is reserved for ACTIVE rejection only. The passive "this piece has
+ * no partner anywhere" case is a resting condition, not something you just
+ * did, so it stays --r-line; and DEAD slots are colour-ABSENT rather than
+ * red, because a held piece can leave four of five slots dead at once and
+ * red that common habituates the eye.
+ *
+ * Every flash and pulse animates OPACITY on a promoted plate (.sv-fx) and
+ * the drag ghost rides a transform, so nothing on this interaction-heavy
+ * surface animates a paint or layout property.
  */
 
 type Dispatch = (a: RunAction) => void;
@@ -57,8 +67,10 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** The typed dialogue box, one line at a time. */
-function StatusBox({ text }: { text: string }) {
+/** The typed bench line, one character at a time (18ms/char, shipped).
+ * Tone is the role: NOMINAL when the weld is ready, RISK only while a
+ * rejection is actively happening. */
+function StatusBox({ text, tone }: { text: string; tone: "ok" | "reject" | null }) {
   const reduced = useReducedMotion();
   const [n, setN] = useState(0);
   useEffect(() => {
@@ -68,8 +80,10 @@ function StatusBox({ text }: { text: string }) {
     return () => clearInterval(iv);
   }, [text, reduced]);
   const shown = reduced ? text : text.slice(0, n);
+  const cls = tone === "ok" ? "sv-status is-ready" : tone === "reject" ? "sv-status is-reject" : "sv-status";
   return (
-    <div className="kp-solder-status">
+    <div className={cls}>
+      <span className="sv-status-label">{"// BENCH _"}</span>
       <span>
         {shown}
         {!reduced && n < text.length && <span className="kp-boot-cursor">_</span>}
@@ -78,7 +92,11 @@ function StatusBox({ text }: { text: string }) {
   );
 }
 
-/** The machine's magnifier: base mask solid ink, gain arms hot + blinking. */
+/** The satellite schematic plate. Live SVG, not a 1-bit raster, so law 5's
+ * crop-never-downscale rule does not govern it: it resizes in its own
+ * viewBox space exactly the way the patch glyphs already do. The tag gets a
+ * band of its own rather than overlaying the drawing, because on a vertical
+ * STRAIGHT it sat on the top arm. */
 function Schematic({ base, gain }: { base: number; gain: number }) {
   const grid: Array<[number, number, number, number]> = [];
   for (let x = 0; x <= 304; x += 19) grid.push([x, 0, x, 228]);
@@ -92,9 +110,9 @@ function Schematic({ base, gain }: { base: number; gain: number }) {
     [-84, 0],
   ];
   return (
-    <div className="kp-schem">
-      <span className="kp-schem-tag">SCHEMATIC</span>
-      <svg viewBox="0 0 304 228" aria-hidden="true">
+    <div className="sv-schem">
+      <span className="sv-schem-tag">SCHEMATIC</span>
+      <svg viewBox="0 0 304 228" preserveAspectRatio="none" aria-hidden="true">
         {grid.map(([x1, y1, x2, y2], i) => (
           <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} className="grid" />
         ))}
@@ -105,6 +123,8 @@ function Schematic({ base, gain }: { base: number; gain: number }) {
             {ends.map(([ex, ey], d) => {
               const bit = 1 << d;
               if (base & bit) return <line key={d} x1={cx} y1={cy} x2={cx + ex} y2={cy + ey} className="arm" />;
+              // the GAIN arms carve out of r-aux into r-data: they are what
+              // the partner ADDS, the thing about to change
               if (gain & bit)
                 return <line key={d} x1={cx} y1={cy} x2={cx + ex} y2={cy + ey} className="arm arm-gain" />;
               return null;
@@ -135,6 +155,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
   const [fusing, setFusing] = useState(false);
   const [lastWeld, setLastWeld] = useState<number | null>(null);
   const [status, setStatus] = useState(LINE_IDLE);
+  const [tone, setTone] = useState<"ok" | "reject" | null>(null);
   const [deny, setDeny] = useState<number | null>(null);
   const [spark, setSpark] = useState<{ x: number; y: number; key: number } | null>(null);
   const [weldDot, setWeldDot] = useState<{ x: number; y: number; key: number } | null>(null);
@@ -172,20 +193,34 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
     return null;
   }, [drag, sel, pair, pouch]);
 
-  /* status line follows the machine state */
+  /* status line follows the machine state. NO_JOIN_LINE has two causes and
+   * only ONE of them is an alarm: an ACTIVE rejection (you are hovering an
+   * illegal target right now) takes --r-warn; the passive "this piece has
+   * no partner anywhere" case does not. */
   useEffect(() => {
     if (fusing) return;
     if (held === null) {
       setStatus(LINE_IDLE);
+      setTone(null);
       return;
     }
     if (candidate) {
       setStatus(LINE_READY);
+      setTone("ok");
       return;
     }
     const partners = legalPartners(held);
     const hoveringIllegal = drag !== null && drag.hoverIndex !== null;
-    setStatus(partners.size === 0 || hoveringIllegal ? NO_JOIN_LINE : LINE_HELD);
+    if (hoveringIllegal) {
+      setStatus(NO_JOIN_LINE);
+      setTone("reject");
+    } else if (partners.size === 0) {
+      setStatus(NO_JOIN_LINE);
+      setTone(null);
+    } else {
+      setStatus(LINE_HELD);
+      setTone(null);
+    }
   }, [held, candidate, fusing, drag, legalPartners]);
 
   const slotCenter = (i: number): { x: number; y: number } | null => {
@@ -205,6 +240,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
       setLastWeld(union);
       setReveal((r) => r + 1);
       setStatus(lineDone(NOUN[shapeClassOf(union)]));
+      setTone(null);
     },
     [dispatch],
   );
@@ -245,6 +281,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
         setDeny(flashIndex);
         setTimeout(() => setDeny(null), 180);
         setStatus(NO_JOIN_LINE);
+        setTone("reject");
       }
       if (drag) setDrag(null);
       setSel(null);
@@ -363,47 +400,88 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
     tapActivate(i);
   };
 
-  /* schematic contents */
+  /* Z1, the one focal element. The hero answers the SAME question in all
+   * four interaction states, which is what keeps it focal instead of merely
+   * big. It is a pure presentation of held/candidate: no new state, ever. */
   const schem = useMemo(() => {
     if (candidate) {
       const a = pouch[candidate.a];
       const b = pouch[candidate.b];
-      return { base: a, gain: b & ~a & 0xf, read: `${NOUN[shapeClassOf((a | b) & 0xf)]} / ${armCount((a | b) & 0xf)} arms` };
+      const u = (a | b) & 0xf;
+      return {
+        base: a,
+        gain: b & ~a & 0xf,
+        eyebrow: "// JOIN RESULT _",
+        hero: NOUN[shapeClassOf(u)].toUpperCase(),
+        arms: `${armCount(u)} ARMS`,
+        idle: false,
+      };
     }
     if (held !== null && held < pouch.length) {
-      return { base: pouch[held], gain: 0, read: `${NOUN[shapeClassOf(pouch[held])]} / ${armCount(pouch[held])} arms` };
+      return {
+        base: pouch[held],
+        gain: 0,
+        eyebrow: "// WORKPIECE _",
+        hero: NOUN[shapeClassOf(pouch[held])].toUpperCase(),
+        arms: `${armCount(pouch[held])} ARMS`,
+        idle: false,
+      };
     }
-    return { base: 0, gain: 0, read: "----" };
+    /* IDLE: the placeholder sits at the hero's OWN footprint, never a
+     * smaller idle treatment (equal footprint, applied at the hero) */
+    return { base: 0, gain: 0, eyebrow: "// WORKPIECE _", hero: "----", arms: "", idle: true };
   }, [candidate, held, pouch]);
 
   const union = candidate ? armUnionCraft(pouch[candidate.a], pouch[candidate.b]) : null;
   const partners = held !== null && held < pouch.length ? legalPartners(held) : null;
 
   return (
-    <div className="kp-solder2">
-      <div className="kp-solder-lay">
-        <div className="kp-solder-left">
+    <div className="sv-panel">
+      <div className="sv-grid">
+        {/* Z1 THE READ: the surface's focal zone. A full-width band, not a
+            left column: the longest noun (STRAIGHT, 8 Silkscreen glyphs)
+            cannot render at hero scale in 300px, and the row Z2 vacated
+            was a row it was sharing anyway. */}
+        <section className="sv-read">
+          <span className="sv-bracket" aria-hidden="true">
+            <i />
+          </span>
+          <div className="sv-heroline">
+            <span className="sv-eyebrow">{schem.eyebrow}</span>
+            <span className={schem.idle ? "sv-hero is-idle" : "sv-hero"}>{schem.hero}</span>
+            <span className="sv-armcount">{schem.arms}</span>
+          </div>
           <Schematic base={schem.base} gain={schem.gain} />
-          <div className="kp-datarow kp-datarow-plain">
-            <span>WORKPIECE</span>
-            <em style={{ textTransform: "uppercase" }}>{schem.read}</em>
+        </section>
+
+        {/* Z2 STATUS + Z4 FOOT: what the bench IS. Its short box sits beside
+            the tall deck for free; the bookkeeping chips anchor the column
+            and shorten the deck by a row it was paying for in full. */}
+        <div className="sv-side">
+          <StatusBox text={status} tone={tone} />
+          <div className="sv-footchips">
+            <Chip label="POUCH" value={`${pouch.length}/${PATCH_POUCH_MAX}`} />
+            <span className="sv-weldbox">
+              <Chip label="LAST WELD" value="" />
+              <span className={lastWeld === null ? "sv-weldcell sv-weldcell-empty" : "sv-weldcell"}>
+                {lastWeld !== null && <PatchGlyph mask={lastWeld} size={34} />}
+              </span>
+            </span>
           </div>
-          <StatusBox text={status} />
         </div>
-        <div ref={deckRef} className={`kp-solder-deck2 kp-frame-ticks ${shake ? "kp-shake-1" : ""}`.trim()}>
-          <Ticks />
-          <div className="kp-deck-head">
+
+        {/* Z3 THE RACK: what your hands are doing */}
+        <section ref={deckRef} className={shake ? "sv-deck kp-shake-1" : "sv-deck"}>
+          <div className="sv-deckhead">
             <strong>PATCH POUCH</strong>
-            <em>
-              {pouch.length} / {PATCH_POUCH_MAX}
-            </em>
           </div>
-          <div className="kp-hero-slot">{held !== null && !fusing && <Hero text="JOIN" />}</div>
-          <div className="kp-rack" ref={rackRef}>
+          {/* five equal columns, so a 5-piece pouch and an EMPTY pouch
+              occupy exactly the same footprint */}
+          <div className="sv-rack" ref={rackRef}>
             {Array.from({ length: PATCH_POUCH_MAX }).map((_, i) => {
               if (i >= pouch.length) {
                 return (
-                  <span key={`e${i}`} className="kp-slot2 kp-slot-empty" data-slot-index={i} aria-hidden="true">
+                  <span key={`e${i}`} className="sv-slot sv-slot-empty" data-slot-index={i} aria-hidden="true">
                     <span className="kp-piece-hole" />
                   </span>
                 );
@@ -416,12 +494,12 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
               const hoverLegal = drag && drag.hoverIndex === i && candidate?.b === i;
               const hoverIllegal = drag && drag.hoverIndex === i && i !== drag.index && !hoverLegal;
               const cls = [
-                "kp-slot2",
-                isCarry ? "kp-slot-carry2" : "",
-                dead && !isDragSource ? "kp-slot-dead" : "",
-                hoverLegal ? "kp-slot-legal2" : "",
-                hoverIllegal ? "kp-slot-illegal2" : "",
-                deny === i ? "kp-slot-deny2" : "",
+                "sv-slot",
+                isCarry ? "sv-slot-carry" : "",
+                dead && !isDragSource ? "sv-slot-dead" : "",
+                hoverLegal ? "sv-slot-legal" : "",
+                hoverIllegal ? "sv-slot-illegal" : "",
+                deny === i ? "sv-slot-deny" : "",
                 reveal > 0 && !reduced ? "kp-slot-anim" : "",
               ]
                 .filter(Boolean)
@@ -447,57 +525,68 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
                       <span>{NOUN[shapeClassOf(pouch[i])]}</span>
                     </>
                   )}
+                  {/* one promoted plate per slot: every flash and pulse on
+                      this surface animates its opacity, never a paint */}
+                  <i className="sv-fx" aria-hidden="true" />
                 </button>
               );
             })}
           </div>
-          <div className="kp-join-row">
+          {/* the join preview, demoted to the two INPUTS and an arrow. The
+              result noun is cut: Z1 already states it at 5x this size. */}
+          <div className="sv-join">
             {candidate && union !== null && (
               <>
-                {"JOIN: "}
-                <PatchGlyph mask={pouch[candidate.a]} size={16} />
-                {" + "}
-                <PatchGlyph mask={pouch[candidate.b]} size={16} />
-                {" -> "}
-                <PatchGlyph mask={union} size={20} />
-                <b> {NOUN[shapeClassOf(union)]}</b>
+                <PatchGlyph mask={pouch[candidate.a]} size={18} />
+                {"+"}
+                <PatchGlyph mask={pouch[candidate.b]} size={18} />
+                {"->"}
+                <PatchGlyph mask={union} size={22} />
               </>
             )}
           </div>
-          <div className="kp-solder-actions">
+          <div className="sv-actions">
             {candidate && !drag && union !== null && (
               <>
-                <button type="button" className="kp-btn2 kp-btn2-primary" onClick={() => fuseAt(candidate.a, candidate.b)}>
+                <button type="button" className="sv-btn sv-btn-craft" onClick={() => fuseAt(candidate.a, candidate.b)}>
                   CRAFT
                 </button>
-                <button type="button" className="kp-btn2 kp-btn2-ghost" onClick={() => rejectCancel(null)}>
+                <button type="button" className="sv-btn" onClick={() => rejectCancel(null)}>
                   CANCEL
                 </button>
               </>
             )}
           </div>
-          <div className="kp-deck-foot">
-            <Chip label="POUCH" value={`${pouch.length}/${PATCH_POUCH_MAX}`} />
-            <span className="kp-weld-box">
-              <Chip label="LAST WELD" value="" />
-              <span className={lastWeld === null ? "kp-weld-cell kp-weld-cell-empty" : "kp-weld-cell"}>
-                {lastWeld !== null && <PatchGlyph mask={lastWeld} size={34} />}
-              </span>
-            </span>
+        </section>
+
+        {/* Z5 CAPTION: full text, lowest box weight. LOADOUT.CFG was allowed
+            to cut its copy of this explanation precisely because SOLDER.BAY
+            keeps it in full at first contact; cutting it here would leave
+            the explanation nowhere. Only the box weight changes. */}
+        <div className="sv-caption">
+          <div className="sv-div">
+            <span>{"// PLACEMENT"}</span>
+            <i />
           </div>
+          <p className="sv-foot">{FOOT_LINE}</p>
         </div>
       </div>
-      <p className="kp-solder-caption">{FOOT_LINE}</p>
 
       {/* drag ghost + weld overlays */}
       {drag && (
-        <div className="kp-slot2 kp-slot-carry2 kp-ghostchip" style={{ left: drag.x, top: drag.y }}>
+        // positioned by TRANSFORM off a fixed origin, never left/top: a
+        // layout property animating at pointer rate is the single most
+        // expensive thing this surface could do inside the glass
+        <div
+          className="sv-slot sv-slot-carry sv-ghost"
+          style={{ transform: `translate(${drag.x}px, ${drag.y}px)` }}
+        >
           <PatchGlyph mask={pouch[drag.index]} size={GLYPH} />
           <span>{NOUN[shapeClassOf(pouch[drag.index])]}</span>
         </div>
       )}
       {spark && (
-        <div key={spark.key} className="kp-spark2" style={{ left: spark.x - 24, top: spark.y - 24 }}>
+        <div key={spark.key} className="sv-spark" style={{ left: spark.x - 24, top: spark.y - 24 }}>
           <svg width={48} height={48} viewBox="-12 -12 24 24">
             {Array.from({ length: 4 }).map((_, i) => {
               const a = (Math.PI * 2 * i) / 4 + Math.PI / 4;
@@ -517,7 +606,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
         </div>
       )}
       {weldDot && (
-        <div key={weldDot.key} className="kp-weldwrap2 kp-weld-fade2" style={{ left: weldDot.x - 8, top: weldDot.y - 8 }}>
+        <div key={weldDot.key} className="sv-weldwrap" style={{ left: weldDot.x - 8, top: weldDot.y - 8 }}>
           <svg width={16} height={16} viewBox="-8 -8 16 16">
             <circle r={3.5} className="kp-dweld" />
           </svg>

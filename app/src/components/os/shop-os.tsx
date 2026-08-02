@@ -29,11 +29,11 @@ import { TeachProvider } from "../game/teach";
 import { DesktopIdle, FinalePre, StoryScene, customerById } from "../game/screens";
 import { BootScreen } from "./boot";
 import { LoginScreen } from "./login";
-import { DesktopIcon, IconGrid } from "./icons";
+import { Dock, DockIcon } from "./icons";
 import { KpMark, Nodes } from "./kp-ui";
 import { Ticker, WallPoster, WallReg, WallScope } from "./desk";
 import { FloatingWindow, useWindowManager, WinDef } from "./wm";
-import { InboxContent } from "./windows/inbox";
+import { InboxContent, INBOX_W_CARD, INBOX_W_LIST } from "./windows/inbox";
 import { ReportContent } from "./windows/report";
 import { LoadoutContent } from "./windows/loadout";
 import { SolderContent } from "./windows/solder";
@@ -43,17 +43,50 @@ import { DadlogContent } from "./windows/dadlog";
 import { LedgerContent } from "./windows/ledger";
 import { DarknetContent } from "./windows/darknet";
 
+/* v3 (ux-2026-07-31-desktop-dive, review round 3): no window carries a spawn
+ * point any more. A plain open lands CENTERED on the desk; the cascade of
+ * hand-picked offsets was the thing that made two open windows overlap. */
+/* Widths are each panel's own MEASURED 16:9 figure from its demo, not the
+ * v2 guesses: every v3 study states the window width its arrangement was
+ * built and verified at. */
 const WIN_DEFS: WinDef[] = [
-  { id: "flow", title: "SHOPFRONT.EXE", x: 170, y: 34, w: 940 },
-  { id: "inbox", title: "INBOX", x: 60, y: 50, w: 510, tall: true },
-  { id: "report", title: "REPAIR.LOG", x: 60, y: 10, w: 1150, tall: true },
-  { id: "loadout", title: "LOADOUT.CFG", x: 100, y: 6, w: 1040, tall: true },
-  { id: "solder", title: "SOLDER.BAY", x: 180, y: 24, w: 1060, tall: true },
-  { id: "manual", title: "MANUAL.TXT", x: 90, y: 60, w: 760 },
-  { id: "journal", title: "DAD.LOG", x: 150, y: 40, w: 1150, tall: true },
-  { id: "ledger", title: "LEDGER.LOG", x: 400, y: 60, w: 760, tall: true },
-  { id: "darknet", title: "DARKNET.LNK", x: 560, y: 110, w: 680, notched: true },
+  { id: "flow", title: "SHOPFRONT.EXE", w: 860 },
+  { id: "inbox", title: "INBOX", w: INBOX_W_LIST, tall: true },
+  { id: "report", title: "REPAIR.LOG", w: 900, tall: true },
+  { id: "loadout", title: "LOADOUT.CFG", w: 860, tall: true },
+  { id: "solder", title: "SOLDER.BAY", w: 860, tall: true },
+  { id: "manual", title: "MANUAL.TXT", w: 760 },
+  { id: "journal", title: "DAD.LOG", w: 1040, tall: true },
+  { id: "ledger", title: "LEDGER.LOG", w: 760, tall: true },
+  { id: "darknet", title: "DARKNET.LNK", w: 820, notched: true },
 ];
+
+/** The desktop's one alarm arms here. Strain DEPLETES toward zero
+ * (run-reducer.ts: START_STRAIN 100, the run ends at 0), so the shipped
+ * `run.strain > 70` danger check lit the chip at full health. */
+const STRAIN_ALARM_AT = 35;
+
+type Scheme = "default" | "nerv" | "tokyo";
+const SCHEME_LABEL: Record<Scheme, string> = {
+  default: "DEFAULT",
+  nerv: "NERV",
+  tokyo: "TOKYO NIGHT",
+};
+
+/** The six glass layers of law 6. FLAT and OFF are the only modes; OFF
+ * removes every layer outright rather than fading them. */
+function Glass() {
+  return (
+    <div className="ds-glass" aria-hidden="true">
+      <i className="g-scan" />
+      <i className="g-mask" />
+      <i className="g-bloom" />
+      <i className="g-spec" />
+      <i className="g-vig" />
+      <i className="g-bezel" />
+    </div>
+  );
+}
 
 function windowTitle(screen: string | null): string {
   switch (screen) {
@@ -118,11 +151,18 @@ export function ShopOS() {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   // The inbox's staged width (the content reports the wide phase).
   const [inboxWide, setInboxWide] = useState(false);
-  // One scheme, three hue families; the switch recolors the whole OS.
-  const [hue, setHue] = useState<"lavender" | "magenta" | "phosphor">("lavender");
+  // v3 ruling 14, desktop-wide: colour is eight ROLE tokens, and a scheme
+  // is a remap of those tokens and nothing else. DEFAULT sets no attribute
+  // at all, so every role collapses onto the single v2 accent and the shell
+  // renders exactly as it shipped. That reversibility is the point.
+  const [scheme, setScheme] = useState<Scheme>("default");
   useEffect(() => {
-    document.documentElement.dataset.hue = hue;
-  }, [hue]);
+    if (scheme === "default") delete document.documentElement.dataset.scheme;
+    else document.documentElement.dataset.scheme = scheme;
+  }, [scheme]);
+  // The tube: FLAT (default) or OFF. Both chrome bands grow under the glass
+  // so their content sits clear of the bezel falloff.
+  const [crt, setCrt] = useState<"flat" | "off">("flat");
   const wm = useWindowManager(WIN_DEFS);
 
   useEffect(() => {
@@ -231,7 +271,7 @@ export function ShopOS() {
         day={isTutorial ? 0 : run.day}
         onTaught={(id) => dispatch({ type: "taught", id })}
       >
-      <div className="kp-os">
+      <div className={crt === "flat" ? "kp-os kp-crt-on" : "kp-os"}>
         <DuelScreen
           key={`dive-${run.runSeed}-${run.day}-${run.activeJob ?? "x"}-${screen}`}
           cfg={cfg}
@@ -284,7 +324,7 @@ export function ShopOS() {
               });
           }}
         />
-        <div className="kp-crt" aria-hidden="true" />
+        {crt === "flat" && <Glass />}
       </div>
       </TeachProvider>
     );
@@ -377,8 +417,11 @@ export function ShopOS() {
   };
 
   // The inbox steps wider while a ticket is open; the content drives the
-  // timing (tall first, then wide) through onWide.
-  const winWidth = (def: WinDef): number => (def.id === "inbox" ? (inboxWide ? 1210 : 510) : def.w);
+  // timing through onWide, and takes its own final width the instant the
+  // state flips so the frame's stepped transition clips over settled
+  // content rather than rewrapping mid-flight.
+  const winWidth = (def: WinDef): number =>
+    def.id === "inbox" ? (inboxWide ? INBOX_W_CARD : INBOX_W_LIST) : def.w;
 
   const winContent = (id: string): ReactNode => {
     switch (id) {
@@ -447,39 +490,14 @@ export function ShopOS() {
       day={run ? run.day : 0}
       onTaught={(id) => dispatch({ type: "taught", id })}
     >
-    <div className="kp-os">
+    <div className={crt === "flat" ? "kp-os kp-crt-on" : "kp-os"}>
       <div className="kp-wallpaper" aria-hidden="true">
         <i className="kp-dither" />
       </div>
       <WallReg />
-      <WallPoster meta={meta} run={run} />
+      <WallPoster meta={meta} run={run} idle={wm.openIds.length === 0} />
       <WallScope day={run ? Math.min(run.day, FINAL_DAY) : 0} />
       <main className="kp-os-desk">
-        <IconGrid>
-          <DesktopIcon
-            label="INBOX"
-            icon="inbox"
-            order={0}
-            badge={run && openJobs > 0 ? openJobs : undefined}
-            onOpen={() => {
-              wm.open(run && screenOwner(screen) !== "flow" ? "inbox" : "flow");
-            }}
-          />
-          <DesktopIcon label="LOADOUT.CFG" icon="loadout" order={1} onOpen={() => { wm.toggle("loadout"); }} />
-          <DesktopIcon label="SOLDER.BAY" icon="solder" order={2} onOpen={() => { wm.toggle("solder"); }} />
-          <DesktopIcon label="REPAIR.LOG" icon="report" order={3} onOpen={() => { wm.toggle("report"); }} />
-          <DesktopIcon label="DAD.LOG" icon="journal" order={4} onOpen={() => { wm.toggle("journal"); }} />
-          <DesktopIcon label="MANUAL.TXT" icon="manual" order={5} hint={tip("manualRef")} onOpen={() => { wm.toggle("manual"); }} />
-          <DesktopIcon label="LEDGER.LOG" icon="ledger" order={6} onOpen={() => { wm.toggle("ledger"); }} />
-          <DesktopIcon
-            label="DARKNET.LNK"
-            icon="darknet"
-            order={7}
-            hint="Gray-market patch pieces, no questions asked. Opens for trade after the shop closes."
-            onOpen={() => { wm.toggle("darknet"); }}
-          />
-        </IconGrid>
-
         {WIN_DEFS.map((def) => {
           if (!wm.isOpen(def.id)) return null;
           const pos = wm.posOf(def.id);
@@ -496,8 +514,8 @@ export function ShopOS() {
               def={{
                 ...def,
                 title: isFlow ? windowTitle(screen) : def.title,
-                x: pos.x,
-                y: pos.y,
+                x: pos?.x,
+                y: pos?.y,
                 w: winWidth(def),
               }}
               z={wm.zIndexOf(def.id)}
@@ -513,9 +531,12 @@ export function ShopOS() {
         })}
       </main>
 
-      <Ticker meta={meta} />
-
-      <footer className="kp-taskbar">
+      {/* The slim TOP strip (v3 review round 3). The old bottom taskbar's
+          whole payload rehomed: mark + start menu (now dropping down), the
+          USER / DAY / STRAIN / CR chips, the stats ticker crawling the
+          middle, ABANDON and SND. The strain chip stays on the desk at all
+          times and keeps its alarm. */}
+      <header className="kp-taskbar">
         <button
           type="button"
           className={startOpen ? "kp-task-mark kp-task-mark-open" : "kp-task-mark"}
@@ -543,10 +564,19 @@ export function ShopOS() {
               type="button"
               onClick={() => {
                 sfx("hueSwap", { bus: "ui" });
-                setHue((h) => (h === "lavender" ? "magenta" : h === "magenta" ? "phosphor" : "lavender"));
+                setScheme((s) => (s === "default" ? "nerv" : s === "nerv" ? "tokyo" : "default"));
               }}
             >
-              HUE: {hue.toUpperCase()}
+              SCHEME: {SCHEME_LABEL[scheme]}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sfx("tick", { bus: "ui" });
+                setCrt((c) => (c === "flat" ? "off" : "flat"));
+              }}
+            >
+              CRT: {crt === "flat" ? "FLAT" : "OFF"}
             </button>
             <button
               type="button"
@@ -585,9 +615,19 @@ export function ShopOS() {
             </em>
           </span>
           {run && (
-            <span className={run.strain > 70 ? "kp-chip-pct kp-chip-crimson" : "kp-chip-pct"}>
+            // The desktop's ONE --r-warn owner: colour, inverse video, and
+            // a composited difference-blend pulse. Three channels, because
+            // colour is never allowed to signal alone.
+            <span
+              className={
+                run.strain <= STRAIN_ALARM_AT
+                  ? "kp-chip-pct ds-strain ds-strain-alarm"
+                  : "kp-chip-pct ds-strain"
+              }
+            >
               <span>STRAIN</span>
               <em>{run.strain}</em>
+              {run.strain <= STRAIN_ALARM_AT && <i className="ds-riskflash" aria-hidden="true" />}
             </span>
           )}
           {run && (
@@ -597,7 +637,7 @@ export function ShopOS() {
             </span>
           )}
         </div>
-        <span className="kp-task-spacer" />
+        <Ticker meta={meta} />
         {run && (
           <button
             type="button"
@@ -620,7 +660,37 @@ export function ShopOS() {
         >
           SND {meta.sound ? "ON" : "OFF"}
         </button>
-      </footer>
+      </header>
+
+      {/* The dock: launcher AND running-window indicator. Clicking a running
+          app surfaces its window (wm.open raises it) instead of toggling it
+          shut; clicking an app with no window opens one, centered. */}
+      <Dock>
+        <DockIcon
+          label="INBOX"
+          icon="inbox"
+          order={0}
+          running={wm.isOpen("inbox") || wm.isOpen("flow")}
+          badge={run && openJobs > 0 ? openJobs : undefined}
+          onOpen={() => {
+            wm.open(run && screenOwner(screen) !== "flow" ? "inbox" : "flow");
+          }}
+        />
+        <DockIcon label="LOADOUT.CFG" icon="loadout" order={1} running={wm.isOpen("loadout")} onOpen={() => { wm.open("loadout"); }} />
+        <DockIcon label="SOLDER.BAY" icon="solder" order={2} running={wm.isOpen("solder")} onOpen={() => { wm.open("solder"); }} />
+        <DockIcon label="REPAIR.LOG" icon="report" order={3} running={wm.isOpen("report")} onOpen={() => { wm.open("report"); }} />
+        <DockIcon label="DAD.LOG" icon="journal" order={4} running={wm.isOpen("journal")} onOpen={() => { wm.open("journal"); }} />
+        <DockIcon label="MANUAL.TXT" icon="manual" order={5} running={wm.isOpen("manual")} hint={tip("manualRef")} onOpen={() => { wm.open("manual"); }} />
+        <DockIcon label="LEDGER.LOG" icon="ledger" order={6} running={wm.isOpen("ledger")} onOpen={() => { wm.open("ledger"); }} />
+        <DockIcon
+          label="DARKNET.LNK"
+          icon="darknet"
+          order={7}
+          running={wm.isOpen("darknet")}
+          hint="Gray-market patch pieces, no questions asked. Opens for trade after the shop closes."
+          onOpen={() => { wm.open("darknet"); }}
+        />
+      </Dock>
       {/* An in-OS dialog rather than window.confirm: a browser chrome prompt
           on top of the desktop broke the fiction and styled nothing. */}
       {confirmAbandon && run && (
@@ -659,7 +729,7 @@ export function ShopOS() {
           </div>
         </div>
       )}
-      <div className="kp-crt" aria-hidden="true" />
+      {crt === "flat" && <Glass />}
     </div>
     </TeachProvider>
   );

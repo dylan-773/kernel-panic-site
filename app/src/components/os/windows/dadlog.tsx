@@ -1,17 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { sfx } from "../../../game/audio";
 import { DADLOG_CHROME, JournalEntry, visibleJournal } from "../../../game/content/journal";
 import type { MetaState } from "../../../game/save";
-import { Btn, Chip } from "../kp-ui";
 
 /**
- * DAD.LOG: the archive reader. Dad's own volume mounted read-only: a
- * volume header strip, a doctype tab strip filtering the file index
- * rail, and a document viewer that runs a RECOVERY beat on every open
- * (READING SEGMENT... then the artifact types in). Each file renders a
- * per-entry ATTACHMENT cell: scans and plates where the artifact earns
- * one, a NO VISUAL PAYLOAD cell for text artifacts. Ported from the
- * gated ui-demos/kpos-shell/dadlog.html study (ux-2026-07-29-dadlog).
+ * DAD.LOG as a KP/OS v3 instrument panel (ui-demos/dadlog-v3, cycle
+ * ux-2026-07-31-dadlog-v3). System: ../RULINGS.md.
+ *
+ * Dad's own volume, mounted read only. GLANCE ORDER: 1st the recovered
+ * document's title, the surface's one focal element; 2nd the file index
+ * rail; 3rd the attachment. The volume string, the recovery meter, the
+ * source-media plate and the bank rows are ambient.
+ *
+ * THE ALARM is the damaged segment and nothing else. It is never colour
+ * alone: the row also floods inverse video and MOVES, which is the one
+ * channel the ambient hazard chrome structurally never gets.
+ *
+ * The main row is FIXED HEIGHT. A document that does not fit does not
+ * scroll, it turns a page (law 8): blocks are laid out at full text,
+ * measured, then packed greedily into the page box. Measuring the FULL
+ * text first is what makes the typewriter safe, because page assignment
+ * can never shift while typing.
  */
 
 const TABS = ["ALL", "NOTE", "BILL", "MEMO", "LOCKED"] as const;
@@ -30,15 +39,17 @@ interface Attach {
   cap: string;
 }
 
-/** The fixed attachment mapping (ui-spec F): the cell renders what the
- * open artifact earns; text artifacts earn nothing and say so. */
+/** The fixed attachment mapping: the cell renders what the open artifact
+ * earns; text artifacts earn nothing and say so. FULL COLOUR prints, cut
+ * at exactly 240x320 so one dither dot is one CSS pixel. */
+const V3 = "/assets/px/window/v3";
 const ATTACH: Record<string, Attach> = {
-  will: { src: "/assets/px/window/dadlog-attach-will.png", tag: "FIG. 01 // SCAN", cap: "FOLDED FOUR, TAPE MARKS" },
-  bills: { src: "/assets/px/window/dadlog-attach-notice.png", tag: "FIG. 01 // SCAN", cap: "CLINIC LETTERHEAD" },
-  receipts: { src: "/assets/px/window/dadlog-attach-receipts.png", tag: "FIG. 01 // SCAN", cap: "STUB STRIP, SHOEBOX" },
-  diagnosis: { src: "/assets/px/window/dadlog-attach-consult.png", tag: "FIG. 01 // SCAN", cap: "SEALED ENVELOPE" },
-  solder: { src: "/assets/px/window/solder-bench.png", tag: "FIG. 01 // FRAGMENT", cap: "RECOVERED STILL" },
-  patch: { src: "/assets/px/window/dadlog-attach-tower.png", tag: "FIG. 01 // DEVICE PLATE", cap: "BACK ROOM TOWER" },
+  will: { src: `${V3}/scan-will-color.png`, tag: "FIG. 01 // SCAN", cap: "FOLDED FOUR, TAPE MARKS" },
+  bills: { src: `${V3}/scan-notice-color.png`, tag: "FIG. 01 // SCAN", cap: "CLINIC LETTERHEAD" },
+  receipts: { src: `${V3}/scan-receipts-color.png`, tag: "FIG. 01 // SCAN", cap: "STUB STRIP, SHOEBOX" },
+  diagnosis: { src: `${V3}/scan-consult-color.png`, tag: "FIG. 01 // SCAN", cap: "SEALED ENVELOPE" },
+  solder: { src: `${V3}/scan-solder-color.png`, tag: "FIG. 01 // FRAGMENT", cap: "RECOVERED STILL" },
+  patch: { src: `${V3}/scan-tower-color.png`, tag: "FIG. 01 // DEVICE PLATE", cap: "BACK ROOM TOWER" },
 };
 
 function useReducedMotion(): boolean {
@@ -53,7 +64,7 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** Deterministic hash: seeds the wave/hex strips and the bank rows. */
+/** Deterministic hash: seeds the wave strip, the media plate and the banks. */
 function seeded(id: string): () => number {
   let h = 2166136261;
   for (let i = 0; i < id.length; i++) {
@@ -73,178 +84,114 @@ function hexGroups(next: () => number, n: number): string {
   return groups.join(" ");
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
 function WaveStrip({ id }: { id: string }) {
   const { pts, hex } = useMemo(() => {
     const next = seeded(id);
     const p: string[] = [];
-    for (let x = 0; x <= 180; x += 6) {
-      const y = 11 + (((next() % 100) / 100) * 16 - 8);
+    for (let x = 0; x <= 168; x += 6) {
+      const y = 10 + ((next() % 100) / 100) * 14 - 7;
       p.push(`${x},${Math.round(y)}`);
     }
-    return { pts: p.join(" "), hex: hexGroups(next, 4).replace(/ /g, " - ") };
+    return { pts: p.join(" "), hex: hexGroups(next, 3).replace(/ /g, " - ") };
   }, [id]);
   return (
-    <div className="kp-jentry-wave" aria-hidden="true">
-      <svg width={180} height={22} viewBox="0 0 180 22">
+    <span className="dl-wave" aria-hidden="true">
+      <svg width={168} height={20} viewBox="0 0 168 20">
         <polyline points={pts} shapeRendering="crispEdges" />
       </svg>
-      <span className="kp-jentry-hex">{hex}</span>
-    </div>
+      <span>{hex}</span>
+    </span>
   );
 }
 
-/** Typewriter with a blinking caret; reports real completion (the late
- * reveals key off finished text, never a wall-clock guess). */
-function Typed({
-  text,
-  delay,
-  interval = 24,
-  onDone,
-}: {
-  text: string;
-  delay: number;
-  interval?: number;
-  onDone: () => void;
-}) {
+/** Typewriter with a blinking caret. */
+function Typed({ text, delay, interval = 24 }: { text: string; delay: number; interval?: number }) {
   const reduced = useReducedMotion();
   const [n, setN] = useState(0);
-  const doneRef = useRef(false);
-  const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
   useEffect(() => {
-    const finish = () => {
-      if (!doneRef.current) {
-        doneRef.current = true;
-        onDoneRef.current();
-      }
-    };
-    if (reduced) {
-      setN(text.length);
-      finish();
-      return;
-    }
+    if (reduced) return;
     setN(0);
     let iv: ReturnType<typeof setInterval> | null = null;
     const to = setTimeout(() => {
-      iv = setInterval(() => {
-        setN((v) => {
-          const next = Math.min(text.length, v + 1);
-          if (next >= text.length) {
-            if (iv) clearInterval(iv);
-            finish();
-          }
-          return next;
-        });
-      }, interval);
+      iv = setInterval(() => setN((v) => Math.min(text.length, v + 1)), interval);
     }, delay);
     return () => {
       clearTimeout(to);
       if (iv) clearInterval(iv);
     };
   }, [text, delay, interval, reduced]);
-  const typing = !reduced && n < text.length;
+  const shown = reduced ? text : text.slice(0, n);
   return (
     <>
-      {reduced ? text : text.slice(0, n)}
-      {typing && <span className="kp-boot-cursor">_</span>}
+      {shown}
+      {!reduced && n < text.length && <span className="kp-boot-cursor">_</span>}
     </>
   );
 }
 
-/** The per-entry attachment cell (image, or NO VISUAL PAYLOAD). */
-function AttachCell({ entry, revealAt }: { entry: JournalEntry | null; revealAt: number }) {
+/** The attachment cell. 1:1, never downscaled: the source is 240x320
+ * exactly, so to show less you crop and never resample. */
+function ScanCell({ entry, revealAt }: { entry: JournalEntry | null; revealAt: number }) {
   const reduced = useReducedMotion();
   const a = entry ? ATTACH[entry.id] : undefined;
   const [on, setOn] = useState(reduced);
-  const [settled, setSettled] = useState(reduced);
   useEffect(() => {
     if (reduced) return;
-    const t1 = setTimeout(() => setOn(true), revealAt);
-    // settle: pins the final state; animation clocks freeze without
-    // rendered frames (occluded window, battery saver) while JS runs on
-    const t2 = setTimeout(() => setSettled(true), revealAt + 750);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [reduced, revealAt]);
+    setOn(false);
+    const t = setTimeout(() => setOn(true), revealAt);
+    return () => clearTimeout(t);
+  }, [reduced, revealAt, entry]);
 
-  if (a) {
+  if (!a) {
     return (
-      <div className="kp-dad3-media">
-        <div className={on ? "kp-photo on" : "kp-photo"}>
-          <span className="kp-photo-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <img
-            src={a.src}
-            alt=""
-            width={304}
-            height={304}
-            className={settled ? "kp-settle" : undefined}
-            style={settled ? { clipPath: "none" } : undefined}
-          />
-          <i className="tint" aria-hidden="true" />
-          <i className="sweep" aria-hidden="true" />
-          <span className="kp-photo-tag">{a.tag}</span>
+      <>
+        {/* the no-payload cell holds exactly the room a scan does */}
+        <div className="dl-nopay">
+          <b>NO VISUAL PAYLOAD</b>
+          {/* the damaged page may not claim TEXT ARTIFACT: the next locked
+              entry can turn out to be a scan */}
+          <i>{entry ? "TEXT ARTIFACT" : "RECOVERY INCOMPLETE"}</i>
         </div>
-        <span className="kp-photo-cap">{a.cap}</span>
-      </div>
+        <span className="dl-scancap"> </span>
+      </>
     );
   }
-  const cls = ["kp-attach-empty", "kp-frame-ticks", on ? "kp-blockfade" : "", settled ? "kp-settle" : ""]
-    .filter(Boolean)
-    .join(" ");
   return (
-    <div className="kp-dad3-media">
-      <div className={cls} style={on || reduced ? undefined : { visibility: "hidden" }}>
-        <i className="kp-tick2" aria-hidden="true" />
-        <b>NO VISUAL PAYLOAD</b>
-        {/* the damaged page may not claim TEXT ARTIFACT: the next locked
-            entry can turn out to be a scan (tutorial gate round 3) */}
-        <i>{entry ? "TEXT ARTIFACT" : "RECOVERY INCOMPLETE"}</i>
+    <>
+      <div className={on ? "dl-scan on" : "dl-scan"}>
+        <img src={a.src} alt="" width={240} height={320} />
+        <i className="tint" aria-hidden="true" />
+        <span className="dl-scantag">{a.tag}</span>
+        <i className="shade" aria-hidden="true" />
       </div>
-      <span className="kp-photo-cap">{" "}</span>
-    </div>
+      <span className="dl-scancap">{a.cap}</span>
+    </>
   );
 }
 
-/** One open document: the recovery beat, metadata, hero, body, bench
- * note, wave strip. Remounted (keyed) on every file open. */
+/** One open document: the recovery beat, metadata chips, the hero title,
+ * the paged body, the bench note and the wave strip. */
 function DocView({ entry }: { entry: JournalEntry | null }) {
   const reduced = useReducedMotion();
-  const dmg = entry === null;
   const chrome = DADLOG_CHROME;
+  const dmg = entry === null;
 
   // beat: 0 reading, 1 mounted (unlocked only), 2 folding, 3 content
   const [beat, setBeat] = useState(reduced ? 3 : 0);
-  const [flipSettled, setFlipSettled] = useState(reduced);
-  const [late, setLate] = useState(false);
-  const [dmgSettled, setDmgSettled] = useState(reduced);
-  const pendingRef = useRef(0);
-
-  const meta = dmg
-    ? { filename: "????", doctype: chrome.damagedPage.doctype, provenance: chrome.damagedPage.provenance }
-    : { filename: entry.filename, doctype: entry.doctype, provenance: entry.provenance };
-  const title = dmg ? chrome.damagedPage.title : entry.title;
-  const body: readonly string[] = dmg ? chrome.damagedPage.body : entry.body;
-
-  pendingRef.current = reduced ? 0 : 4 + body.length; // 3 fields + hero + paragraphs
-
   useEffect(() => {
     if (reduced) {
       setBeat(3);
       return;
     }
     setBeat(0);
-    setLate(false);
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (dmg) {
       timers.push(setTimeout(() => setBeat(2), 220));
       timers.push(setTimeout(() => setBeat(3), 310));
-      timers.push(setTimeout(() => setDmgSettled(true), 520));
     } else {
       timers.push(
         setTimeout(() => {
@@ -255,120 +202,140 @@ function DocView({ entry }: { entry: JournalEntry | null }) {
       timers.push(setTimeout(() => setBeat(2), 380));
       timers.push(setTimeout(() => setBeat(3), 470));
     }
-    timers.push(setTimeout(() => setFlipSettled(true), 320));
     return () => timers.forEach(clearTimeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reduced, dmg]);
 
-  // reduced motion still owes the mount confirm exactly once
   useEffect(() => {
     if (reduced && !dmg) sfx("segmentMount", { bus: "ui" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fieldDone = () => {
-    pendingRef.current -= 1;
-    if (pendingRef.current <= 0) setTimeout(() => setLate(true), 80);
-  };
+  const meta = dmg
+    ? { filename: "????", doctype: chrome.damagedPage.doctype, provenance: chrome.damagedPage.provenance }
+    : { filename: entry.filename, doctype: entry.doctype, provenance: entry.provenance };
+  const title = dmg ? chrome.damagedPage.title : entry.title;
+  const body: readonly string[] = dmg ? chrome.damagedPage.body : entry.body;
+  const benchNote = !dmg ? entry.benchNote : null;
 
-  const frameCls = [
-    "kp-dad3-frame",
-    dmg ? "dmg" : "",
-    reduced ? "" : "kp-page-flip",
-    flipSettled ? "kp-settle" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  /* PAGINATION. Blocks lay out at full text, get measured, and are packed
+   * greedily into the fixed page box. */
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const [pages, setPages] = useState<number[][]>([]);
+  const [page, setPage] = useState(0);
 
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const inner = innerRef.current;
+    if (!box || !inner) return;
+    const kids = Array.from(inner.children) as HTMLElement[];
+    kids.forEach((k) => k.classList.remove("hide"));
+    const avail = box.clientHeight;
+    const gap = 8;
+    const out: number[][] = [];
+    let cur: number[] = [];
+    let used = 0;
+    kids.forEach((k, i) => {
+      const h = k.offsetHeight;
+      const add = cur.length ? h + gap : h;
+      if (cur.length && used + add > avail) {
+        out.push(cur);
+        cur = [i];
+        used = h;
+      } else {
+        cur.push(i);
+        used += add;
+      }
+    });
+    if (cur.length) out.push(cur);
+    setPages(out.length ? out : [[]]);
+    setPage(0);
+  }, [entry, body, benchNote]);
+
+  // apply the page assignment to the DOM (class only: never a scrollbar)
+  useLayoutEffect(() => {
+    const inner = innerRef.current;
+    if (!inner || pages.length === 0) return;
+    const shown = new Set(pages[Math.min(page, pages.length - 1)] ?? []);
+    Array.from(inner.children).forEach((k, i) => {
+      (k as HTMLElement).classList.toggle("hide", !shown.has(i));
+    });
+  }, [pages, page]);
+
+  const single = pages.length <= 1;
   const showContent = dmg ? beat >= 3 : true;
-  const typingLive = !dmg && !reduced && beat >= 3;
-  const dmgFadeCls = ["kp-blockfade", dmgSettled ? "kp-settle" : ""].filter(Boolean).join(" ");
-  const lateCls = late || reduced ? "kp-latefade show" + (reduced ? " kp-settle" : "") : "kp-latefade";
 
   return (
-    <div className={frameCls}>
+    <section className={dmg ? "dl-doc dmg" : "dl-doc"}>
       {!reduced && beat < 3 && (
-        <div className={beat === 2 ? "kp-seg-status fold" : "kp-seg-status"}>
+        <div className={`dl-beat${beat >= 1 && !dmg ? " mounted" : ""}${beat === 2 ? " fold" : ""}`}>
           <span>{beat >= 1 && !dmg ? chrome.recoveryBeat[1] : chrome.recoveryBeat[0]}</span>
           <span className="kp-boot-cursor">_</span>
         </div>
       )}
-      <div
-        className={dmg && showContent && !reduced ? "kp-dad3-inner " + dmgFadeCls : "kp-dad3-inner"}
-        style={dmg && !showContent ? { visibility: "hidden" } : undefined}
-      >
-        <div className="kp-dad3-rows">
-          {(
-            [
-              ["FILENAME", meta.filename, 470],
-              ["DOCTYPE", meta.doctype, 540],
-              ["PROVENANCE", meta.provenance, 610],
-            ] as const
-          ).map(([label, value, at]) => (
-            <div key={label} className="kp-datarow">
-              <span>{label}</span>
-              <em>
-                {typingLive ? (
-                  <Typed text={value} delay={at - 470} onDone={fieldDone} />
-                ) : (
-                  (showContent || reduced) && value
-                )}
-              </em>
-            </div>
-          ))}
-        </div>
-        <div className="kp-dad3-hero">
-          {typingLive ? <Typed text={title} delay={220} onDone={fieldDone} /> : (showContent || reduced) && title}
-        </div>
-        <div className="kp-dad3-body">
-          {body.map((line, i) => (
-            <p key={i}>
-              {typingLive ? (
-                <Typed text={line} delay={300 + i * 90} interval={14} onDone={fieldDone} />
-              ) : (
-                (showContent || reduced) && line
-              )}
-            </p>
-          ))}
-        </div>
-        {!dmg && entry.benchNote && (
-          <>
-            <div className={"kp-benchsep " + lateCls} />
-            <div className={"kp-benchnote " + lateCls}>
-              <b>BENCH NOTE</b>
-              <p>{">> " + entry.benchNote}</p>
-            </div>
-          </>
-        )}
-        {!dmg && (
-          <div className={lateCls}>
-            <WaveStrip id={entry.id} />
-          </div>
-        )}
+      <div className="dl-metarow">
+        {(
+          [
+            ["FILENAME", meta.filename],
+            ["DOCTYPE", meta.doctype],
+            ["PROVENANCE", meta.provenance],
+          ] as const
+        ).map(([label, value]) => (
+          <span key={label} className="dl-chip">
+            <span>{label}</span>
+            <em>{showContent ? value : ""}</em>
+          </span>
+        ))}
       </div>
-    </div>
-  );
-}
-
-function Banks() {
-  const rows = useMemo(() => {
-    const next = seeded("dadvol");
-    return ["BANK 1", "BANK 2"].map((label) => ({
-      label,
-      quads: Array.from({ length: 4 }, () => hexGroups(next, 4)),
-    }));
-  }, []);
-  return (
-    <div className="kp-dad3-banks" aria-hidden="true">
-      {rows.map((r) => (
-        <div key={r.label} className="kp-dad3-bankrow">
-          <b>{r.label}</b>
-          {r.quads.map((q, i) => (
-            <span key={i}>{q}</span>
+      {/* THE FOCAL ELEMENT. Everything else here is annotation around a
+          recovered document title. */}
+      <h2 className="dl-hero">
+        {showContent && (beat >= 3 && !reduced && !dmg ? <Typed text={title} delay={0} /> : title)}
+      </h2>
+      <p className="dl-prov">{showContent ? meta.provenance : ""}</p>
+      {/* hazard-stripe divider: labels the boundary between the metadata
+          block and the artifact itself. Ambient chrome, static forever. */}
+      <i className="dl-stripe" aria-hidden="true" />
+      <div className="dl-page" ref={boxRef}>
+        <div className="dl-pagein" ref={innerRef}>
+          {body.map((line, i) => (
+            <div key={i} className="dl-block">
+              {showContent && (beat >= 3 && !reduced && !dmg ? <Typed text={line} delay={i * 90} interval={14} /> : line)}
+            </div>
           ))}
+          {/* the player's voice stays quarantined in its own dashed box:
+              the artifact is Dad's, the annotation is not */}
+          {benchNote && (
+            <div className="dl-bench dl-block">
+              <b>BENCH NOTE</b>
+              <p>{">> " + benchNote}</p>
+            </div>
+          )}
         </div>
-      ))}
-    </div>
+      </div>
+      <div className="dl-docfoot">
+        {!dmg && entry && <WaveStrip id={entry.id} />}
+        <span className="dl-pager" data-single={single ? "1" : "0"}>
+          <em>
+            PAGE {Math.min(page + 1, Math.max(pages.length, 1))}/{Math.max(pages.length, 1)}
+          </em>
+          <button type="button" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+            PREV PAGE
+          </button>
+          <button
+            type="button"
+            disabled={page >= pages.length - 1}
+            onClick={() => setPage((p) => Math.min(pages.length - 1, p + 1))}
+          >
+            NEXT PAGE
+          </button>
+        </span>
+      </div>
+      {/* hairline + heavy corner brackets, scoped to the FOCAL panel only */}
+      <i className="dl-bracket" aria-hidden="true">
+        <i />
+      </i>
+    </section>
   );
 }
 
@@ -384,13 +351,11 @@ export function DadlogContent({ meta }: { meta: MetaState }) {
   }, [meta.runCount, meta.machineOpened]);
 
   const [tab, setTab] = useState<Tab>("ALL");
-  // the open document is tracked by identity, not list position, so a
-  // tab filter change never desyncs the viewer from the rail
   const [openKey, setOpenKey] = useState<string | null>(() => {
     const last = [...allRows].reverse().find((r) => r.entry);
     return last ? last.entry!.id : null;
   });
-  const [beatN, setBeatN] = useState(0); // remount key: replays the beat
+  const [beatN, setBeatN] = useState(0);
 
   const rows = useMemo(
     () =>
@@ -418,71 +383,161 @@ export function DadlogContent({ meta }: { meta: MetaState }) {
   const d = meta.machineOpened ? 10 : 9;
   const volMeta = chrome.volumeHeaderMeta.replace("{n}", String(unlocked.length)).replace("{d}", String(d));
 
+  const plate = useMemo(() => {
+    const next = seeded(openRow?.entry ? openRow.entry.id : "dadvol");
+    return [
+      ["MEDIA", "DAD.VOL"],
+      ["MOUNT", "READ ONLY"],
+      ["SEGMENT", hexGroups(next, 1)],
+      ["CHECKSUM", hexGroups(next, 2)],
+      ["PASSES", pad2(meta.runCount)],
+    ] as Array<[string, string]>;
+  }, [openRow?.entry?.id, meta.runCount]);
+
+  const banks = useMemo(() => {
+    const next = seeded("dadvol");
+    return ["BANK 1", "BANK 2"].map((label) => ({
+      label,
+      quads: Array.from({ length: 4 }, () => hexGroups(next, 4)),
+    }));
+  }, []);
+
   return (
-    <div className="kp-dad3">
-      <div className="kp-dad3-vol">
-        <span>{volMeta}</span>
-        <b className="kp-boot-cursor">_</b>
-      </div>
-      <div className="kp-dad3-tabs">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            type="button"
-            className={tab === t ? "on" : undefined}
-            onClick={() => {
-              if (tab === t) return;
-              sfx("tick", { bus: "ui" });
-              setTab(t);
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      <div className="kp-dad3-grid">
-        <div className="kp-dad3-rail">
-          <span className="kp-dad3-railhead">{chrome.indexRailHeader}</span>
-          <div className="kp-dad3-list">
-            {rows.length === 0 &&
-              (tab === "ALL" ? (
-                <p className="kp-rail-dim">{chrome.emptyDrawerState}</p>
-              ) : (
-                /* a working filter that found nothing must say so, or it
-                 * reads as broken (tutorial gate 2b, tier 0) */
-                <p className="kp-rail-dim">NONE OF THIS KIND RECOVERED YET</p>
+    <div className="dl">
+      <div className="dl-grid">
+        {/* Z4 MASTHEAD: the volume, the recovery, the filter. nowrap is
+            load bearing: this row must fit the NARROWEST supported window,
+            or three viewports render two different arrangements. */}
+        <div className="dl-mast">
+          {/* the gated volume string, verbatim, but DEMOTED: the instrument
+              beside it is the readable form of the same fact, so this is
+              the copy record rather than a thing the eye stops on */}
+          <span className="dl-volline">{volMeta}</span>
+          <div className="dl-recwrap">
+            <span className="dl-reclabel">RECOVERY</span>
+            <span className="dl-recnum">
+              <em>{unlocked.length}</em>
+              <b>/</b>
+              <em>{d}</em>
+            </span>
+            <span className="dl-recbar">
+              {Array.from({ length: d }).map((_, i) => (
+                <i key={i} className={i < unlocked.length ? "on" : undefined} />
               ))}
-            {rows.map((r, i) => (
+            </span>
+          </div>
+          <div className="dl-tabs">
+            {TABS.map((t) => (
               <button
-                key={keyOf(r)}
+                key={t}
                 type="button"
-                className={["kp-dfile-row", r.entry ? "" : "dmg", i === selIndex ? "on" : ""].filter(Boolean).join(" ")}
-                onClick={() => nav(i)}
+                className={tab === t ? "on" : undefined}
+                onClick={() => {
+                  if (tab === t) return;
+                  sfx("tick", { bus: "ui" });
+                  setTab(t);
+                }}
               >
-                <b>{String(r.badge).padStart(2, "0")}</b>
-                <span>{r.entry ? r.entry.filename : "????"}</span>
-                <i>{r.entry ? r.entry.doctype : chrome.damagedPage.doctype}</i>
-                <em>{r.entry ? "RECOVERED" : chrome.damagedRowText}</em>
+                {t}
               </button>
             ))}
           </div>
         </div>
-        <div className="kp-dad3-viewer">
+
+        <div className="dl-main">
+          {/* Z3 RAIL: the index */}
+          <aside className="dl-rail">
+            <span className="dl-railhead">{chrome.indexRailHeader}</span>
+            <div className="dl-list">
+              {rows.length === 0 && (
+                <p className="dl-railempty">
+                  {tab === "ALL" ? chrome.emptyDrawerState : "NONE OF THIS KIND RECOVERED YET"}
+                </p>
+              )}
+              {rows.map((r, i) => (
+                <button
+                  key={keyOf(r)}
+                  type="button"
+                  className={["dl-row", r.entry ? "" : "dmg", i === selIndex ? "on" : ""].filter(Boolean).join(" ")}
+                  onClick={() => nav(i)}
+                >
+                  <b>{pad2(r.badge)}</b>
+                  <span>{r.entry ? r.entry.filename : "????"}</span>
+                  <i>{r.entry ? r.entry.doctype : chrome.damagedPage.doctype}</i>
+                  <em>{r.entry ? "RECOVERED" : chrome.damagedRowText}</em>
+                  {!r.entry && <i className="dl-flash" aria-hidden="true" />}
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          {/* Z1/Z2 DOCUMENT: the focal panel */}
           {openRow ? (
-            <>
-              <AttachCell key={`a${openKey}-${beatN}`} entry={openRow.entry} revealAt={openRow.entry ? 470 : 310} />
-              <DocView key={`d${openKey}-${beatN}`} entry={openRow.entry} />
-            </>
+            <DocView key={`d${openKey}-${beatN}`} entry={openRow.entry} />
           ) : (
-            <p className="kp-rail-dim">{chrome.emptyDrawerState}</p>
+            <section className="dl-doc">
+              <p className="dl-railempty">{chrome.emptyDrawerState}</p>
+              <i className="dl-bracket" aria-hidden="true">
+                <i />
+              </i>
+            </section>
           )}
+
+          {/* Z2 MEDIA: the attachment */}
+          <aside className="dl-media" data-scan="color">
+            {openRow ? (
+              <ScanCell key={`a${openKey}-${beatN}`} entry={openRow.entry} revealAt={openRow.entry ? 470 : 310} />
+            ) : (
+              <>
+                <div className="dl-nopay">
+                  <b>NO VISUAL PAYLOAD</b>
+                  <i>RECOVERY INCOMPLETE</i>
+                </div>
+                <span className="dl-scancap"> </span>
+              </>
+            )}
+            {/* ambient furniture that fills the media column to the doc
+                column's height, so nothing pays for a row of its own */}
+            <div className="dl-plate">
+              {plate.map(([k, v]) => (
+                <div key={k}>
+                  <span>{k}</span>
+                  <em>{v}</em>
+                </div>
+              ))}
+            </div>
+          </aside>
         </div>
-      </div>
-      <Banks />
-      <div className="kp-dad3-foot">
-        <Btn label="PREV" variant="ghost" disabled={selIndex <= 0 || rows.length === 0} onClick={() => nav(selIndex - 1)} />
-        <Btn label="NEXT" variant="ghost" disabled={rows.length === 0 || selIndex >= rows.length - 1} onClick={() => nav(selIndex + 1)} />
-        <Chip label={chrome.footChipLabel} value={`${selIndex >= 0 ? selIndex + 1 : 0}/${rows.length}`} />
+
+        {/* Z4 FOOTLINE */}
+        <div className="dl-foot">
+          <button type="button" disabled={selIndex <= 0 || rows.length === 0} onClick={() => nav(selIndex - 1)}>
+            PREV
+          </button>
+          <button
+            type="button"
+            disabled={rows.length === 0 || selIndex >= rows.length - 1}
+            onClick={() => nav(selIndex + 1)}
+          >
+            NEXT
+          </button>
+          <span className="kp-chip-pct">
+            <span>{chrome.footChipLabel}</span>
+            <em>
+              {selIndex >= 0 ? selIndex + 1 : 0}/{rows.length}
+            </em>
+          </span>
+          <div className="dl-banks" aria-hidden="true">
+            {banks.map((r) => (
+              <div key={r.label}>
+                <b>{r.label}</b>
+                {r.quads.map((q, i) => (
+                  <span key={i}>{q}</span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

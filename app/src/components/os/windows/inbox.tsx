@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { sfx } from "../../../game/audio";
 import { DAY_CONFIGS, FINAL_DAY, jobPay } from "../../../game/content/arc";
 import { CustomerProfile } from "../../../game/content/customers";
@@ -7,23 +7,27 @@ import type { RunAction } from "../../../game/run-reducer";
 import type { RunState } from "../../../game/save";
 import { tip } from "../../../game/content/teaching";
 import { customerById } from "../../game/screens";
-import { cardPortraitFor, deviceArtFor } from "../roster-art";
+import { recDeviceFor, recPortraitFor } from "../roster-art";
 import { Teach } from "../../game/teach";
 import { TapTip } from "../../game/tap-tip";
 import { PatchGlyph } from "../../game/patch-glyph";
-import { Btn, Chip, Hero, Nodes, Ticks } from "../kp-ui";
+import { Btn, Chip } from "../kp-ui";
 
 /**
- * INBOX: the day loop's front door. Collapsed (`run.screen === "day"`): the
- * day strip and one boxed subject line per ticket, from Rhea. Opening a
- * ticket dispatches pickJob; the reducer's `analyze` screen renders as the
- * expanded CUSTOMER.REC card (same teaching surface, new presentation).
+ * INBOX + CUSTOMER.REC as a KP/OS v3 instrument panel
+ * (ui-demos/inbox-v3, cycle ux-2026-07-31-inbox-v3). System: ../RULINGS.md.
  *
- * Open/close choreography ports inbox.html's staged machine: one axis at a
- * time so the frame never tears diagonally. Open: grow tall (measured off a
- * hidden clone with its full text), then wide, then the card genies out of
- * its list row. File away: the card shrinks into its row, the window pulls
- * back in, then settles down. Instant under reduced motion.
+ * GLANCE ORDER, resolved by STATE rather than by two focal elements
+ * fighting: with no ticket open the DAY numeral is the hero; the moment a
+ * ticket opens it demotes to an ordinary chip and DOMINANT ROUTINE plus
+ * THREAT TIER take the focal slot. This is a decision surface, and the
+ * decision is "what am I walking into", not "who is this".
+ *
+ * RISK is the head-start WARNING and nothing else on this surface. It
+ * floods inverse video permanently and blinks a three-cycle BURST on
+ * reveal: seven of the ten days carry headStart >= 1, so a continuous
+ * strobe here would be ambient motion, which is the habituation motion
+ * law 7 exists to prevent.
  */
 
 type Dispatch = (a: RunAction) => void;
@@ -53,24 +57,17 @@ export function subjectFor(c: CustomerProfile): string {
   return quote.length > 64 ? `${quote.slice(0, 61)}...` : quote;
 }
 
-/** The open window's card-pane width: the wide window (clamped to the
- * viewport the way the wm clamps it) minus borders, body padding, the
- * fixed list column and the grid gap. Must track the CSS; computed at
- * measure time because 96vw is the live clamp. */
-const OPEN_W = 1210;
-function paneWidth(): number {
-  return Math.min(OPEN_W, window.innerWidth * 0.96) - 6 - 36 - 470 - 18;
-}
+/** The day line is true in both states: an empty masthead in CARD state
+ * read as unfinished rather than as ambient. */
+const DAY_LINE = "Three tickets. Strain is shared across all of them. Pick your order.";
 
-/** Deterministic pseudo-random stream (the studies' seeded() pattern). */
-function seeded(id: string): () => number {
-  let s = 0;
-  for (let i = 0; i < id.length; i++) s = (s * 31 + id.charCodeAt(i)) >>> 0;
-  return () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s;
-  };
-}
+/** The two window widths the frame steps between. 460 was the spec's idle
+ * number and wrapped every subject line to three lines, which cost more
+ * desk than the width saved; 560 lands every subject on two. */
+export const INBOX_W_LIST = 560;
+export const INBOX_W_CARD = 940;
+/** kp-fw border (3px a side) plus kp-fw-body padding (18px a side). */
+const FRAME_CHROME = 42;
 
 function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -84,238 +81,211 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** Async typewriter with blinking caret; instant under reduced motion or
- * when the host is a hidden measurement clone. */
+/** Typewriter scoped per element, so interacting with one field does not
+ * restart the others (law 7's load choreography). */
 function Typed({
   text,
   delay = 0,
-  interval = 24,
+  interval = 8,
   className,
-  instant = false,
 }: {
   text: string;
   delay?: number;
   interval?: number;
   className?: string;
-  instant?: boolean;
 }) {
   const reduced = useReducedMotion();
-  const still = reduced || instant;
   const [n, setN] = useState(0);
   const [started, setStarted] = useState(false);
   useEffect(() => {
-    if (still) return;
+    if (reduced) return;
     setN(0);
     setStarted(false);
     const start = setTimeout(() => setStarted(true), delay);
     return () => clearTimeout(start);
-  }, [text, delay, still]);
+  }, [text, delay, reduced]);
   useEffect(() => {
-    if (!started || still) return;
+    if (!started || reduced) return;
     if (n >= text.length) return;
     const iv = setInterval(() => setN((v) => Math.min(text.length, v + 1)), interval);
     return () => clearInterval(iv);
-  }, [started, still, n >= text.length, text, interval]);
-  const shown = still ? text : text.slice(0, n);
-  const typing = !still && started && n < text.length;
-  return (
-    <span className={className}>
-      {shown}
-      {typing && <span className="kp-boot-cursor">_</span>}
-    </span>
-  );
+  }, [started, reduced, n >= text.length, text, interval]);
+  return <span className={className}>{reduced ? text : text.slice(0, n)}</span>;
 }
 
-/* ---------- the CUSTOMER.REC card ---------- */
-
-function PrintMark({ id }: { id: string }) {
-  const cells = useMemo(() => {
-    const next = seeded(id);
-    return Array.from({ length: 81 }, () => next() % 5 < 2);
-  }, [id]);
-  return (
-    <span className="kp-printmark" aria-hidden="true">
-      {cells.map((on, i) => (
-        <i key={i} className={on ? "on" : undefined} />
-      ))}
-    </span>
-  );
-}
-
-function CardScope({ id }: { id: string }) {
-  const pts = useMemo(() => {
-    const next = seeded(id);
-    const out: string[] = [];
-    for (let px = 0; px <= 700; px += 7) {
-      const base = 45 + Math.sin(px / 34) * 24;
-      const jit = ((next() % 100) / 100 - 0.5) * 10;
-      out.push(`${px},${Math.round(base + jit)}`);
+/** Count-up on a LOAD SWEEP only. Ambient chrome that re-counts from zero
+ * on every open and close is motion spent on nothing (law 7). */
+function CountUp({ value, delay = 0 }: { value: number; delay?: number }) {
+  const reduced = useReducedMotion();
+  const [n, setN] = useState(reduced ? value : 0);
+  useEffect(() => {
+    if (reduced) {
+      setN(value);
+      return;
     }
-    return out.join(" ");
-  }, [id]);
-  const vlines: number[] = [];
-  for (let x = 0; x <= 700; x += 28) vlines.push(x);
-  const hlines: number[] = [];
-  for (let y = 0; y <= 90; y += 18) hlines.push(y);
-  return (
-    <div className="kp-card-scope" aria-hidden="true">
-      <svg viewBox="0 0 700 90" preserveAspectRatio="none" height={90}>
-        {vlines.map((x) => (
-          <line key={`v${x}`} x1={x} x2={x} y1={0} y2={90} className="grid" />
-        ))}
-        {hlines.map((y) => (
-          <line key={`h${y}`} x1={0} x2={700} y1={y} y2={y} className="grid" />
-        ))}
-        <polyline points={pts} shapeRendering="crispEdges" />
-      </svg>
-    </div>
-  );
+    setN(0);
+    const step = Math.max(1, Math.round(value / 22));
+    const start = setTimeout(() => {
+      let v = 0;
+      const iv = setInterval(() => {
+        v = Math.min(value, v + step);
+        setN(v);
+        if (v >= value) clearInterval(iv);
+      }, 26);
+    }, delay);
+    return () => clearTimeout(start);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, reduced]);
+  return <>{n}</>;
 }
 
-function HexRows({ id, instant }: { id: string; instant?: boolean }) {
-  const rows = useMemo(() => {
-    const next = seeded(`${id}-hex`);
-    return Array.from({ length: 12 }, () =>
-      Array.from({ length: 3 }, () => (next() % 0xffff).toString(16).toUpperCase().padStart(4, "0")).join(" "),
-    );
-  }, [id]);
+function TierPips({ tier }: { tier: number }) {
   return (
-    <div className="kp-hexrows">
-      {rows.map((row, i) => (
-        <Typed key={`${id}-${i}`} text={row} delay={600 + i * 40} interval={7} instant={instant} />
+    <span className="kp-pip-row" aria-label={`Threat tier ${tier} of 5`}>
+      {Array.from({ length: 5 }).map((_, t) => (
+        <i key={t} className={t < tier ? "kp-pip-diamond kp-pip-on" : "kp-pip-diamond"} />
       ))}
-    </div>
+    </span>
   );
 }
 
-function CardRow({
-  label,
-  value,
-  typed,
-  delay,
-  instant,
-}: {
-  label: string;
-  value: ReactNode;
-  typed?: string;
-  delay?: number;
-  instant?: boolean;
-}) {
+/** A print cell. 1:1, never downscaled: the PNG is cut at exactly 160x160
+ * by the colourise pass, so the cell needs no CSS scaling at all. A roster
+ * gap renders a plate of the identical footprint, so the row never
+ * reflows on art coverage. */
+function PrintCell({ src, tag }: { src: string | null; tag: string }) {
+  if (!src) {
+    return (
+      <div className="ib-cell ib-nofile">
+        <b>
+          NO {tag}
+          <br />
+          ON FILE
+        </b>
+      </div>
+    );
+  }
   return (
-    <div className="kp-datarow kp-datarow-plain">
-      <span>{label}</span>
-      <em>{typed !== undefined ? <Typed text={typed} delay={delay ?? 0} instant={instant} /> : value}</em>
+    <div className="ib-cell">
+      <img src={src} alt="" width={160} height={160} />
+      <span className="ib-celltag">{tag}</span>
     </div>
   );
 }
 
-export function CustomerCard({
+/* ---------- Z3: the record pane ---------- */
+
+function RecordPane({
   run,
   jobIndex,
-  instant = false,
+  dispatch,
+  onConfigureKit,
+  onFile,
 }: {
   run: RunState;
   jobIndex: number;
-  /** Render with full text immediately (measurement clones). */
-  instant?: boolean;
+  dispatch: Dispatch;
+  onConfigureKit: () => void;
+  onFile: () => void;
 }) {
   const job = run.jobs[jobIndex];
   const c = customerById(job.customerId);
   const day = DAY_CONFIGS[run.day];
+  const label = MODE_LABEL[job.dominant];
+  // the reveal burst arms once per record, never on a re-render
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    setRevealed(false);
+    const t = setTimeout(() => setRevealed(true), 20);
+    // layered under the genie, and only when this ticket's intrusion is
+    // already partway in: a plain early-run card gets the genie alone
+    if (day.headStart > 0) sfx("ibWarnReveal", { bus: "ui" });
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobIndex]);
+
   return (
-    <div className="kp-pane">
-      <div className="kp-pane-subject">
-        <Typed className="kp-pane-from" text="From: Rhea" delay={0} instant={instant} />
-        <Typed className="kp-pane-subj" text={subjectFor(c)} delay={120} instant={instant} />
+    <>
+      <div className="ib-focal">
+        <i className="ib-bracket" aria-hidden="true">
+          <i />
+        </i>
+        <span className="ib-eyebrow">
+          {`// CUSTOMER.REC // TICKET ${jobIndex + 1} OF ${run.jobs.length}`}
+        </span>
+        {/* THE FOCAL ELEMENT. --len caps the ramp by character count, so
+            "ARM: SIPHON" cannot overflow the pane at any tile width. */}
+        <span className="ib-dominant" style={{ ["--len" as string]: String(label.length) }}>
+          {label}
+        </span>
+        <span className="ib-domlabel">DOMINANT ROUTINE</span>
+        <div className="ib-tierrow">
+          <span className="ib-tierlabel">THREAT TIER</span>
+          <TapTip text={tip("threatTier")}>
+            <TierPips tier={job.tier} />
+          </TapTip>
+          <span className="ib-tierval">T{job.tier} OF 5</span>
+        </div>
+        <p className="ib-tell">
+          <Typed text={MODE_TELL[job.dominant]} delay={120} />
+        </p>
       </div>
-      <div className="kp-card kp-frame-nodes">
-        <Nodes />
-        <header className="kp-card-head">
-          <h2>CUSTOMER.REC</h2>
-          <span className="kp-card-batt" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-        </header>
-        <div className="kp-card-inner">
-          <div className="kp-card-photos">
-            <div className="kp-cell">
-              <span className="kp-cell-dots" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </span>
-              <img src={cardPortraitFor(c)} alt="" width={880} height={880} />
-              <i className="tint" aria-hidden="true" />
-            </div>
-            <div className="kp-cell">
-              <img src={deviceArtFor(c)} alt="" width={880} height={880} />
-              <i className="tint" aria-hidden="true" />
-            </div>
+
+      <div className="ib-support">
+        <div className="ib-ticks">
+          <div className="ib-tick">
+            <span>NAME</span>
+            <em>{c.name.toUpperCase()}</em>
           </div>
-          <div className="kp-card-mid">
-            <div className="kp-card-mid-left">
-              <div className="kp-cell-open kp-frame-ticks">
-                <Ticks />
-                <PrintMark id={c.id} />
-              </div>
-              <div className="kp-cell-open kp-frame-ticks">
-                <Ticks />
-                <span className="kp-eyecrop-wrap">
-                  <span className="kp-eyecrop" style={{ backgroundImage: `url(${cardPortraitFor(c)})` }} />
-                  <i className="tint" aria-hidden="true" />
-                </span>
-              </div>
-            </div>
-            <div className="kp-card-rows">
-              <CardRow label="NAME" value={null} typed={c.name.toUpperCase()} delay={100} instant={instant} />
-              <CardRow label="DEVICE" value={null} typed={c.device} delay={170} instant={instant} />
-              <CardRow label="DOMINANT ROUTINE" value={null} typed={MODE_LABEL[job.dominant]} delay={240} instant={instant} />
-              <div className="kp-datarow kp-datarow-plain">
-                <span>THREAT TIERS</span>
-                <em>
-                  <TapTip text={tip("threatTier")}>
-                    <span className="kp-pip-row">
-                      {Array.from({ length: 5 }).map((_, t) => (
-                        <i key={t} className={t < job.tier ? "kp-pip-diamond kp-pip-on" : "kp-pip-diamond"} />
-                      ))}
-                    </span>
-                  </TapTip>
-                </em>
-              </div>
-              <CardRow label="TICKET RATE" value={null} typed={`${jobPay(job.tier)} cr`} delay={310} instant={instant} />
-              <CardRow label="GRID" value={null} typed={`${day.grid[0]}x${day.grid[1]}`} delay={380} instant={instant} />
-              <CardRow label="INTRUSION RAM" value={null} typed={`${day.oppRam}/turn`} delay={450} instant={instant} />
-              {day.headStart > 0 && (
-                <div className="kp-datarow kp-datarow-plain kp-datarow-warn">
-                  <span>WARNING</span>
-                  <em>
-                    <Typed text={`Intrusion already ${day.headStart} nodes deep`} delay={520} instant={instant} />
-                  </em>
-                </div>
-              )}
-            </div>
+          <div className="ib-tick">
+            <span>DEVICE</span>
+            <em>{c.device}</em>
           </div>
-          <div className="kp-intake">
-            <span className="kp-intake-label">INTAKE</span>
-            <div>
-              <Typed text={`"${c.quotes[job.quoteIndex]}"`} delay={320} instant={instant} />
-            </div>
+          <div className="ib-tick">
+            <span>GRID</span>
+            <em>
+              {day.grid[0]}x{day.grid[1]}
+            </em>
           </div>
-          <div className="kp-readout">
-            <span className="kp-intake-label">READOUT</span>
-            <p className="kp-readout-tell">
-              <Typed text={MODE_TELL[job.dominant]} delay={420} instant={instant} />
-            </p>
+          <div className="ib-tick">
+            <span>INTRUSION RAM</span>
+            <em>{day.oppRam} PER TURN</em>
           </div>
-          <CardScope id={c.id} />
-          <HexRows id={c.id} instant={instant} />
+        </div>
+
+        {day.headStart > 0 && (
+          <div className={revealed ? "ib-warn reveal" : "ib-warn"}>
+            <span>WARNING</span>
+            <em>Intrusion already {day.headStart} nodes deep</em>
+            <i className="ib-riskflash" aria-hidden="true" />
+          </div>
+        )}
+
+        <div className="ib-bottom">
+          <div className="ib-cells">
+            <PrintCell src={recPortraitFor(c)} tag="SUBJECT" />
+            <PrintCell src={recDeviceFor(c)} tag="DEVICE" />
+          </div>
+          <div className="ib-verdict">
+            <Btn
+              label="DIVE"
+              variant="signal"
+              onClick={() => {
+                sfx("claimTick", { bus: "ui" });
+                dispatch({ type: "startDuel" });
+              }}
+            />
+            <Btn label="CONFIGURE KIT" variant="ghost" onClick={onConfigureKit} />
+            <Btn label="BACK" variant="ghost" onClick={onFile} />
+            <span className="ib-rate">
+              <span>TICKET RATE</span>
+              <em>{jobPay(job.tier)} CR</em>
+            </span>
+          </div>
         </div>
       </div>
       <Teach id="analyze-readout" />
-    </div>
+    </>
   );
 }
 
@@ -344,20 +314,18 @@ export function InboxContent({
   const allDone = run.jobsDone.length > 0 && run.jobsDone.every(Boolean);
   const reduced = useReducedMotion();
 
-  /* staged open/close machine: which pane is MOUNTED lags `open`. The
-   * vertical axis is driven by direct style writes on the sizing wrapper
-   * (never rAF: an occluded window would stall the sequence). */
+  /* The open/close machine, one axis at a time. `paneFor` lags `open`: the
+   * width axis steps first (a steps(4) transition on the frame), then the
+   * record genies out of the clicked row's midpoint. The record is built
+   * ONCE, at the moment the pane becomes visible; building it twice per
+   * open is what made the choreography look like it played twice. */
   const [paneFor, setPaneFor] = useState<number | null>(null);
-  const [closing, setClosing] = useState(false);
-  const [measuring, setMeasuring] = useState<number | null>(null);
-  const [wide, setWide] = useState(false);
-  const sizeRef = useRef<HTMLDivElement | null>(null);
-  const sideRef = useRef<HTMLDivElement | null>(null);
-  const measureRef = useRef<HTMLDivElement | null>(null);
+  const [phase, setPhase] = useState<"idle" | "hiding" | "shrink">("idle");
   const paneRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const prevOpenRef = useRef<number | null>(null);
+  const busyRef = useRef(false);
 
   const stage = useCallback((fn: () => void, ms: number) => {
     timersRef.current.push(setTimeout(fn, ms));
@@ -367,119 +335,89 @@ export function InboxContent({
     timersRef.current = [];
   }, []);
 
-  /* the window narrows again if this content ever unmounts mid-flight */
   useEffect(() => () => onWide(false), [onWide]);
   useEffect(() => () => clearStages(), [clearStages]);
+
+  // The content takes its FINAL width the moment the state flips, so the
+  // frame's 200ms width animation simply clips over already-settled
+  // content. Letting the container query see the in-between widths is what
+  // broke the rows' vertical scale mid-flight.
+  const wide = paneFor !== null || open !== null;
+  const evaWidth = (wide ? INBOX_W_CARD : INBOX_W_LIST) - FRAME_CHROME;
 
   useEffect(() => {
     const prev = prevOpenRef.current;
     if (prev === open) return;
     prevOpenRef.current = open;
     clearStages();
+    busyRef.current = true;
 
     if (reduced) {
-      setMeasuring(null);
-      setClosing(false);
+      setPhase("idle");
       setPaneFor(open);
-      setWide(open !== null);
       onWide(open !== null);
-      if (sizeRef.current) sizeRef.current.style.height = "";
+      busyRef.current = false;
       return;
     }
 
-    if (prev === null && open !== null) {
-      /* OPEN, one axis at a time: measure the destination first */
-      setMeasuring(open);
-      return; // the layout effect below runs the vertical phase
-    }
-
-    if (prev !== null && open === null) {
-      /* FILE AWAY, in reverse: card shrinks into its row, the window pulls
-       * back in with the grid still two-column (the fixed list column
-       * holds its width; folding to 1fr early would snap the rows out to
-       * the still-wide frame), then the grid folds where both layouts
-       * agree on the column width, and the height settles */
+    if (open === null) {
+      /* FILE AWAY: the card shrinks into its row, then the frame narrows */
       sfx("inboxFile", { bus: "ui" });
-      setClosing(true);
+      setPhase("shrink");
       stage(() => {
-        setClosing(false);
+        setPhase("idle");
         setPaneFor(null);
-        const el = sizeRef.current;
-        if (el) {
-          el.style.height = `${el.offsetHeight}px`;
-          void el.offsetHeight;
-        }
         onWide(false);
-        stage(() => {
-          setWide(false);
-          const el2 = sizeRef.current;
-          const sideH = sideRef.current?.offsetHeight;
-          if (el2 && sideH) el2.style.height = `${sideH}px`;
-          stage(() => {
-            if (sizeRef.current) sizeRef.current.style.height = "";
-          }, 240);
-        }, 200);
-      }, 180);
+        busyRef.current = false;
+      }, 190);
       return;
     }
 
-    if (prev !== null && open !== null) {
-      /* SWITCH: shrink into the old row, grow from the new; the window
-       * itself stays put */
-      setClosing(true);
+    if (prev === null) {
+      /* OPEN FROM LIST: the width axis steps first, the pane stays hidden
+       * so the outgoing state never shows through */
+      sfx("inboxGrow", { bus: "ui" });
+      setPhase("hiding");
+      onWide(true);
+      stage(() => sfx("inboxWide", { bus: "ui" }), 200);
       stage(() => {
-        setClosing(false);
         setPaneFor(open);
-      }, 180);
+        setPhase("idle");
+        busyRef.current = false;
+      }, 210);
+      return;
     }
+
+    /* SWITCH: the open record shrinks away, the new one grows out of the
+     * row that was just clicked. One movement, not two. */
+    sfx("inboxFile", { bus: "ui" });
+    setPhase("shrink");
+    stage(() => {
+      setPaneFor(open);
+      setPhase("idle");
+      busyRef.current = false;
+    }, 190);
   }, [open, reduced, onWide, stage, clearStages]);
 
-  /* vertical phase: the measurement clone is in the DOM; read it, commit
-   * the start height with a forced reflow, then run the timeline */
-  useLayoutEffect(() => {
-    if (measuring === null || reduced) return;
-    const el = sizeRef.current;
-    if (!el) return;
-    const paneH = measureRef.current?.offsetHeight ?? 0;
-    const sideH = sideRef.current?.offsetHeight ?? 0;
-    const target = Math.max(paneH, sideH);
-    el.style.height = `${el.offsetHeight}px`;
-    void el.offsetHeight;
-    el.style.height = `${target}px`;
-    sfx("inboxGrow", { bus: "ui" });
-    stage(() => {
-      sfx("inboxWide", { bus: "ui" });
-      setWide(true);
-      onWide(true);
-    }, 200);
-    stage(() => {
-      setPaneFor(measuring);
-      setMeasuring(null);
-    }, 400);
-    /* settle to auto only after the typewriters have finished, so the
-     * pinned height never dips on partial text and never grows after */
-    stage(() => {
-      if (sizeRef.current) sizeRef.current.style.height = "";
-    }, 2400);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measuring, reduced]);
-
-  /* genie: the card grows from its list item; origin = item center */
+  /* the genie: the card grows from its list row's midpoint. offset math,
+   * never getBoundingClientRect: transform-origin is unscaled local px and
+   * both nodes share the same offsetParent. */
   useEffect(() => {
-    if (paneFor === null || reduced || closing) return;
+    if (paneFor === null || reduced || phase !== "idle") return;
     const wrap = paneRef.current;
     const item = listRef.current?.children[paneFor] as HTMLElement | undefined;
-    if (!wrap || !item) return;
-    const ir = item.getBoundingClientRect();
-    const wr = wrap.getBoundingClientRect();
-    wrap.style.transformOrigin = `0px ${Math.round(ir.top + ir.height / 2 - wr.top)}px`;
+    if (!wrap) return;
+    if (item) {
+      const oy = item.offsetTop + item.offsetHeight / 2 - wrap.offsetTop;
+      wrap.style.transformOrigin = `0px ${Math.round(oy)}px`;
+    }
     wrap.classList.remove("grow");
     void wrap.offsetWidth;
     sfx("inboxGenie", { bus: "ui" });
     wrap.classList.add("grow");
-    const t = setTimeout(() => wrap.classList.remove("grow"), 210);
+    const t = setTimeout(() => wrap.classList.remove("grow"), 220);
     return () => clearTimeout(t);
-  }, [paneFor, reduced, closing]);
+  }, [paneFor, reduced, phase]);
 
   /* UP/DOWN ticket selection while the inbox is the live surface */
   useEffect(() => {
@@ -488,7 +426,7 @@ export function InboxContent({
       const n = run.jobs.length;
       if (n === 0) return;
       e.preventDefault();
-      const next =
+      let next =
         open === null
           ? e.key === "ArrowDown"
             ? 0
@@ -496,6 +434,11 @@ export function InboxContent({
           : e.key === "ArrowDown"
             ? (open + 1) % n
             : (open - 1 + n) % n;
+      let guard = 0;
+      while (run.jobsDone[next] && guard < n) {
+        next = (next + 1) % n;
+        guard += 1;
+      }
       if (next !== open && !run.jobsDone[next]) {
         if (open !== null) dispatch({ type: "backToDay" });
         dispatch({ type: "pickJob", index: next });
@@ -507,6 +450,7 @@ export function InboxContent({
 
   const toggle = (i: number) => {
     if (run.jobsDone[i]) return;
+    if (busyRef.current) return;
     sfx("press", { bus: "ui" });
     if (run.screen === "analyze" && run.activeJob === i) {
       setFiled((f) => !f);
@@ -517,104 +461,127 @@ export function InboxContent({
   };
 
   const paneJob = paneFor !== null && run.jobs[paneFor] ? paneFor : null;
+  const state = paneJob !== null || open !== null ? "card" : "list";
+  const day = Math.min(run.day, FINAL_DAY);
+  const quoteJob = paneJob !== null ? run.jobs[paneJob] : null;
+  const quoteCustomer = quoteJob ? customerById(quoteJob.customerId) : null;
 
   return (
-    <div ref={sizeRef} className="kp-inbox-size">
-      <div className={wide ? "kp-inbox kp-inbox-open" : "kp-inbox"}>
-        <div className="kp-inbox-side" ref={sideRef}>
-          <div className="kp-screen-head">
-            <div className="kp-hero-day">
-              <b>DAY</b>
-              <Hero text={String(Math.min(run.day, FINAL_DAY))} />
-              <b>OF {FINAL_DAY}</b>
+    <div className="ib-eva" style={{ width: evaWidth }}>
+      <div className="ib-grid" data-state={state}>
+        {/* Z1 MASTHEAD */}
+        <div className="ib-mast">
+          <div className="ib-mast-l">
+            <span className="ib-eyebrow">
+              {state === "list" ? "INBOX.SYS // DAY LOOP" : "INBOX.SYS // RECORD PULLED"}
+            </span>
+            <div className="ib-dayline">
+              <span className="ib-dayunit">DAY</span>
+              <span className="ib-daywrap">
+                <span className="ib-day">{day}</span>
+              </span>
+              <span className="ib-dayunit">OF {FINAL_DAY}</span>
+              <span className="ib-line">{DAY_LINE}</span>
             </div>
-            <p>Three tickets. Strain is shared across all of them. Pick your order.</p>
           </div>
-          <span className="kp-inbox-label">INBOX</span>
-          <div className="kp-inbox-list-zone">
-            <div className="kp-inbox-list" ref={listRef}>
-              {allDone && <div className="kp-inbox-item kp-inbox-done kp-inbox-alldone">ALL TICKETS FILED</div>}
-              {!allDone &&
-                run.jobs.map((job, i) => {
+        </div>
+
+        {/* Z2 THE TICKET LIST */}
+        <aside className="ib-tickets">
+          <div className="ib-div">
+            <span>{"// INBOX"}</span>
+            <i />
+          </div>
+          <div className="ib-list" ref={listRef}>
+            {allDone && <div className="ib-item ib-alldone">ALL TICKETS FILED</div>}
+            {!allDone &&
+              run.jobs.map((job, i) => {
                 const c = customerById(job.customerId);
                 const done = run.jobsDone[i];
                 return (
                   <button
                     key={i}
                     type="button"
-                    className={`kp-inbox-item ${open === i ? "sel" : ""} ${done ? "kp-inbox-done" : ""}`.trim()}
+                    className={paneJob === i && !done ? "ib-item sel" : "ib-item"}
                     disabled={done}
                     onClick={() => toggle(i)}
                   >
-                    <span className="kp-inbox-subj">{done ? <s>{subjectFor(c)}</s> : subjectFor(c)}</span>
-                    <span className="kp-inbox-meta">
+                    <span className="ib-subj">{subjectFor(c)}</span>
+                    <span className="ib-meta">
+                      <span className="ib-tierlabel">TIER</span>
                       <TapTip text={tip("threatTier")}>
-                        <span className="kp-pip-row" aria-label={`Threat tier ${job.tier} of 5`}>
-                          {Array.from({ length: 5 }).map((_, t) => (
-                            <i key={t} className={t < job.tier ? "kp-pip-diamond kp-pip-on" : "kp-pip-diamond"} />
-                          ))}
-                        </span>
+                        <TierPips tier={job.tier} />
                       </TapTip>
                       {done ? (
-                        <span className="kp-inbox-cleared">CLEARED</span>
+                        <span className="ib-cleared">CLEARED</span>
                       ) : (
-                        <span className="kp-inbox-pay">{jobPay(job.tier)} cr</span>
+                        <span className="ib-pay">{jobPay(job.tier)} CR</span>
                       )}
                     </span>
                   </button>
                 );
               })}
-            </div>
           </div>
-          {open !== null && (
-            <div className="kp-inbox-actions">
-              <Btn
-                label="DIVE"
-                variant="signal"
-                onClick={() => {
-                  sfx("claimTick", { bus: "ui" });
-                  dispatch({ type: "startDuel" });
-                }}
-              />
-              <Btn label="CONFIGURE KIT" variant="ghost" onClick={onConfigureKit} />
-              <Btn label="BACK" variant="ghost" onClick={() => dispatch({ type: "backToDay" })} />
+          {quoteCustomer && quoteJob && (
+            <div className="ib-quote">
+              <b>INTAKE</b>
+              <Typed text={`"${quoteCustomer.quotes[quoteJob.quoteIndex]}"`} delay={220} />
             </div>
           )}
-          <p className="kp-inbox-hint">UP, DOWN: select ticket | CLICK AGAIN: file it away</p>
-          <footer className="kp-screen-foot">
-            <TapTip text={tip("strain")}>
-              <Chip label="STRAIN" value={String(run.strain)} crimson={run.strain > 70} />
-            </TapTip>
-            <Chip label="CR" value={String(run.credits)} />
-            <TapTip text={tip("ram")}>
-              <Chip label="RAM" value={`${run.ramPerTurn}/turn`} />
-            </TapTip>
-            {run.patchPouch.length > 0 && (
-              <span className="kp-foot-pouch">
-                <span className="kp-rail-dim">POUCH</span>
-                {run.patchPouch.map((m, i) => (
-                  <PatchGlyph key={i} mask={m} size={14} />
-                ))}
-              </span>
-            )}
-            <Chip label="KIT" value={`S${run.kit.scanTier}/A${run.kit.attackTier}/D${run.kit.defendTier}`} />
-          </footer>
+        </aside>
+
+        {/* Z3 THE RECORD PANE */}
+        <section
+          className={phase === "shrink" ? "ib-pane shrink" : "ib-pane"}
+          ref={paneRef}
+          style={phase === "hiding" ? { opacity: 0 } : undefined}
+        >
+          {paneJob !== null && (
+            <RecordPane
+              key={paneJob}
+              run={run}
+              jobIndex={paneJob}
+              dispatch={dispatch}
+              onConfigureKit={onConfigureKit}
+              onFile={() => dispatch({ type: "backToDay" })}
+            />
+          )}
+        </section>
+
+        {/* Z5 FOOTLINE: the run's ambient state */}
+        <div className="ib-foot">
+          <TapTip text={tip("strain")}>
+            <span className="kp-chip-pct">
+              <span>STRAIN</span>
+              <em>
+                <CountUp value={run.strain} delay={650} />
+              </em>
+            </span>
+          </TapTip>
+          <span className="kp-chip-pct">
+            <span>CR</span>
+            <em>
+              <CountUp value={run.credits} delay={690} />
+            </em>
+          </span>
+          <TapTip text={tip("ram")}>
+            <Chip label="RAM" value={`${run.ramPerTurn}/TURN`} />
+          </TapTip>
+          <Chip
+            label="KIT"
+            value={`S${run.kit.scanTier}/A${run.kit.attackTier}/D${run.kit.defendTier}`}
+          />
+          {run.patchPouch.length > 0 && (
+            <span className="ib-pouch">
+              <span>POUCH</span>
+              {run.patchPouch.map((m, i) => (
+                <PatchGlyph key={i} mask={m} size={13} />
+              ))}
+            </span>
+          )}
+          <span className="ib-hint">UP, DOWN: SELECT | CLICK AGAIN: FILE AWAY</span>
         </div>
-        {paneJob !== null && (
-          <div className={closing ? "kp-pane-wrap shrink" : "kp-pane-wrap"} ref={paneRef}>
-            <CustomerCard run={run} jobIndex={paneJob} />
-          </div>
-        )}
       </div>
-      {measuring !== null && run.jobs[measuring] && (
-        <div className="kp-inbox-measure" aria-hidden="true">
-          {/* kp-inbox-open on the clone so the short-desk compact rules
-              measure the same card the live pane will render */}
-          <div ref={measureRef} className="kp-inbox-open" style={{ width: paneWidth() }}>
-            <CustomerCard run={run} jobIndex={measuring} instant />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

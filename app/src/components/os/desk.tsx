@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { FINAL_DAY } from "../../game/content/arc";
 import type { MetaState, RunState } from "../../game/save";
 import { KpMark } from "./kp-ui";
@@ -20,18 +20,48 @@ function seeded(id: string): () => number {
   };
 }
 
-export function WallPoster({ meta, run }: { meta: MetaState; run: RunState | null }) {
+/**
+ * The dossier poster. On the IDLE desk (no window open) it promotes a real
+ * focal element: the ATTEMPT/DAY pair at --ds-fs-hero, with the wordmark
+ * demoted to identity dressing. Open a window and it steps back down, so
+ * the focused window owns the glance order instead. (v3 decision 2.)
+ */
+export function WallPoster({
+  meta,
+  run,
+  idle = false,
+}: {
+  meta: MetaState;
+  run: RunState | null;
+  idle?: boolean;
+}) {
   const sealed = !meta.machineOpened;
+  const attempt = run ? run.runNumber : meta.runCount;
+  const day = run ? Math.min(run.day, FINAL_DAY) : 0;
   return (
-    <div className="kp-wallposter kp-slot-anim" style={{ animationDelay: "260ms" }}>
+    <div
+      className={idle ? "kp-wallposter ds-idle-hero kp-slot-anim" : "kp-wallposter kp-slot-anim"}
+      style={{ animationDelay: "260ms" }}
+    >
       <span className="kp-wallposter-tag">KP/OS v9.2 // REPAIR BENCH</span>
       <div className="kp-wallposter-emblem">
         <KpMark cell={13} />
       </div>
+      {/* the hero readout paints only on the idle desk (.ds-idle-hero) */}
+      <div className="ds-heropair">
+        <b>
+          <span>ATTEMPT</span>
+          {String(attempt).padStart(2, "0")}
+        </b>
+        <b>
+          <span>DAY</span>
+          {String(day).padStart(2, "0")}
+        </b>
+      </div>
       <div className="kp-wallposter-word">KERNEL PANIC</div>
       <div className="kp-wallposter-row">
-        <span>ATTEMPT 0{run ? run.runNumber : meta.runCount}</span>
-        <span>DAY 0{run ? Math.min(run.day, FINAL_DAY) : 0}</span>
+        <span>ATTEMPT 0{attempt}</span>
+        <span>DAY 0{day}</span>
         <span>{sealed ? "BACK ROOM SEALED" : "THE DOOR IS OPEN"}</span>
       </div>
     </div>
@@ -133,11 +163,19 @@ export function Ticker({ meta }: { meta: MetaState }) {
     ["DIVES LOST", st.divesLost],
     ["SCANS RUN", st.scans],
   ];
-  const text = stats.map(([l, v]) => `${l} ${v}`).join(" // ");
   const ref = useRef<HTMLDivElement | null>(null);
   return (
     <div className="kp-ticker" ref={ref} aria-hidden="true">
-      <span>{text}</span>
+      {/* labels NAME (--r-note), values READ (--r-line, dimmed) */}
+      <span>
+        {stats.map(([l, v], i) => (
+          <Fragment key={l}>
+            {i > 0 && " // "}
+            {l}{" "}
+            <em className="ds-tickval">{v}</em>
+          </Fragment>
+        ))}
+      </span>
     </div>
   );
 }

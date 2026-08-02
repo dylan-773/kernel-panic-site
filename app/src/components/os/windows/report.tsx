@@ -1,25 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "../../../game/audio";
 import { FINAL_DAY } from "../../../game/content/arc";
-import { CustomerProfile } from "../../../game/content/customers";
 import { AUGMENT_BY_ID, GRIDLOCK_CHIP } from "../../../game/content/kit";
 import { PATCH_POUCH_MAX, shapeClassOf } from "../../../game/patch-cells";
 import type { RunAction } from "../../../game/run-reducer";
 import type { RunState } from "../../../game/save";
 import { customerById } from "../../game/screens";
-import { figureArtFor } from "../roster-art";
+import { clientPrintFor } from "../roster-art";
 import { Teach } from "../../game/teach";
 import { PatchGlyph } from "../../game/patch-glyph";
-import { Chip, Nodes, Stripe, Ticks } from "../kp-ui";
 
 /**
- * REPAIR.LOG: the dive result as a dense status dossier. Left rail: the
- * client figure and the DIVE LOG (the actual bus log of the finished
- * dive). Center: hero verdict with the customer's win line typing in, the
- * ECG strain trace drawn from the dive's real trap and over-par rounds,
- * the AUGMENT CACHE draft (with the bays-full swap flow), and four
- * telemetry sparklines. Right: itemized payout, the patch piece poster,
- * and the pouch strip with NEW and left-on-the-bench states.
+ * REPAIR.LOG as a KP/OS v3 instrument panel (ui-demos/repair-log-v3, cycle
+ * ux-2026-07-31-repair-log-v3). System: ../RULINGS.md.
+ *
+ * The dive result read as a TRANSACTION. GLANCE ORDER: 1st the bill, whose
+ * three cells (CREDITED, BILLED, RECOVERED) are one focal row; 2nd the
+ * verdict slab and the client's own line; 3rd the strain trace. The client
+ * cam still, the telemetry ticks and the dive log are ambient.
+ *
+ * THE ALARM is the strain the run has LEFT, armed at or below 35 (the same
+ * risk band LOADOUT.CFG uses) and owned by the BILLED cell alone. Not "this
+ * ticket billed a lot": an expensive ticket you can afford is not an
+ * emergency. Strain severs the run at zero, so the alarm is the distance to
+ * zero, and it carries four channels: colour, inverse video, motion, and
+ * position on the strain-left meter.
+ *
+ * CUTS (law 8, recorded in the demo's NOTES): the four boxed telemetry
+ * sparklines are gone (four boxes of the same idea, none of which survived
+ * being shrunk to the ceiling); their VALUES survive as unboxed gutter
+ * ticks. The footer row, the brand plate and its battery pips are cut; the
+ * chips moved into the masthead and the advance button rides the cache
+ * divider. The patch piece's poster card became the bill's third cell.
  */
 
 type Dispatch = (a: RunAction) => void;
@@ -38,6 +50,8 @@ const SHAPE_NOUN: Record<"I" | "L" | "T" | "X", string> = {
   X: "Cross",
 };
 
+/** The same risk band LOADOUT.CFG arms at. */
+const RISK_BAND = 35;
 
 function seeded(id: string): () => number {
   let s = 0;
@@ -98,7 +112,7 @@ function Typed({
 }
 
 /** Stepped counter roll, CRT odometer feel. */
-function RollUp({ target, delay = 0, suffix }: { target: number; delay?: number; suffix?: string }) {
+function RollUp({ target, delay = 0 }: { target: number; delay?: number }) {
   const reduced = useReducedMotion();
   const [v, setV] = useState(0);
   useEffect(() => {
@@ -121,59 +135,7 @@ function RollUp({ target, delay = 0, suffix }: { target: number; delay?: number;
       if (iv) clearInterval(iv);
     };
   }, [target, delay, reduced]);
-  return (
-    <>
-      {v}
-      {suffix && <i>{suffix}</i>}
-    </>
-  );
-}
-
-function GridLines({ W, H, stepX, stepY }: { W: number; H: number; stepX: number; stepY: number }) {
-  const lines: Array<[number, number, number, number]> = [];
-  for (let x = 0; x <= W; x += stepX) lines.push([x, 0, x, H]);
-  for (let y = 0; y <= H; y += stepY) lines.push([0, y, W, y]);
-  return (
-    <>
-      {lines.map(([x1, y1, x2, y2], i) => (
-        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} className="grid" />
-      ))}
-    </>
-  );
-}
-
-/** Polyline that draws itself in (stroke-dash sweep, steps timing). */
-function DrawPoly({ pts, delay }: { pts: string; delay: number }) {
-  const reduced = useReducedMotion();
-  const [drawn, setDrawn] = useState(false);
-  const length = useMemo(() => {
-    const parsed = pts
-      .trim()
-      .split(/\s+/)
-      .map((p) => p.split(",").map(Number));
-    let L = 0;
-    for (let i = 1; i < parsed.length; i++) {
-      L += Math.hypot(parsed[i][0] - parsed[i - 1][0], parsed[i][1] - parsed[i - 1][1]);
-    }
-    return Math.ceil(L);
-  }, [pts]);
-  useEffect(() => {
-    setDrawn(false);
-    const t = setTimeout(() => setDrawn(true), delay);
-    return () => clearTimeout(t);
-  }, [pts, delay]);
-  if (reduced) return <polyline points={pts} shapeRendering="crispEdges" />;
-  return (
-    <polyline
-      points={pts}
-      shapeRendering="crispEdges"
-      style={{
-        strokeDasharray: `${length} ${length}`,
-        strokeDashoffset: drawn ? 0 : length,
-        transition: drawn ? "stroke-dashoffset 620ms steps(14)" : "none",
-      }}
-    />
-  );
+  return <>{v}</>;
 }
 
 interface DiveShape {
@@ -184,90 +146,73 @@ interface DiveShape {
   capWobble: boolean;
 }
 
-/** ECG strain trace: flat pulse line, a spike per trap, a bump per
- * over-par rotation, a wobble tail on a cap win. */
-function EcgSvg({ shape }: { shape: DiveShape }) {
+/** The strain trace: a flat pulse line, a spike per trap, a bump per
+ * over-par rotation, a wobble tail on a cap win. Trap markers take
+ * --r-hazard, so a spike is legible as an EVENT without spending the alarm
+ * colour on a readout. */
+function Ecg({ shape }: { shape: DiveShape }) {
+  const W = 640;
+  const H = 54;
   const pts = useMemo(() => {
-    const W = 640;
-    const base = 60;
+    const base = 35;
     const next = seeded(`${shape.key}-ecg`);
     const events: Array<{ x: number; amp: number }> = [];
-    shape.trapRounds.forEach((r) => events.push({ x: ((r - 0.5) / shape.rounds) * W, amp: 40 }));
-    shape.parRounds.forEach((r) => events.push({ x: ((r - 0.5) / shape.rounds) * W, amp: 16 }));
+    shape.trapRounds.forEach((r) => events.push({ x: ((r - 0.5) / shape.rounds) * W, amp: 24 }));
+    shape.parRounds.forEach((r) => events.push({ x: ((r - 0.5) / shape.rounds) * W, amp: 10 }));
     const out: string[] = [];
     for (let x = 0; x <= W; x += 4) {
-      let y = base + ((next() % 100) / 100 - 0.5) * 5;
+      let y = base + ((next() % 100) / 100 - 0.5) * 4;
       for (const e of events) {
         const d = Math.abs(x - e.x);
         if (d < 20) y -= e.amp * (1 - d / 20);
       }
-      if (shape.capWobble && x > W * 0.82) y += Math.sin(x / 9) * 9;
+      if (shape.capWobble && x > W * 0.82) y += Math.sin(x / 9) * 6;
       out.push(`${x},${Math.round(y)}`);
     }
     return out.join(" ");
   }, [shape]);
+  const vlines: number[] = [];
+  for (let x = 0; x <= W; x += 32) vlines.push(x);
+  const hlines: number[] = [];
+  for (let y = 0; y <= H; y += 18) hlines.push(y);
   return (
-    <svg viewBox="0 0 640 96" preserveAspectRatio="none" height={96}>
-      <GridLines W={640} H={96} stepX={32} stepY={24} />
-      <DrawPoly pts={pts} delay={140} />
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" height={H} aria-hidden="true">
+      {vlines.map((x) => (
+        <line key={`v${x}`} x1={x} y1={0} x2={x} y2={H} className="grid" />
+      ))}
+      {hlines.map((y) => (
+        <line key={`h${y}`} x1={0} y1={y} x2={W} y2={y} className="grid" />
+      ))}
+      {shape.trapRounds.map((r, i) => {
+        const x = Math.round(((r - 0.5) / shape.rounds) * W);
+        return <line key={`t${i}`} x1={x} y1={0} x2={x} y2={H} className="trap" />;
+      })}
+      <polyline points={pts} shapeRendering="crispEdges" />
     </svg>
   );
 }
 
-/** Small telemetry sparkline; kind shapes the wave from the real dive. */
-function QuadSvg({ shape, kind, delay }: { shape: DiveShape; kind: string; delay: number }) {
-  const pts = useMemo(() => {
-    const W = 300;
-    const next = seeded(`${shape.key}-${kind}`);
-    const out: string[] = [];
-    if (kind === "ram") {
-      for (let x = 0; x <= W; x += 6) {
-        const phase = (x % 60) / 60;
-        out.push(`${x},${Math.round(38 - phase * 26 + ((next() % 100) / 100 - 0.5) * 3)}`);
-      }
-    } else if (kind === "rot") {
-      let lvl = 40;
-      for (let x = 0; x <= W; x += 6) {
-        if (next() % 5 === 0 && lvl > 10) lvl -= 4;
-        out.push(`${x},${lvl}`);
-      }
-    } else if (kind === "trap") {
-      const spikes = shape.trapRounds.map((r) => ((r - 0.5) / shape.rounds) * 300);
-      for (let x = 0; x <= W; x += 4) {
-        let y = 38;
-        for (const s of spikes) {
-          const d = Math.abs(x - s);
-          if (d < 10) y -= 28 * (1 - d / 10);
-        }
-        out.push(`${x},${Math.round(y)}`);
-      }
-    } else {
-      const amp = shape.trapRounds.length === 0 ? 3 : shape.trapRounds.length <= 2 ? 8 : 14;
-      for (let x = 0; x <= W; x += 4) {
-        out.push(`${x},${Math.round(24 + ((next() % 100) / 100 - 0.5) * amp * 2)}`);
-      }
-    }
-    return out.join(" ");
-  }, [shape, kind]);
-  return (
-    <svg viewBox="0 0 300 46" preserveAspectRatio="none" height={46}>
-      <GridLines W={300} H={46} stepX={30} stepY={23} />
-      <DrawPoly pts={pts} delay={delay} />
-    </svg>
-  );
-}
-
-function Receipt({ rows, startDelay }: { rows: Array<[string, string] | [string, string, "inv"]>; startDelay: number }) {
+/** The itemized receipt. Values are --r-line: they are live data, not
+ * alarms, and nothing in a receipt is ever allowed to reach for red. THREE
+ * rows are reserved whatever the branch actually bills, so a clean sweep, a
+ * chip breakdown and a capped bill all leave the cell the same height. */
+function Receipt({
+  rows,
+  startDelay,
+}: {
+  rows: Array<[string, string] | [string, string, "inv"]>;
+  startDelay: number;
+}) {
   const reduced = useReducedMotion();
   return (
-    <ul className="kp-receipt">
+    <ul className="rl-receipt">
       {rows.map((r, i) => (
         <li
           key={i}
           className={`${r[2] === "inv" ? "inv" : ""} ${reduced ? "" : "kp-receipt-pop"}`.trim()}
           style={reduced ? undefined : { animationDelay: `${startDelay + i * 90}ms` }}
         >
-          {r[0]}
+          <span>{r[0]}</span>
           <em>{r[1]}</em>
         </li>
       ))}
@@ -275,16 +220,41 @@ function Receipt({ rows, startDelay }: { rows: Array<[string, string] | [string,
   );
 }
 
+function Bracket() {
+  return (
+    <i className="rl-bracket" aria-hidden="true">
+      <i />
+    </i>
+  );
+}
+
 export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
   const r = run.lastResult;
   const reduced = useReducedMotion();
   const [pendingSwap, setPendingSwap] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   useEffect(() => {
     if (r && r.draft.length > 0) sfx("unlock", { at: 0.3 });
   }, [r]);
   useEffect(() => {
     if (r?.picked) setPendingSwap(null);
   }, [r?.picked]);
+
+  const strainLeft = run.strain;
+  const [litStrain, setLitStrain] = useState(0);
+  const strainSegs = Math.round((24 * strainLeft) / 100);
+  useEffect(() => {
+    if (reduced) {
+      setLitStrain(strainSegs);
+      return;
+    }
+    setLitStrain(0);
+    const timers = Array.from({ length: strainSegs }, (_, i) =>
+      setTimeout(() => setLitStrain((v) => Math.max(v, i + 1)), 700 + i * 26),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [strainSegs, reduced]);
+
   if (!r) return null;
 
   const job = run.jobs[r.jobIndex];
@@ -304,7 +274,10 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
 
   const chipRows: Array<[string, string]> = [];
   if (r.overRotations > 0)
-    chipRows.push([`${r.overRotations} rotation${r.overRotations === 1 ? "" : "s"} over par`, `-${r.overRotations * 2}`]);
+    chipRows.push([
+      `${r.overRotations} rotation${r.overRotations === 1 ? "" : "s"} over par`,
+      `-${r.overRotations * 2}`,
+    ]);
   if (r.trapsFired > 0)
     chipRows.push([`${r.trapsFired} trap${r.trapsFired === 1 ? "" : "s"} sprung`, `-${r.trapsFired * 4}`]);
   if (r.capWin) chipRows.push(["hit the turn cap", "-10"]);
@@ -316,30 +289,30 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
   const payRows: Array<[string, string]> = [];
   if (r.capWin || r.salvage > 0 || r.cleanRunBonus > 0) {
     payRows.push(["ticket rate", `${r.basePay} cr`]);
-    if (r.capWin) payRows.push(["reduced rate, you hit the turn cap", `-${r.basePay - (r.pay - r.salvage - r.cleanRunBonus)} cr`]);
+    if (r.capWin)
+      payRows.push([
+        "reduced rate, you hit the turn cap",
+        `-${r.basePay - (r.pay - r.salvage - r.cleanRunBonus)} cr`,
+      ]);
     if (r.cleanRunBonus > 0) payRows.push(["clean run, trap free to the cap", `+${r.cleanRunBonus} cr`]);
     if (r.salvage > 0) payRows.push(["salvage, augment cache dry", `+${r.salvage} cr`]);
   }
 
-  /* the patch poster: clean run bank first, else the job drop */
-  const poster = r.cleanRun
+  /* the RECOVERED cell: clean-run bank first, else the job drop */
+  const piece = r.cleanRun
     ? {
-        title: "CLEAN RUN",
         mask: r.cleanRun.status === "banked" ? r.cleanRun.mask : null,
         noun: r.cleanRun.status === "banked" ? SHAPE_NOUN[shapeClassOf(r.cleanRun.mask)].toUpperCase() : null,
         line:
           r.cleanRun.status === "banked"
             ? `Zero strain billed. Banked a random ${SHAPE_NOUN[shapeClassOf(r.cleanRun.mask)].toLowerCase()}.`
             : `Zero strain billed. Pouch already holds the maximum of ${PATCH_POUCH_MAX}.`,
-        status:
-          r.cleanRun.status === "banked"
-            ? `BANKED. POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}`
-            : "POUCH FULL",
+        status: r.cleanRun.status === "banked" ? `BANKED. POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}` : "POUCH FULL",
         capped: r.cleanRun.status !== "banked",
+        none: false,
       }
     : r.patchDrop
       ? {
-          title: "PATCH PIECE RECOVERED",
           mask: r.patchDrop.mask,
           noun: SHAPE_NOUN[shapeClassOf(r.patchDrop.mask)].toUpperCase(),
           line:
@@ -351,290 +324,376 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
               ? `BANKED. POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}`
               : "LEFT ON THE BENCH",
           capped: r.patchDrop.status !== "banked",
+          none: false,
         }
       : {
-          title: "NO PIECE THIS TICKET",
           mask: null as number | null,
           noun: null as string | null,
           line: "Nothing came off this one. The next clean run still banks.",
           status: `POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}`,
           capped: false,
+          none: true,
         };
 
-  /* pouch strip: the freshly banked piece is the last one in */
   const freshMask =
     r.cleanRun?.status === "banked" ? r.cleanRun.mask : r.patchDrop?.status === "banked" ? r.patchDrop.mask : null;
   const freshIndex = freshMask !== null ? run.patchPouch.lastIndexOf(freshMask) : -1;
-  const lostMask =
-    r.patchDrop?.status === "capped" ? r.patchDrop.mask : r.cleanRun?.status === "capped" ? null : null;
 
-  const footLabel =
-    r.picked || r.draft.length === 0
-      ? run.jobsDone.every(Boolean)
-        ? "CLOSE THE DAY"
-        : "NEXT TICKET"
-      : "SKIP THE DRAFT";
+  const advanceLabel = run.jobsDone.every(Boolean) ? "CLOSE THE DAY" : "NEXT TICKET";
+  const cacheState = r.draft.length === 0 ? "DRY" : r.picked ? "INSTALLED" : "PICK ONE";
+  const noChoice = r.draft.length === 0;
+  const clientPrint = c ? clientPrintFor(c) : null;
+
+  // BILLED owns the alarm, and the flash plate exists ONLY on that cell:
+  // putting one on every numeral would mean --r-warn was present, inert and
+  // at zero opacity, in cells that have no alarm.
+  const billCls =
+    strainLeft > 70 ? "rl-cell is-ok" : strainLeft <= RISK_BAND ? "rl-cell is-risk" : "rl-cell";
 
   return (
-    <div className="kp-report">
-      <div className="kp-rpt-grid">
-        {/* ---------- left rail ---------- */}
-        <div className="kp-rpt-col">
-          <div className="kp-figure-cell">
-            <span className="kp-figure-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-            <i className="kp-figure-crop" style={{ backgroundImage: `url("${c ? figureArtFor(c) : ""}")` }} />
-            <i className="tint" aria-hidden="true" />
-            <span className="kp-figure-tag">REPAIR LOGGED</span>
+    <div className="rl-wrap">
+      <div className="rl-grid">
+        {/* Z1 MASTHEAD */}
+        <div className="rl-mast">
+          <div className="rl-mast-top">
+            <span className="rl-eyebrow">REPAIR.LOG // TICKET</span>
+            <div className="rl-mast-r">
+              <span className="kp-chip-pct">
+                <span>DAY</span>
+                <em>{String(Math.min(run.day, FINAL_DAY)).padStart(2, "0")}</em>
+              </span>
+              <span className="kp-chip-pct">
+                <span>TICKET</span>
+                <em>
+                  {run.jobsDone.filter(Boolean).length} OF {run.jobs.length}
+                </em>
+              </span>
+              <span className="kp-chip-pct">
+                <span>CREDITS</span>
+                <em>{run.credits}</em>
+              </span>
+            </div>
           </div>
-          <div className="kp-divelog">
-            <span className="kp-rpt-label">DIVE LOG</span>
-            <div className="kp-divelog-lines">
-              {(log.length > 0 ? log.slice(-14) : ["LINK CLOSED. NO TAP ON FILE."]).map((line, i) => (
-                <Typed
-                  key={`${shape.key}-${i}`}
-                  text={line}
-                  delay={260 + i * 110}
-                  interval={9}
-                  hot={/TRAP SPRUNG|TURN CAP/.test(line)}
-                />
+          <div className="rl-mast-mid">
+            <span className="rl-slab kp-frame-ticks">
+              <i className="kp-tick2" />
+              REPAIR LOGGED
+            </span>
+            <div className="rl-mast-act">
+              <span className="kp-chip-pct">
+                <span>CLIENT</span>
+                <em>{c ? c.name.toUpperCase() : "--"}</em>
+              </span>
+              <span className="kp-chip-pct">
+                <span>DEVICE</span>
+                <em>{c ? c.device : "--"}</em>
+              </span>
+            </div>
+          </div>
+          {/* the one line of human voice on a page of instrumentation. The
+              measure is reserved at two lines whatever its length, so a
+              short win line and a long one leave the masthead identical. */}
+          {c ? (
+            <Typed className="rl-quote" text={`"${c.winLine}"`} delay={160} interval={18} />
+          ) : (
+            <p className="rl-quote" />
+          )}
+        </div>
+
+        {/* Z2 THE CLIENT CAM STILL. The shop camera on the counter caught the
+            handover; what the log files is the CAPTURE, not the feed, so the
+            live furniture (REC light, scan roll, boot wipe) is gone. A report
+            shows evidence, it does not stream. */}
+        <div className="rl-cam" data-feed="color">
+          {clientPrint ? (
+            <img src={clientPrint} alt="" />
+          ) : (
+            <i className="rl-camnone" aria-hidden="true" />
+          )}
+          <i className="tint" aria-hidden="true" />
+          <span className="rl-camlabel">{"// CLIENT CAM"}</span>
+          <span className="rl-camtag">REPAIR LOGGED</span>
+        </div>
+
+        <aside className="rl-gutter">
+          <div className="rl-ticks">
+            <div className="rl-tick">
+              <span>RAM FLOW</span>
+              <em>{run.ramPerTurn}/T</em>
+            </div>
+            <div className="rl-tick">
+              <span>OVER PAR</span>
+              <em>{r.overRotations}</em>
+            </div>
+            <div className="rl-tick">
+              <span>TRAPS SPRUNG</span>
+              <em>{r.trapsFired}</em>
+            </div>
+            <div className="rl-tick">
+              <span>LINK NOISE</span>
+              <em>{r.chip === 0 ? "LOW" : r.chip <= 12 ? "MID" : "HIGH"}</em>
+            </div>
+          </div>
+          <div className="rl-pouch">
+            <div className="rl-tick">
+              <span>PATCH POUCH</span>
+              <em>
+                {run.patchPouch.length} / {PATCH_POUCH_MAX}
+              </em>
+            </div>
+            <div className="rl-pouchrow">
+              {run.patchPouch.map((m, i) => (
+                <span key={i} className={i === freshIndex ? "rl-pslot fresh" : "rl-pslot"}>
+                  <PatchGlyph mask={m} size={18} />
+                </span>
+              ))}
+              {Array.from({ length: PATCH_POUCH_MAX - run.patchPouch.length }).map((_, i) => (
+                <span key={`e${i}`} className="rl-pslot empty" />
               ))}
             </div>
           </div>
+        </aside>
+
+        {/* Z3 THE BILL: the focal zone. Three cells, one line item each. */}
+        <div className="rl-bill">
+          <div className="rl-cell">
+            <span className="rl-cname">{"// CREDITED"}</span>
+            <div className="rl-heroline">
+              <span className="rl-num">
+                <RollUp target={r.pay} delay={300} />
+              </span>
+              <span className="rl-unit">CR</span>
+            </div>
+            <Receipt rows={payRows} startDelay={560} />
+            <Bracket />
+          </div>
+
+          <div className={billCls}>
+            <span className="rl-cname">{"// BILLED"}</span>
+            <div className="rl-heroline">
+              {/* zero strain billed reads as a VERDICT, not a number, so it
+                  takes the nominal role and the word rather than a numeral */}
+              <span className={r.chip === 0 ? "rl-num is-clean" : "rl-num"}>
+                {r.chip === 0 ? "CLEAN" : <RollUp target={-r.chip} delay={360} />}
+                <i className="rl-riskflash" aria-hidden="true" />
+              </span>
+              {r.chip !== 0 && <span className="rl-unit">STRAIN</span>}
+            </div>
+            <Receipt
+              rows={
+                cappedBill
+                  ? [...chipRows, ["strain bill capped", "-40 max", "inv"] as [string, string, "inv"]]
+                  : chipRows
+              }
+              startDelay={620}
+            />
+            {/* the alarm's fourth channel: position on a scale, which
+                survives both a colourblind reader and the CRT layer */}
+            <span className="rl-strainbar">
+              {Array.from({ length: 24 }).map((_, i) => (
+                <i key={i} className={i < litStrain ? "on" : undefined} />
+              ))}
+            </span>
+            <div className="rl-cellfoot">
+              <span>STRAIN LEFT</span>
+              <em>{strainLeft}</em>
+              <span>{strainLeft <= RISK_BAND ? "SEVERS AT 0" : ""}</span>
+            </div>
+            <Bracket />
+          </div>
+
+          <div className="rl-cell">
+            <span className="rl-cname">{"// RECOVERED"}</span>
+            <div className="rl-piece">
+              {/* the empty stage keeps the filled stage's exact footprint */}
+              <div className={piece.capped || piece.none ? "rl-piecestage void" : "rl-piecestage"}>
+                {piece.mask !== null && <PatchGlyph mask={piece.mask} size={46} />}
+              </div>
+              <div className="rl-piecemeta">
+                {piece.noun && <span className="rl-noun">{piece.noun}</span>}
+                <span
+                  className={
+                    piece.capped ? "rl-pstatus capped" : piece.none ? "rl-pstatus none" : "rl-pstatus"
+                  }
+                >
+                  {piece.status}
+                </span>
+              </div>
+            </div>
+            <Typed className="rl-pline" text={piece.line} delay={760} interval={8} />
+            <Bracket />
+          </div>
         </div>
 
-        {/* ---------- center rail ---------- */}
-        <div className="kp-rpt-col">
-          <div className="kp-hero-block">
-            <span className="kp-rpt-label">DIVE RESULT</span>
-            <h2 className="kp-hero-verdict">REPAIR LOGGED</h2>
-            <Stripe style={{ opacity: 0.5 }} />
-            {c && <Typed className="kp-hero-quote" text={`"${c.winLine}"`} delay={160} interval={18} />}
-            <div className="kp-hero-chips">
-              {c && <Chip label="CLIENT" value={c.name.toUpperCase()} />}
-              {c && <Chip label="DEVICE" value={c.device} />}
-              <Chip label="TICKET RATE" value={`${r.basePay} cr`} />
+        {/* Z4 THE TRACE */}
+        <section className="rl-trace">
+          <div className="rl-scope">
+            <div className="rl-scopetag">
+              <span>STRAIN TRACE</span>
+              <b>{shape.rounds} ROUNDS</b>
             </div>
+            <Ecg shape={shape} />
+          </div>
+          {/* the dive log, capped at four lines under the trace it annotates */}
+          <div className="rl-log">
+            {(log.length > 0 ? log.slice(-4) : ["LINK CLOSED. NO TAP ON FILE."]).map((line, i) => (
+              <Typed
+                key={`${shape.key}-${i}`}
+                className="rl-logline"
+                text={line}
+                delay={260 + i * 110}
+                interval={9}
+                hot={/TRAP SPRUNG|TURN CAP/.test(line)}
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* Z5 THE CACHE: the only thing on this surface that needs a hand.
+            The decline slot is the rail slot OF the draft group, so the
+            choice reads "pick one of the drafts, or skip" rather than a
+            window-level button carrying a zone-level decision. */}
+        <section className={noChoice ? "rl-cache no-choice" : "rl-cache"}>
+          <div className="rl-div">
+            <i />
+            <span>{"// AUGMENT CACHE"}</span>
+            <em className={r.picked || noChoice ? "done" : undefined}>{cacheState}</em>
+            <i />
+            <button
+              type="button"
+              className="kp-btn2 kp-btn2-signal"
+              onClick={() => {
+                sfx("press", { bus: "ui" });
+                dispatch({ type: "resultNext" });
+              }}
+            >
+              {advanceLabel}
+            </button>
           </div>
 
-          <div className="kp-strainband kp-frame-ticks">
-            <Ticks />
-            <div className="kp-scopebox">
-              <div className="kp-scope-tag">
-                <span className="kp-rpt-label">STRAIN TRACE</span>
-                <b>{shape.rounds} ROUNDS</b>
-              </div>
-              <EcgSvg shape={shape} />
-            </div>
-            <div className="kp-strain-side">
-              <span className="kp-rpt-label">NEURAL STRAIN</span>
-              {r.chip === 0 ? (
-                <div className="kp-strain-big clean">CLEAN</div>
+          {!noChoice && (
+            <div className="rl-cacherail">
+              {pendingSwap !== null && r.picked === null ? (
+                <button type="button" className="kp-btn2 kp-btn2-ghost" onClick={() => setPendingSwap(null)}>
+                  CANCEL THE SWAP
+                </button>
               ) : (
-                <div className="kp-strain-big">
-                  <RollUp target={-r.chip} delay={240} />
-                </div>
-              )}
-              <p className="kp-strain-left">
-                <em>{run.strain}</em> STRAIN LEFT
-              </p>
-              {chipRows.length > 0 && (
-                <Receipt
-                  rows={cappedBill ? [...chipRows, ["strain billed, capped", "-40 max", "inv"] as [string, string, "inv"]] : chipRows}
-                  startDelay={420}
-                />
+                <button
+                  type="button"
+                  className={r.picked === null ? "rl-skipcard" : "rl-skipcard skipped"}
+                  disabled={r.picked !== null}
+                  onClick={() => {
+                    sfx("press", { bus: "ui" });
+                    dispatch({ type: "resultNext" });
+                  }}
+                >
+                  SKIP THE DRAFT
+                </button>
               )}
             </div>
-          </div>
+          )}
 
-          <div className="kp-cachebox">
-            <div className="kp-cache-head">
-              <span className="kp-cache-title">AUGMENT CACHE</span>
-              <span className="kp-rpt-label">{r.draft.length === 0 ? "DRY" : r.picked ? "INSTALLED" : "PICK ONE"}</span>
-            </div>
-            {r.draft.length > 0 ? (
-              <>
-                <div className="kp-draft-grid2">
-                  {r.draft.map((id, i) => {
+          <div className="rl-cachebody">
+            {noChoice ? (
+              <p className="rl-dry">Augment cache is dry. Salvage credited instead.</p>
+            ) : pendingSwap !== null && r.picked === null ? (
+              <div className="rl-swap">
+                <h4>EJECT WHICH BOOST FOR {AUGMENT_BY_ID[pendingSwap]?.name}?</h4>
+                <div className="rl-swaprow">
+                  {run.kit.augments.map((id) => {
                     const a = AUGMENT_BY_ID[id];
-                    if (!a) return null;
-                    const picked = r.picked === id;
-                    const dimmed = (r.picked !== null && !picked) || (pendingSwap !== null && pendingSwap !== id);
-                    const needsSwap = a.kind === "boost" && baysFull;
                     return (
                       <button
                         key={id}
                         type="button"
-                        className={`kp-draft-card2 ${picked ? "picked" : ""} ${dimmed ? "dimmed" : ""} ${pendingSwap === id ? "swapping" : ""} ${reduced ? "" : "kp-slot-anim"}`.trim()}
-                        disabled={r.picked !== null}
-                        style={reduced ? undefined : { animationDelay: `${300 + i * 110}ms` }}
+                        className="rl-card"
                         onClick={() => {
-                          if (needsSwap) {
-                            sfx("press", { bus: "ui" });
-                            setPendingSwap((p) => (p === id ? null : id));
-                            return;
-                          }
                           sfx("granted", { bus: "ui" });
-                          dispatch({ type: "pickAugment", id });
+                          dispatch({ type: "pickAugment", id: pendingSwap, replace: id });
                         }}
                       >
-                        <span className={a.kind === "config" ? "kp-draft-kind2 cfg" : "kp-draft-kind2"}>
-                          {a.kind === "config" ? "CONFIG" : needsSwap && !picked ? "BOOST. BAYS FULL, PICK TO SWAP" : "BOOST"}
-                        </span>
-                        <strong>{a.name}</strong>
-                        <p>{a.desc}</p>
-                        {a.kind === "config" && (
-                          <p className="note">
-                            Unlocks the mode. Your active kit does not change; switch to it in
-                            LOADOUT.CFG when you want it.
-                          </p>
-                        )}
-                        {picked && <em className="kp-draft-stamp2">INSTALLED</em>}
+                        <span className="rl-kind">EJECT</span>
+                        <strong>{a?.name ?? id}</strong>
+                        <p className="clamped">{a?.desc}</p>
                       </button>
                     );
                   })}
                 </div>
-                {pendingSwap !== null && r.picked === null && (
-                  <div className="kp-swap-panel2">
-                    <h4>EJECT WHICH BOOST FOR {AUGMENT_BY_ID[pendingSwap]?.name}?</h4>
-                    <div className="kp-draft-grid2">
-                      {run.kit.augments.map((id) => {
-                        const a = AUGMENT_BY_ID[id];
-                        return (
-                          <button
-                            key={id}
-                            type="button"
-                            className="kp-draft-card2"
-                            onClick={() => {
-                              sfx("granted", { bus: "ui" });
-                              dispatch({ type: "pickAugment", id: pendingSwap, replace: id });
-                            }}
-                          >
-                            <span className="kp-draft-kind2 cfg">EJECT</span>
-                            <strong>{a?.name ?? id}</strong>
-                            <p>{a?.desc}</p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <button type="button" className="kp-btn2 kp-btn2-ghost" onClick={() => setPendingSwap(null)}>
-                      CANCEL THE SWAP
-                    </button>
-                  </div>
-                )}
-                {r.picked !== null && r.replaced !== null && (
-                  <p className="kp-rail-dim">EJECTED: {AUGMENT_BY_ID[r.replaced]?.name ?? r.replaced}</p>
-                )}
-              </>
+              </div>
             ) : (
-              <p className="kp-cache-dry">Augment cache is dry. Salvage credited instead.</p>
+              <div className="rl-draft">
+                {r.draft.map((id, i) => {
+                  const a = AUGMENT_BY_ID[id];
+                  if (!a) return null;
+                  const picked = r.picked === id;
+                  const dimmed = r.picked !== null && !picked;
+                  const needsSwap = a.kind === "boost" && baysFull;
+                  const open = expanded === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`rl-card ${picked ? "picked" : ""} ${dimmed ? "dimmed" : ""} ${reduced ? "" : "kp-slot-anim"}`.trim()}
+                      disabled={r.picked !== null}
+                      style={reduced ? undefined : { animationDelay: `${300 + i * 110}ms` }}
+                      onClick={() => {
+                        if (needsSwap) {
+                          sfx("press", { bus: "ui" });
+                          setPendingSwap((p) => (p === id ? null : id));
+                          return;
+                        }
+                        sfx("granted", { bus: "ui" });
+                        dispatch({ type: "pickAugment", id });
+                      }}
+                    >
+                      <span className="rl-kind">
+                        {a.kind === "config"
+                          ? "CONFIG"
+                          : needsSwap && !picked
+                            ? "BOOST. BAYS FULL, PICK TO SWAP"
+                            : "BOOST"}
+                      </span>
+                      <strong>{a.name}</strong>
+                      {/* clamped to THREE RENDERED LINES by CSS, never by a
+                          character budget: the cards are different widths at
+                          different viewports, and a budget low enough to be
+                          safe everywhere starts hiding effect clauses. */}
+                      <p className={open ? undefined : "clamped"}>
+                        {a.desc}
+                        {a.kind === "config" &&
+                          " Unlocks the mode. Your active kit does not change; switch to it in LOADOUT.CFG when you want it."}
+                      </p>
+                      {/* the MORE row is reserved on EVERY card and shown
+                          only where there is more, so a long card and a short
+                          one are the same height. A hidden remainder always
+                          carries a visible control. */}
+                      <span className="rl-morerow">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className={a.kind === "config" || a.desc.length > 96 ? "rl-more" : "rl-more hidden"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sfx("tick", { bus: "ui" });
+                            setExpanded((p) => (p === id ? null : id));
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter" && e.key !== " ") return;
+                            e.stopPropagation();
+                            setExpanded((p) => (p === id ? null : id));
+                          }}
+                        >
+                          {open ? "LESS" : "MORE"}
+                        </span>
+                      </span>
+                      {picked && <em className="rl-stamp">INSTALLED</em>}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
-
-          <div className="kp-ruler">
-            <i />
-            <span>DIVE TELEMETRY</span>
-            <i />
-          </div>
-          <div className="kp-quadstrip">
-            {(
-              [
-                ["ram", "RAM FLOW", `${run.ramPerTurn}/T`],
-                ["rot", "ROTATIONS", `OVER PAR ${r.overRotations}`],
-                ["trap", "TRAP FEED", String(r.trapsFired)],
-                ["noise", "LINK NOISE", r.chip === 0 ? "LOW" : r.chip <= 12 ? "MID" : "HIGH"],
-              ] as Array<[string, string, string]>
-            ).map(([kind, label, val], i) => (
-              <div key={kind} className="kp-quad">
-                <div className="kp-quad-tag">
-                  <span className="kp-rpt-label">{label}</span>
-                  <b>{val}</b>
-                </div>
-                <QuadSvg shape={shape} kind={kind} delay={260 + i * 120} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ---------- right rail ---------- */}
-        <div className="kp-rpt-col">
-          <div className="kp-paycard kp-frame-nodes">
-            <Nodes />
-            <span className="kp-rpt-label">PAYOUT</span>
-            <div className="kp-pay-big">
-              <RollUp target={r.pay} delay={300} suffix="cr" />
-            </div>
-            {payRows.length > 0 && <Receipt rows={payRows} startDelay={520} />}
-          </div>
-
-          {poster && (
-            <div className="kp-patchcard kp-frame-ticks">
-              <Ticks />
-              <span className="kp-patch-head">{poster.title}</span>
-              <div className={`kp-patch-stage ${poster.capped ? "void" : ""} ${reduced ? "" : "pop"}`.trim()}>
-                {poster.mask !== null ? <PatchGlyph mask={poster.mask} size={84} /> : <span className="kp-piece-hole" />}
-              </div>
-              {poster.noun && <div className="kp-patch-noun">{poster.noun}</div>}
-              <p className="kp-patch-line">{poster.line}</p>
-              <span className={poster.capped ? "kp-patch-status inv" : "kp-patch-status"}>{poster.status}</span>
-            </div>
-          )}
-
-          <div className="kp-rpt-pouch">
-            <span className="kp-rpt-label">
-              PATCH POUCH {run.patchPouch.length} OF {PATCH_POUCH_MAX}
-            </span>
-            <div className="kp-pouch-row2">
-              {run.patchPouch.map((m, i) => (
-                <span key={i} className={i === freshIndex ? "kp-pouch-slot fresh" : "kp-pouch-slot"}>
-                  <PatchGlyph mask={m} size={26} />
-                </span>
-              ))}
-              {Array.from({ length: PATCH_POUCH_MAX - run.patchPouch.length }).map((_, i) => (
-                <span key={`e${i}`} className="kp-pouch-slot empty" />
-              ))}
-              {lostMask !== null && (
-                <>
-                  <span className="kp-pouch-plus">+</span>
-                  <span className="kp-pouch-slot lost">
-                    <PatchGlyph mask={lostMask} size={26} />
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ---------- footer ---------- */}
-      <div className="kp-rpt-foot">
-        <div className="kp-foot-brand">
-          <span className="kp-foot-batt" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>KP/OS REPAIR BENCH v9.2</span>
-        </div>
-        <div className="kp-foot-chips">
-          <Chip label="DAY" value={String(Math.min(run.day, FINAL_DAY)).padStart(2, "0")} />
-          <Chip label="TICKET" value={`${run.jobsDone.filter(Boolean).length} OF ${run.jobs.length}`} />
-          <Chip label="CREDITS" value={`${run.credits} cr`} />
-        </div>
-        <button
-          type="button"
-          className="kp-btn2 kp-btn2-primary"
-          onClick={() => {
-            sfx("press", { bus: "ui" });
-            dispatch({ type: "resultNext" });
-          }}
-        >
-          {footLabel}
-        </button>
+        </section>
       </div>
       <Teach id="strain-chip" />
       <Teach id="augment-draft" signals={{ draftOffered: r.draft.length > 0 }} />

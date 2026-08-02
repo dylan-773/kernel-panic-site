@@ -37,7 +37,7 @@ import { createDuel } from "../../game/duel-setup";
 import { DuelConfig, DuelKit, DuelState, ROUND_CAP } from "../../game/duel-types";
 import { PLACE_COST } from "../../game/patch-cells";
 import { customerById } from "./screens";
-import { deviceArtFor } from "../os/roster-art";
+import { deviceMacroFor } from "../os/roster-art";
 import { DuelBoard } from "./duel-board";
 import { PatchGlyph } from "./patch-glyph";
 
@@ -340,6 +340,7 @@ export function DuelScreen(props: DuelScreenProps) {
   const parRoundsRef = useRef<number[]>([]);
 
   const customer = props.customerId ? customerById(props.customerId) : null;
+  const macro = customer ? deviceMacroFor(customer) : null;
 
   // Boot lines: the tap comes alive, staggered so each arrival lands as
   // its own beat (display cadence only; the board is live from t=0, and
@@ -1029,30 +1030,40 @@ export function DuelScreen(props: DuelScreenProps) {
 
         {/* ---- right rail: telemetry ---- */}
         <div className="dv-rail dv-rail-r">
-          <div className="dv-turnpair">
-            <div className={`dv-turncell ${state.turn === "player" && state.phase === "playing" ? "dv-turn-on" : ""}`.trim()}>
-              YOU
-            </div>
-            <div
-              className={`dv-turncell ${state.turn === "opp" && state.phase === "playing" ? "dv-turn-on dv-turn-moving" : ""}`.trim()}
+          {/* the TURN readout: same unboxed annotation furniture as ROUND.
+              The value rides the acting side's tone and blinks only while
+              the intrusion is actually moving (event-tied, opacity only). */}
+          <span className="dv-round dv-turnread">
+            <span>TURN</span>
+            <em
+              className={
+                state.turn === "opp" && state.phase === "playing"
+                  ? "dv-turnval-opp dv-turnval-live"
+                  : state.turn === "player" && state.phase === "playing"
+                    ? "dv-turnval-you"
+                    : undefined
+              }
             >
-              INTRUSION
-            </div>
-          </div>
+              {state.turn === "opp" ? "INTRUSION" : "YOU"}
+            </em>
+          </span>
 
           <div className="kp-datarow-list">
-            <div className={`kp-datarow kp-datarow-plain ${playerNear >= 99 ? "kp-datarow-warn" : ""}`.trim()}>
+            <div className={`kp-datarow kp-datarow-plain dv-warnrow ${playerNear >= 99 ? "kp-datarow-warn dv-warn-max" : ""}`.trim()}>
               <span>YOUR ROUTE</span>
               <em>{playerNear >= 99 ? "SEVERED" : "OPEN"}</em>
             </div>
-            <div className={`kp-datarow kp-datarow-plain ${oppNear <= 2 ? "kp-datarow-warn" : ""}`.trim()}>
+            <div className={`kp-datarow kp-datarow-plain dv-warnrow ${oppNear <= 2 ? "kp-datarow-warn" : ""} ${oppNear === 0 ? "dv-warn-max" : ""}`.trim()}>
               <span>ITS ROUTE</span>
               <em>{oppNear >= 99 ? "CUT" : oppNear === 0 ? "AT THE CORE" : oppNear <= 2 ? "CLOSING" : "OPEN"}</em>
             </div>
           </div>
 
           <div className="dv-oppbox">
-            <h3>INTRUSION</h3>
+            <h3>
+              INTRUSION
+              <em className="dv-opp-banked">{oppBanked > 0 ? `+${oppBanked} BANKED` : ""}</em>
+            </h3>
             <div className="kp-datarow-list">
               {/* Live RAM, not just the per-turn rate: a cascade banks RAM
                   into the machine's next turn, and with only the rate on
@@ -1063,13 +1074,7 @@ export function DuelScreen(props: DuelScreenProps) {
                   {state.turn === "opp" ? oppEcon.ram : oppEcon.ramPerTurn} / {oppEcon.ramPerTurn} PER TURN
                 </em>
               </div>
-              {oppBanked > 0 && (
-                <div className="kp-datarow kp-datarow-plain kp-datarow-warn">
-                  <span>BANKED</span>
-                  <em>+{oppBanked} NEXT TURN</em>
-                </div>
-              )}
-              <div className={`kp-datarow kp-datarow-plain ${armedCount > revealedCount ? "kp-datarow-warn" : ""}`.trim()}>
+              <div className={`kp-datarow kp-datarow-plain dv-hazrow ${armedCount > revealedCount ? "kp-datarow-warn" : ""}`.trim()}>
                 <span>ARMED NODES</span>
                 <em>{armedCount > 0 ? `${armedCount}${revealedCount < armedCount ? " (HIDDEN)" : ""}` : "0"}</em>
               </div>
@@ -1080,11 +1085,11 @@ export function DuelScreen(props: DuelScreenProps) {
             )}
           </div>
 
-          <div className="kp-datarow-list dv-meterbox">
+          <div className="kp-datarow-list">
             <TapTip text={tip("par")}>
               <div
                 key={parPopKey}
-                className={`kp-datarow kp-datarow-plain ${overPar > 0 ? "kp-datarow-warn" : ""} ${parPopKey > 0 ? "dv-par-pop" : ""}`.trim()}
+                className={`kp-datarow kp-datarow-plain dv-hazrow ${overPar > 0 ? "kp-datarow-warn" : ""} ${parPopKey > 0 ? "dv-par-pop" : ""}`.trim()}
               >
                 <span>PAR</span>
                 <em>
@@ -1107,10 +1112,17 @@ export function DuelScreen(props: DuelScreenProps) {
             <Teach id="par-budget" signals={{ overPar: overPar > 0 }} />
           </div>
 
-          {customer && (
+          {customer && macro && (
             <div className="dv-device">
-              <span className="kp-photo-cell-full">
-                <img src={deviceArtFor(customer)} alt="" width={880} height={880} />
+              <span className="dv-mon" data-feed={macro.feed}>
+                <img
+                  src={macro.src}
+                  alt=""
+                  width={macro.w}
+                  height={macro.h}
+                  style={{ top: macro.top, left: macro.left }}
+                />
+                <i className="tint" aria-hidden="true" />
               </span>
               <span className="dv-device-tag">ON THE BENCH // {customer.device.toUpperCase()}</span>
             </div>
@@ -1192,24 +1204,24 @@ export function DuelScreen(props: DuelScreenProps) {
                     {round}/{ROUND_CAP}
                   </em>
                 </div>
-                <div className={`kp-datarow kp-datarow-plain ${overPar > 0 ? "kp-datarow-warn" : ""}`.trim()}>
+                <div className={`kp-datarow kp-datarow-plain dv-hazrow ${overPar > 0 ? "kp-datarow-warn" : ""}`.trim()}>
                   <span>ROTATIONS</span>
                   <em>
                     {econ.rotations} / PAR {state.par}
                   </em>
                 </div>
-                <div className={`kp-datarow kp-datarow-plain ${econ.trapsFired > 0 ? "kp-datarow-warn" : ""}`.trim()}>
+                <div className={`kp-datarow kp-datarow-plain dv-hazrow ${econ.trapsFired > 0 ? "kp-datarow-warn" : ""}`.trim()}>
                   <span>TRAPS FIRED ON YOU</span>
                   <em>{econ.trapsFired}</em>
                 </div>
                 {state.phase === "won" && state.strainChip > 0 && (
-                  <div className="kp-datarow kp-datarow-plain kp-datarow-warn">
+                  <div className="kp-datarow kp-datarow-plain dv-hazrow kp-datarow-warn">
                     <span>STRAIN CHIP</span>
                     <em>-{state.strainChip}</em>
                   </div>
                 )}
                 {state.phase !== "won" && (
-                  <div className="kp-datarow kp-datarow-plain kp-datarow-warn">
+                  <div className="kp-datarow kp-datarow-plain dv-hazrow kp-datarow-warn">
                     <span>NEURAL STRAIN</span>
                     <em>ZEROED. THE RUN IS OVER.</em>
                   </div>

@@ -153,6 +153,20 @@ const P: Record<string, SfxrParams> = {
   segmentDamaged: preset({ wave: 2, baseFreq: 0.22, sustain: 0.02, decay: 0.14, lpfCutoff: 0.3, volume: 0.26 }),
   winFocus: preset({ wave: 0, baseFreq: 0.22, duty: 0.5, sustain: 0.015, decay: 0.05, punch: 0.15, volume: 0.22 }),
 
+  // v3 instrument-panel pass (ux-2026-07-31): three cues the panels ask for.
+  /** Each hero numeral's count-up settling on its final value. Fires several
+   * times per load, staggered, so it is deliberately quieter and lower than
+   * `tick`: a gentle ripple across the load, not three identical dings
+   * competing with each other or with the interaction sounds. */
+  instrumentLock: preset({ wave: 0, baseFreq: 0.5, duty: 0.15, sustain: 0.015, decay: 0.06, punch: 0.15, lpfCutoff: 0.55, volume: 0.22 }),
+  /** Layered under inboxGenie when the opened ticket's intrusion already has
+   * a head start: a low tense one-shot marking that this one is partway in. */
+  ibWarnReveal: preset({ wave: 1, baseFreq: 0.14, sustain: 0.03, decay: 0.22, freqSlide: -0.1, hpfCutoff: 0.15, punch: 0.35, volume: 0.42 }),
+  /** MORNING.LOG cuts between the shop's two cameras: a very quiet noise pop
+   * layered under `story` on the same click, textural rather than an event of
+   * its own, since it can fire several times per scene. */
+  camSwitch: preset({ wave: 3, baseFreq: 0.4, freqSlide: -0.1, sustain: 0.01, decay: 0.05, hpfCutoff: 0.5, punch: 0.15, volume: 0.16 }),
+
   // v2 sound pass (ux-2026-07-29-v2-sound): the staged INBOX choreography,
   // one cue per axis, then the card genie and the file-away collapse
   inboxGrow: preset({ wave: 0, baseFreq: 0.22, duty: 0.3, arpMod: 0.4, arpSpeed: 0.55, sustain: 0.05, decay: 0.13, punch: 0.2, hpfCutoff: 0.08, volume: 0.3 }),

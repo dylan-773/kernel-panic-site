@@ -3,7 +3,7 @@ import { sfx } from "../../../game/audio";
 import { PATCH_POUCH_MAX, armCount, shapeClassOf } from "../../../game/patch-cells";
 import { darkPullPrice, type RunAction } from "../../../game/run-reducer";
 import type { RunState } from "../../../game/save";
-import { Chip, Stripe } from "../kp-ui";
+import { PatchGlyph } from "../../game/patch-glyph";
 
 /**
  * DARKNET.LNK: the gray market as a real dark-web CLI (ported from the
@@ -19,6 +19,14 @@ import { Chip, Stripe } from "../kp-ui";
  * The log is imperative DOM inside one ref'd region (append-only ring
  * buffer, BUS.LOG plumbing: bottom-anchored, clipped, no scrollbar ever);
  * React owns everything around it.
+ *
+ * v3 (ui-demos/darknet-v3, cycle ux-2026-07-31-darknet-v3): the surface
+ * gains ONE FOCAL CELL whose CONTENT moves through four states on a single
+ * footprint. PENDING while the channel dials, OFFER carrying tonight's
+ * price at hero scale (it used to live in a 13px chip), REVEAL lifting the
+ * piece that landed out of the log and into the place the eye is already
+ * trained on, and DEAD carrying the surface's one alarm. The stepped-notch
+ * chrome is DARKNET's identity and is deliberately unmapped to any role.
  */
 
 type Dispatch = (a: RunAction) => void;
@@ -179,9 +187,9 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
     return node;
   };
   const line = (cls?: string, text?: string): HTMLElement =>
-    push(el("p", `kp-dnet-line ${cls ?? ""}`.trim(), text));
+    push(el("p", `t-line ${cls ?? ""}`.trim(), text));
   const gap = (): void => {
-    push(el("i", "kp-dnet-gap"));
+    push(el("i", "t-gap"));
   };
 
   const typeLine = (cls: string, text: string, cps = 13): void => {
@@ -207,7 +215,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
 
   const dotsLine = (label: string, verdict: string, nDots = 7, slow = 110): void => {
     enq((done) => {
-      const n = line("kp-dnet-sys", `${label} `);
+      const n = line("t-sys", `${label} `);
       if (reduced) {
         n.textContent = `${label} ......... ${verdict}`;
         done();
@@ -239,7 +247,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
 
   const pouchStrip = (pouch: number[]): void => {
     instant(() => {
-      const row = el("div", "kp-dnet-pouchrow kp-pouch-row2");
+      const row = el("div", "o-pouch kp-pouch-row2");
       for (let i = 0; i < PATCH_POUCH_MAX; i++) {
         if (i < pouch.length) {
           const slot = el("span", "kp-pouch-slot");
@@ -249,28 +257,28 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
           row.appendChild(el("span", "kp-pouch-slot empty"));
         }
       }
-      row.appendChild(el("i", "kp-dnet-pouchtag", `POUCH ${pouch.length}/${PATCH_POUCH_MAX}`));
+      row.appendChild(el("i", "o-pouchtag", `POUCH ${pouch.length}/${PATCH_POUCH_MAX}`));
       push(row);
     });
   };
 
   const banner = (): void => {
     instant(() => {
-      const ban = el("div", reduced ? "kp-dnet-banner" : "kp-dnet-banner kp-dnet-banner-glitch");
-      const mark = el("span", "kp-dnet-mark");
+      const ban = el("div", reduced ? "banner" : "banner banner-glitch");
+      const mark = el("span", "banner-mark");
       mark.appendChild(chevMark(5));
       ban.appendChild(mark);
       const col = el("div");
-      col.appendChild(el("div", "kp-dnet-word", "DARKNET"));
-      col.appendChild(el("span", "kp-dnet-wordtag", "SALVAGE EXCHANGE // NO NAMES ON FILE"));
+      col.appendChild(el("div", "banner-word", "DARKNET"));
+      col.appendChild(el("span", "banner-tag", "SALVAGE EXCHANGE // NO NAMES ON FILE"));
       ban.appendChild(col);
       push(ban);
     });
   };
 
   const vendorGreeting = (): void => {
-    typeLine("kp-dnet-ven", "Salvage off a hundred dead machines, sorted by nobody.", 14);
-    typeLine("kp-dnet-dim", "type HELP for trades, or click one below.", 18);
+    typeLine("t-ven", "Salvage off a hundred dead machines, sorted by nobody.", 14);
+    typeLine("t-dim", "type HELP for trades, or click one below.", 18);
     instant(() => {
       hooks.setRoute("SCRAMBLED", false);
       setLive(true);
@@ -281,7 +289,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
     const r = hooks.runRef.current;
     const price = r ? darkPullPrice(r) : 0;
     instant(() => {
-      const box = el("div", "kp-dnet-help");
+      const box = el("div", "o-help");
       const rows: Array<[string, string]> = [
         ["LIST", "what is on the table tonight"],
         ["BUY", `one blind pull, ${price} cr`],
@@ -302,16 +310,16 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
   const cmdList = (): void => {
     const r = hooks.runRef.current;
     const price = r ? darkPullPrice(r) : 0;
-    typeLine("kp-dnet-ven", "Tonight, same as every night. One crate.", 15);
+    typeLine("t-ven", "Tonight, same as every night. One crate.", 15);
     instant(() => {
-      const card = el("div", "kp-dnet-card kp-frame-ticks");
+      const card = el("div", "o-card kp-frame-ticks");
       card.appendChild(el("i", "kp-tick2"));
-      card.appendChild(el("span", "kp-dnet-cardtag", "TONIGHT ONLY"));
-      const cell = el("div", "kp-dnet-cell");
-      cell.appendChild(el("span", "kp-dnet-q", "?"));
-      cell.appendChild(el("i", "kp-dnet-cellsweep"));
+      card.appendChild(el("span", "o-tag", "TONIGHT ONLY"));
+      const cell = el("div", "o-cell");
+      cell.appendChild(el("span", "o-q", "?"));
+      cell.appendChild(el("i", "o-sweep"));
       card.appendChild(cell);
-      const rows = el("div", "kp-dnet-cardrows");
+      const rows = el("div", "o-rows");
       rows.appendChild(datarow("ITEM", "PATCH PIECE"));
       rows.appendChild(datarow("SHAPE", "UNSORTED"));
       rows.appendChild(datarow("PRICE", `${price} CR`));
@@ -319,24 +327,24 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
       card.appendChild(rows);
       push(card);
     });
-    typeLine("kp-dnet-ven", "Pay first. Shape is the surprise. That is the whole business model here.", 13);
+    typeLine("t-ven", "Pay first. Shape is the surprise. That is the whole business model here.", 13);
   };
 
   const cmdBal = (): void => {
     const r = hooks.runRef.current;
     instant(() => {
-      const wrap = el("div", "kp-dnet-rowbox");
+      const wrap = el("div", "o-row1");
       wrap.appendChild(datarow("BAL", `${r ? r.credits : 0} CR`));
       push(wrap);
     });
-    typeLine("kp-dnet-ven", "It spends the same as clean money.", 15);
+    typeLine("t-ven", "It spends the same as clean money.", 15);
   };
 
   const cmdPouch = (): void => {
     const r = hooks.runRef.current;
     pouchStrip(r ? r.patchPouch : []);
     if (r && r.patchPouch.length >= PATCH_POUCH_MAX) {
-      typeLine("kp-dnet-ven", "That is a full bag. I admire the appetite.", 15);
+      typeLine("t-ven", "That is a full bag. I admire the appetite.", 15);
     }
   };
 
@@ -345,21 +353,21 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
     if (!r || r.screen !== "upgrade") return;
     const cost = darkPullPrice(r);
     if (r.patchPouch.length >= PATCH_POUCH_MAX) {
-      typeLine("kp-dnet-ven", "Dealer is not a storage locker. Pouch is full. Come back with room.", 13);
+      typeLine("t-ven", "Dealer is not a storage locker. Pouch is full. Come back with room.", 13);
       return;
     }
     if (r.credits < cost) {
       instant(() => {
-        push(el("p", "kp-dnet-warn", `// SHORT _ NEED ${cost} CR. YOU HOLD ${r.credits} CR.`));
+        push(el("p", "t-haz", `// SHORT _ NEED ${cost} CR. YOU HOLD ${r.credits} CR.`));
       });
-      typeLine("kp-dnet-ven", "No tab. A tab needs a name and there are no names here.", 13);
+      typeLine("t-ven", "No tab. A tab needs a name and there are no names here.", 13);
       return;
     }
 
     /* escrow fills, then the reducer takes the money and rolls the piece;
      * the darkBuys effect queues the reveal behind the handoff beats */
     enq((done) => {
-      const row = el("div", "kp-dnet-escrow");
+      const row = el("div", "o-escrow");
       row.appendChild(el("span", "", "ESCROW"));
       const bar = el("span", "kp-bar-hatch");
       const fill = el("i");
@@ -393,19 +401,19 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
       timers.push(iv);
     });
     dotsLine("handoff at the dead relay", "DONE", 5, 130);
-    typeLine("kp-dnet-sys", "package inbound on the wire.", 16);
+    typeLine("t-sys", "package inbound on the wire.", 16);
   };
 
   /** Queued by the component when run.darkBuys ticks up: the reveal lands
    * on the mask the reducer rolled. */
   const reveal = (mask: number, buys: number, credits: number, pouch: number[]): void => {
     enq((done) => {
-      const card = el("div", "kp-dnet-card kp-dnet-reveal kp-frame-ticks");
+      const card = el("div", "o-card o-reveal kp-frame-ticks");
       card.appendChild(el("i", "kp-tick2"));
-      card.appendChild(el("span", "kp-dnet-cardtag", "SIGNAL DROP"));
-      const cell = el("div", "kp-dnet-cell");
+      card.appendChild(el("span", "o-tag", "SIGNAL DROP"));
+      const cell = el("div", "o-cell");
       card.appendChild(cell);
-      const rows = el("div", "kp-dnet-cardrows");
+      const rows = el("div", "o-rows");
       card.appendChild(rows);
       push(card);
 
@@ -413,14 +421,14 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
         cell.textContent = "";
         cell.appendChild(glyphSvg(mask, 68));
         cell.appendChild(el("i", "kp-scan-sweep"));
-        if (!reduced) card.classList.add("kp-dnet-landed");
+        if (!reduced) card.classList.add("dn-landed");
         sfx("darknetReveal", { bus: "ui" });
         const cls = shapeClassOf(mask);
         rows.appendChild(datarow("SHAPE", SHAPE_NOUN[cls]));
         rows.appendChild(datarow("ARMS", String(armCount(mask))));
         rows.appendChild(datarow("GUARANTEE", "NONE"));
         if (cls === "X") {
-          push(el("p", "kp-dnet-warn", "// JACKPOT _ A CROSS. FOUR ARMS. THREE IN A HUNDRED."));
+          push(el("p", "t-haz", "// JACKPOT _ A CROSS. FOUR ARMS. THREE IN A HUNDRED."));
         }
         done();
       };
@@ -443,7 +451,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
       tick();
     });
     typeLine(
-      "kp-dnet-ven",
+      "t-ven",
       shapeClassOf(mask) === "X"
         ? "A cross. Do not ask which machine gave that up."
         : CLOSERS[(buys + credits) % CLOSERS.length],
@@ -455,11 +463,11 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
   const cmdExit = (): void => {
     dead = true;
     setLive(false);
-    typeLine("kp-dnet-sys", "keys burned. session never happened.", 18);
+    typeLine("t-sys", "keys burned. session never happened.", 18);
     wait(300);
     instant(() => {
       gap();
-      push(el("p", "kp-dnet-hero kp-dnet-hero-dim", "NO CARRIER"));
+      push(el("p", "dn-hero dn-deny", "NO CARRIER"));
       hooks.setRoute("CLOSED", true);
       sfx("darknetLinkDown", { bus: "ui" });
     });
@@ -471,7 +479,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
     const cmd = raw.trim().toLowerCase();
     if (!cmd || !live) return;
     instant(() => {
-      line("kp-dnet-you", `> ${raw}`);
+      line("t-you", `> ${raw}`);
     });
     const r = hooks.runRef.current;
     if (cmd === "help" || cmd === "?") cmdHelp();
@@ -482,38 +490,38 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
     else if (cmd === "exit" || cmd === "quit" || cmd === "logout") cmdExit();
     else if (cmd === "haggle")
       typeLine(
-        "kp-dnet-ven",
+        "t-ven",
         `The price climbs by the day. Tonight it is ${r ? darkPullPrice(r) : 0} cr. Tomorrow it is more.`,
         13,
       );
-    else if (EGGS[cmd]) typeLine("kp-dnet-ven", EGGS[cmd], 15);
-    else typeLine("kp-dnet-dim", "no such trade. HELP lists what there is.", 14);
+    else if (EGGS[cmd]) typeLine("t-ven", EGGS[cmd], 15);
+    else typeLine("t-dim", "no such trade. HELP lists what there is.", 14);
   };
 
   /** First dial of this mount. The market state decides how far it gets. */
   const connect = (open: boolean): void => {
     hooks.setRoute("DIALING", false);
-    typeLine("kp-dnet-dim", "KP/OS TERM LINK 9.2 // UNREGISTERED CHANNEL", 8);
-    typeLine("kp-dnet-you", "> dial darknet.lnk", 20);
-    typeLine("kp-dnet-sys", "resolving name... no such address on record.", 14);
-    typeLine("kp-dnet-sys", "trying anyway.", 22);
+    typeLine("t-dim", "KP/OS TERM LINK 9.2 // UNREGISTERED CHANNEL", 8);
+    typeLine("t-you", "> dial darknet.lnk", 20);
+    typeLine("t-sys", "resolving name... no such address on record.", 14);
+    typeLine("t-sys", "trying anyway.", 22);
     dotsLine("hop 1 // exchange node", "LINKED", 6, 100);
     if (!open) {
       dotsLine("hop 2 // dead relay", "dead air", 8, 150);
       wait(250);
       instant(() => {
         gap();
-        push(el("p", "kp-dnet-hero", "MARKET OFFLINE."));
+        push(el("p", "dn-hero", "MARKET OFFLINE."));
         sfx("darknetLinkDown", { bus: "ui" });
       });
-      typeLine("kp-dnet-sys", "Signal only holds after the shop shuts. Trades resume at day close.", 14);
+      typeLine("t-sys", "Signal only holds after the shop shuts. Trades resume at day close.", 14);
       instant(() => hooks.setRoute("DEAD", true));
       return;
     }
     dotsLine("hop 2 // dead relay", "LINKED", 5, 110);
     dotsLine("hop 3 // [no record]", "LINKED", 4, 120);
-    typeLine("kp-dnet-sys", "crypt: keys traded. names were not.", 14);
-    typeLine("kp-dnet-sys", "carrier locked at 300 baud. it is enough.", 14);
+    typeLine("t-sys", "crypt: keys traded. names were not.", 14);
+    typeLine("t-sys", "carrier locked at 300 baud. it is enough.", 14);
     instant(() => sfx("darknetLinkUp", { bus: "ui" }));
     wait(200);
     banner();
@@ -525,10 +533,10 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
   const relink = (): void => {
     if (dead) return;
     instant(() => gap());
-    typeLine("kp-dnet-sys", "signal returns. trying again.", 16);
+    typeLine("t-sys", "signal returns. trying again.", 16);
     dotsLine("hop 2 // dead relay", "LINKED", 5, 110);
     dotsLine("hop 3 // [no record]", "LINKED", 4, 120);
-    typeLine("kp-dnet-sys", "carrier locked at 300 baud. it is enough.", 14);
+    typeLine("t-sys", "carrier locked at 300 baud. it is enough.", 14);
     instant(() => sfx("darknetLinkUp", { bus: "ui" }));
     wait(200);
     vendorGreeting();
@@ -542,12 +550,12 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
       gap();
       sfx("darknetLinkDown", { bus: "ui" });
     });
-    typeLine("kp-dnet-sys", "carrier lost.", 20);
+    typeLine("t-sys", "carrier lost.", 20);
     instant(() => {
-      push(el("p", "kp-dnet-hero", "MARKET OFFLINE."));
+      push(el("p", "dn-hero", "MARKET OFFLINE."));
       hooks.setRoute("DEAD", true);
     });
-    typeLine("kp-dnet-sys", "Signal only holds after the shop shuts. Trades resume at day close.", 14);
+    typeLine("t-sys", "Signal only holds after the shop shuts. Trades resume at day close.", 14);
   };
 
   return {
@@ -603,6 +611,12 @@ export function DarknetContent({
   const histAtRef = useRef(-1);
   const seenBuysRef = useRef<number>(run ? run.darkBuys : 0);
   const prevOpenRef = useRef<boolean>(open);
+  /* the focal cell's REVEAL state: the mask the reducer actually rolled,
+   * held until the next trade so the piece stays readable */
+  const [revealMask, setRevealMask] = useState<number | null>(null);
+  const [scramble, setScramble] = useState<number | null>(null);
+  const [jackpot, setJackpot] = useState(false);
+  const [lockFlash, setLockFlash] = useState(0);
 
   /* one engine per mount; every open of the window dials fresh */
   useEffect(() => {
@@ -645,8 +659,41 @@ export function DarknetContent({
     if (run.darkBuys > seenBuysRef.current && run.lastDarkBuy !== null) {
       seenBuysRef.current = run.darkBuys;
       eng.reveal(run.lastDarkBuy, run.darkBuys, run.credits, [...run.patchPouch]);
+      setRevealMask(run.lastDarkBuy);
+      setJackpot(shapeClassOf(run.lastDarkBuy) === "X");
     }
   }, [run, run?.darkBuys]);
+
+  /* the decelerating shape scramble, in the focal cell. Compositor-safe:
+   * only the glyph's mask changes, nothing animates a paint property. */
+  useEffect(() => {
+    if (revealMask === null) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setScramble(null);
+      return;
+    }
+    const cycle = [0x3, 0xa, 0x7, 0x9, 0x5, 0xe, 0x6, 0xd];
+    const beats = [70, 70, 70, 80, 90, 110, 130, 160, 200, 260];
+    let b = 0;
+    let t: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      if (b >= beats.length) {
+        setScramble(null);
+        return;
+      }
+      setScramble(cycle[b % cycle.length]);
+      t = setTimeout(tick, beats[b]);
+      b++;
+    };
+    tick();
+    return () => clearTimeout(t);
+  }, [revealMask]);
+
+  /* the one-shot lock-in flash when the channel resolves and the offer lands */
+  useEffect(() => {
+    if (route.dead || route.txt === "DIALING") return;
+    setLockFlash((n) => n + 1);
+  }, [route.dead, route.txt]);
 
   /* the prompt is real: keys land whenever this window holds focus */
   useEffect(() => {
@@ -691,6 +738,8 @@ export function DarknetContent({
     const eng = engRef.current;
     if (!eng || !eng.isLive()) return;
     sfx("tick", { bus: "ui" });
+    setRevealMask(null);
+    setJackpot(false);
     const lower = word.toLowerCase();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduced) {
@@ -714,45 +763,152 @@ export function DarknetContent({
 
   const credits = run ? run.credits : 0;
   const pouchN = run ? run.patchPouch.length : 0;
-  /* tier-0 per the tutorial gate (darknet-cli-rate-chip): tonight's price
-   * stays readable at a glance, no command required */
-  const rate = open && run ? `${darkPullPrice(run)} cr` : "----";
+
+  /* THE FOCAL CELL: one cell, four states, one footprint. Every state fills
+   * the same eyebrow + hero + three-row block, so switching never reflows
+   * the window. */
+  const focalState = route.dead
+    ? "dead"
+    : revealMask !== null
+      ? "reveal"
+      : route.txt === "DIALING"
+        ? "pending"
+        : "offer";
+
+  const focalRows: Array<[string, string]> =
+    focalState === "reveal" && revealMask !== null
+      ? [
+          ["SHAPE", SHAPE_NOUN[shapeClassOf(revealMask)]],
+          ["ARMS", String(armCount(revealMask))],
+          ["GUARANTEE", "NONE"],
+        ]
+      : focalState === "offer"
+        ? [
+            ["ITEM", "PATCH PIECE"],
+            ["SHAPE", "UNSORTED"],
+            ["STOCK", "A CRATE FULL"],
+          ]
+        : [
+            ["ITEM", "----"],
+            ["SHAPE", "----"],
+            ["STOCK", "----"],
+          ];
+
+  const eyebrow =
+    focalState === "offer" ? "RATE" : focalState === "reveal" ? "SIGNAL DROP" : "ROUTE";
 
   return (
-    <div className="kp-dnet" ref={hostRef}>
-      <div className="kp-dnet-strip">
-        <Chip label="ROUTE" value={route.txt} crimson={route.dead} />
-        <Chip label="PEER" value="NO ID" />
-        <Chip label="RATE" value={rate} />
-        <span key={`b${credits}`} className="kp-dnet-flash">
-          <Chip label="BAL" value={`${credits} cr`} />
-        </span>
-        <span key={`p${pouchN}`} className="kp-dnet-flash">
-          <Chip label="POUCH" value={`${pouchN}/${PATCH_POUCH_MAX}`} />
-        </span>
-      </div>
+    <div className="dn" ref={hostRef}>
+      <div className="dn-grid">
+        {/* Z1 FOCAL CELL */}
+        <section
+          className={focalState === "offer" ? "dn-focal dn-lock" : "dn-focal"}
+          data-state={focalState}
+          key={`f${lockFlash}${revealMask ?? ""}`}
+        >
+          <i className="dn-bracket" aria-hidden="true">
+            <i />
+          </i>
+          <span className={jackpot && focalState === "reveal" ? "dn-eyebrow dn-jack" : "dn-eyebrow"}>
+            {eyebrow}
+            {/* the jackpot flash: the same composited technique as the alarm,
+                --r-ok, and it STOPS after three iterations, so a celebration
+                can never be mistaken for the alarm, which loops forever */}
+            <i className="dn-jack-flash" aria-hidden="true" />
+          </span>
+          <div className="dn-focal-body">
+            <div className="dn-focal-hero">
+              {focalState === "pending" && <span className="dn-pend">--</span>}
+              {focalState === "offer" && (
+                <>
+                  {/* tonight's price: the largest glyphs on the page and the
+                      only numeral that takes --r-data */}
+                  <span className="dn-num">{run ? darkPullPrice(run) : "--"}</span>
+                  <span className="dn-unit">CR</span>
+                </>
+              )}
+              {focalState === "reveal" && revealMask !== null && (
+                <span className={scramble !== null ? "dn-drop dn-drop-scramble" : "dn-drop"}>
+                  <PatchGlyph mask={scramble ?? revealMask} size={96} />
+                </span>
+              )}
+              {focalState === "dead" && (
+                <span className="dn-dead">
+                  MARKET OFFLINE
+                  <i className="dn-alarm-flash" aria-hidden="true" />
+                </span>
+              )}
+            </div>
+            <div className="dn-focal-rows">
+              {focalState === "dead" ? (
+                <p className="dn-deadsub">
+                  Signal only holds after the shop shuts. Trades resume at day close.
+                </p>
+              ) : (
+                focalRows.map(([k, v]) => (
+                  <div key={k} className="kp-datarow">
+                    <span>{k}</span>
+                    <em>{v}</em>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
 
-      <div className="kp-dnet-clip">
-        <div className="kp-dnet-log" ref={logRef} role="log" aria-live="polite" />
-      </div>
+        {/* Z2 STATUS STRIP: shares the focal cell's row, because a row you do
+            not share is a row you pay for in full. RATE is gone from here:
+            its number lives in the focal cell now, never restated at two
+            scales. */}
+        <div className="dn-status">
+          <span className={route.dead ? "kp-chip-pct chip-alarm" : "kp-chip-pct"}>
+            <span>ROUTE</span>
+            <em>{route.txt}</em>
+          </span>
+          <span className="kp-chip-pct">
+            <span>PEER</span>
+            <em>NO ID</em>
+          </span>
+          <span key={`b${credits}`} className="kp-chip-pct chip-flash">
+            <span>BAL</span>
+            <em>{credits} cr</em>
+          </span>
+          <span key={`p${pouchN}`} className="kp-chip-pct chip-flash">
+            <span>POUCH</span>
+            <em>
+              {pouchN}/{PATCH_POUCH_MAX}
+            </em>
+          </span>
+        </div>
 
-      <div className={promptDead ? "kp-dnet-prompt kp-dnet-prompt-dead" : "kp-dnet-prompt"}>
-        <span className="kp-dnet-plabel">nobody@nowhere:~$</span>
-        <span className="kp-dnet-pinput">{buf}</span>
-        <span className="kp-dnet-caret" aria-hidden="true" />
-      </div>
+        {/* Z3 THE LOG */}
+        <div className="dn-log-clip">
+          <div className="dn-log" ref={logRef} role="log" aria-live="polite" />
+        </div>
 
-      <div className="kp-dnet-cmds">
-        {TRADES.map((t) => (
-          <button key={t} type="button" disabled={lock || promptDead} onClick={() => clickTrade(t)}>
-            {t}
-          </button>
-        ))}
-      </div>
+        {/* Z4 PROMPT */}
+        <div className={promptDead ? "dn-prompt dead" : "dn-prompt"}>
+          <span className="dn-plabel">nobody@nowhere:~$</span>
+          <span className="dn-pinput">{buf}</span>
+          <span className="dn-caret" aria-hidden="true" />
+        </div>
 
-      <div className="kp-dnet-foot">
-        <Stripe />
-        <p className="kp-rail-dim">No refunds. No complaints line. Close the window if you want a guarantee.</p>
+        {/* Z5 TRADES */}
+        <div className="dn-cmds">
+          {TRADES.map((t) => (
+            <button key={t} type="button" disabled={lock || promptDead} onClick={() => clickTrade(t)}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* Z6 FOOTLINE */}
+        <div className="dn-footwrap">
+          <i className="kp-frame-stripe dn-stripe" />
+          <p className="dn-foot">
+            No refunds. No complaints line. Close the window if you want a guarantee.
+          </p>
+        </div>
       </div>
     </div>
   );

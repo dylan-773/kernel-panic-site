@@ -9,15 +9,23 @@
 .kp-fw {
   position: absolute;
   min-width: var(--kp-win-w-floor, 420px);
-  max-height: var(--kp-win-h-ceiling, min(calc(100vh - 120px), 760px));
+  /* v3 (law 3): the DESK is the authority, not the browser. The old
+   * ceiling was min(100vh - 120px, 760px), a browser unit that clamped a
+   * 654px window to 349px inside a stage. Windows carry their own measured
+   * heights and never exceed the desk they are tiled on. */
+  max-height: calc(100cqb - 12px);
   display: flex;
   flex-direction: column;
   background: var(--px-void);
   border: 3px solid var(--ch-dim);
-  /* shadow spec matched to the study windows (9px hard offset + glow) */
-  filter:
-    drop-shadow(9px 9px 0 rgba(0, 0, 0, 0.8))
-    drop-shadow(0 0 26px color-mix(in srgb, var(--ch) 25%, transparent));
+  /* shadow spec matched to the study windows (9px hard offset + glow).
+   * GHOSTING FIX (inbox-v3 round 3): this was `filter: drop-shadow`, which
+   * rasterizes the whole window subtree and re-blurs it on every size step,
+   * leaving ghost edges behind a scaling window. The frame is opaque, so
+   * box-shadow renders identically for free. */
+  box-shadow:
+    9px 9px 0 rgba(0, 0, 0, 0.8),
+    0 0 26px color-mix(in srgb, var(--ch) 25%, transparent);
   animation: kp-fw-in 180ms steps(4) both;
   outline: none;
 }
@@ -31,9 +39,10 @@
 .kp-fw-focused { border-color: var(--ch); }
 .kp-fw-dragging { user-select: none; }
 
-/* study-grade windows: full-height frames, capped only by the viewport
- * (the demo desktop's embed hosts had no utility ceiling either) */
-.kp-fw-tall { max-height: calc(100vh - 52px); }
+/* study-grade windows: full-height frames, capped only by the desk. v3
+ * builds every panel to the ~700px ceiling, so `tall` is now the same
+ * budget as everything else and exists only as a marker. */
+.kp-fw-tall { max-height: calc(100cqb - 12px); }
 
 /* FOCUS-PULSE 220ms steps(4) */
 .kp-fw-refocus { animation: kp-fw-focus-pulse 220ms steps(4); }

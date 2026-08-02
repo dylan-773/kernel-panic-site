@@ -50,3 +50,44 @@ export function DesktopIcon({ label, icon, onOpen, badge, hint, order = 0 }: Des
 export function IconGrid({ children }: { children: ReactNode }) {
   return <div className="kp-dicon-grid">{children}</div>;
 }
+
+/* ---------- the dock (v3, ux-2026-07-31-desktop-dive review round 3) ----------
+ * The Windows-style left icon column is gone. The eight app icons live in a
+ * dock centered on the bottom edge, which is both the launcher AND the
+ * running-window indicator: a running app carries an --r-line underline
+ * plate, and clicking it surfaces its window rather than re-opening it.
+ */
+
+export interface DockIconProps extends DesktopIconProps {
+  /** True when this app has a window open: paints the running plate. */
+  running?: boolean;
+}
+
+export function DockIcon({ label, icon, onOpen, badge, hint, order = 0, running = false }: DockIconProps) {
+  const showBadge = typeof badge === "number" && badge > 0;
+  return (
+    <button
+      type="button"
+      className={running ? "ds-dock-icon ds-running kp-slot-anim" : "ds-dock-icon kp-slot-anim"}
+      style={{ animationDelay: `${order * 50}ms` }}
+      onClick={onOpen}
+      title={hint}
+      aria-pressed={running}
+    >
+      <span className="ds-dock-glyph">
+        <PxIcon rows={PX_ICONS[icon]} cell={3} />
+        {showBadge && <span className="kp-dicon-badge">{badge > 99 ? "99+" : badge}</span>}
+      </span>
+      <span className="ds-dock-label">{label}</span>
+      <i className="ds-dock-run" aria-hidden="true" />
+    </button>
+  );
+}
+
+export function Dock({ children }: { children: ReactNode }) {
+  return (
+    <nav className="ds-dock" aria-label="Application dock">
+      {children}
+    </nav>
+  );
+}

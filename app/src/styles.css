@@ -3714,15 +3714,18 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 
 /* ============================================================
-   DIVE.EXE: the duel as a circuit-schematic instrument panel
-   (ported from ui-demos/kpos-shell/dive.html)
-   ============================================================ */
+   DIVE.EXE: the duel on the v3 role system
+   Integrated 2026-08-01 from ui-demos/dive-v3 (ux-2026-07-31-desktop-dive).
 
-/* DIVE.EXE poster study, standalone (the shell is untouched by it).
- * The flood-claim duel as a full-screen instrument panel: the board drawn
- * as a white-line circuit schematic, framed by the ship-diagnostic OS
- * anatomy (title strip, breadcrumb, key rail, telemetry rail, console).
- * The whole duel runs on the shipped engine, imported by dive.ts. */
+   The flood-claim duel as a full-screen instrument panel, playable end to
+   end on the shipped engine. It does NOT follow the window rules: it is
+   full-screen and real-time, and the machine's two-beat telegraph has to
+   stay readable above everything else.
+
+   THE ALARM is route-threat and nothing else. Every other ex-warn
+   condition (the strain low band, hidden traps, banked RAM, over-par) is
+   dv-hazrow: hazard colour plus inverse video, never motion.
+   ============================================================ */
 
 :root {
   /* the intrusion's tone: the scheme's support ink, never a second hue */
@@ -3731,16 +3734,35 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   --ch2-glow: color-mix(in srgb, var(--ch2) 50%, transparent);
 }
 
-
 /* ================= shell frame ================= */
 
 .dv-shell {
-  position: fixed;
+  position: absolute;
   inset: 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   background: var(--px-void);
+  /* size containment (the shell always spans the fixed stage), so the
+   * short-stage tier below can query HEIGHT via max-height */
+  container-type: size;
+  container-name: dv;
+  /* the type ramp (law 3): every size resolves against the stage's own
+   * container; the rail numerals are deliberately capped under the key
+   * names so none reads as a page headline (glance order, 4th) */
+  --dv-fs-body: clamp(19px, 0.5cqi + 17px, 21px);
+  --dv-fs-label: clamp(9px, 0.3cqi + 8.5px, 11px);
+  /* the hierarchy chain, verified numerically per the spec's revision:
+   * key (13-16) <= val (16-20) < banner (22-32) */
+  --dv-fs-val: clamp(16px, 0.8cqi + 13px, 20px);
+  --dv-fs-key: clamp(13px, 0.6cqi + 11px, 16px);
+  --dv-fs-banner: clamp(22px, 1.6cqi + 16px, 32px);
 }
+/* The per-resolution tier blocks (narrow / short stage) live at the END of
+ * the right-rail section, after every base rule they override: round 3
+ * found them up here, ABOVE the base .dv-mon/.dv-oppbox/.dv-device rules,
+ * where equal specificity handed the cascade to the later base rules and
+ * the whole tier was dead CSS (the device macro clipped at 768/800 desks
+ * exactly as if round 2 had never happened). */
 
 /* fine checker over the whole panel interior */
 .dv-shell::before {
@@ -3806,7 +3828,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .dv-crumb-path {
   font-family: var(--kp-display);
-  font-size: 10px;
+  font-size: var(--dv-fs-label);
   letter-spacing: 0.14em;
   color: var(--ch-dim);
   white-space: nowrap;
@@ -3838,6 +3860,13 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-roundsegs i.dv-seg-late.dv-seg-on { background: var(--ch-hot); }
 @keyframes dv-blink { 50% { opacity: 0.25; } }
 
+/* the TURN readout (round 3): replaces the right rail's YOU / INTRUSION
+ * chips, which read as false buttons. Same unboxed annotation furniture as
+ * ROUND; the value rides the acting side's tone and blinks only while the
+ * intrusion is actually moving (event-tied, opacity only). */
+.dv-turnread > em.dv-turnval-opp { color: var(--dv-o-hot); }
+.dv-turnread > em.dv-turnval-live { animation: dv-blink 0.8s steps(2) infinite; }
+
 .dv-day {
   font-family: var(--kp-display);
   font-size: 10px;
@@ -3861,7 +3890,10 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 .dv-stage {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr) 264px;
+  /* fluid rails (law 3): clamp on cqi against the stage container, never
+   * fixed px, never vw. The board keeps the centre and stays the largest
+   * object on the surface at every supported viewport. */
+  grid-template-columns: clamp(200px, 15cqi, 264px) minmax(0, 1fr) clamp(220px, 17cqi, 300px);
   gap: 16px;
   padding: 14px 16px;
   min-height: 0;
@@ -3878,7 +3910,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-ram-top { display: flex; align-items: baseline; gap: 10px; }
 .dv-ram-label {
   font-family: var(--kp-display);
-  font-size: 10px;
+  font-size: var(--dv-fs-label);
   letter-spacing: 0.16em;
   color: var(--ch);
 }
@@ -3886,7 +3918,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-ram-num {
   font-style: normal;
   font-family: var(--kp-display);
-  font-size: 30px;
+  font-size: var(--dv-fs-val);
   line-height: 1;
   color: var(--ch-hot);
   text-shadow: 0 0 14px var(--px-glow);
@@ -3941,7 +3973,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-key-name { display: flex; align-items: center; gap: 8px; }
 .dv-key-name b {
   font-family: var(--kp-display);
-  font-size: 13px;
+  font-size: var(--dv-fs-key);
   letter-spacing: 0.12em;
   font-weight: 400;
 }
@@ -3961,7 +3993,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-key-arming .dv-key-chip.dv-chip-arm { box-shadow: none; background: var(--px-void); color: var(--ch); }
 .dv-key-meta {
   font-family: var(--kp-term);
-  font-size: 17px;
+  font-size: var(--dv-fs-body);
   line-height: 1.1;
   color: color-mix(in srgb, currentColor 75%, transparent);
 }
@@ -4023,7 +4055,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-log-head {
   flex: none;
   font-family: var(--kp-display);
-  font-size: 9px;
+  font-size: var(--dv-fs-label);
   letter-spacing: 0.16em;
   color: var(--ch-dim);
 }
@@ -4039,7 +4071,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   gap: 1px;
   overflow: hidden;
   font-family: var(--kp-term);
-  font-size: 16px;
+  font-size: var(--dv-fs-body);
   line-height: 1.15;
   color: var(--ch-dim);
 }
@@ -4051,7 +4083,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .dv-log-lines b { font-weight: 400; margin-right: 7px; }
 .dv-log-you b { color: var(--ch-hot); }
-.dv-log-int b { color: var(--ch2-hot); }
+.dv-log-int b { color: var(--dv-o-hot); }
 .dv-log-sys b { color: var(--ch-dim); }
 .dv-log-lines > span:last-child { color: var(--ch); }
 .dv-log-lines > span:last-child:not(.dv-log-div)::after {
@@ -4068,12 +4100,12 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   position: relative;
   min-height: 0;
   min-width: 0;
-  border: 2px solid var(--ch-faint);
+  border: 2px solid var(--dv-sch-faint);
   /* the whole surface is textured, not just the SVG sheet: a full-bleed
    * pixel dot grid over the center glow */
   background-image:
-    radial-gradient(color-mix(in srgb, var(--ch) 26%, transparent) 1px, transparent 1.5px),
-    radial-gradient(90% 80% at 50% 45%, color-mix(in srgb, var(--ch) 5%, transparent), transparent 70%);
+    radial-gradient(color-mix(in srgb, var(--dv-sch) 26%, transparent) 1px, transparent 1.5px),
+    radial-gradient(90% 80% at 50% 45%, color-mix(in srgb, var(--dv-sch) 6%, transparent), transparent 70%);
   background-size: 16px 16px, 100% 100%;
   background-color: var(--px-void);
   display: flex;
@@ -4092,14 +4124,14 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   inset: 0;
   pointer-events: none;
   background-image:
-    repeating-conic-gradient(color-mix(in srgb, var(--ch) 13%, transparent) 0% 25%, transparent 0% 50%),
-    repeating-conic-gradient(color-mix(in srgb, var(--ch2) 11%, transparent) 0% 25%, transparent 0% 50%);
+    repeating-conic-gradient(color-mix(in srgb, var(--dv-sch) 13%, transparent) 0% 25%, transparent 0% 50%),
+    repeating-conic-gradient(color-mix(in srgb, var(--dv-o) 11%, transparent) 0% 25%, transparent 0% 50%);
   background-size: 4px 4px, 10px 10px;
   -webkit-mask-image: radial-gradient(115% 100% at 50% 46%, transparent 36%, black 95%);
   mask-image: radial-gradient(115% 100% at 50% 46%, transparent 36%, black 95%);
 }
 
-.dv-gridline { fill: color-mix(in srgb, var(--ch) 7%, transparent); }
+.dv-gridline { fill: color-mix(in srgb, var(--dv-sch) 9%, transparent); }
 
 /* margin furniture: all under the SVG sheet (z 0 vs the board's z 1) */
 .dv-wm {
@@ -4108,7 +4140,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   bottom: 10px;
   z-index: 0;
   font-family: var(--kp-display);
-  font-size: clamp(38px, 5.4vw, 76px);
+  font-size: clamp(38px, 5.4cqi, 76px);
   line-height: 1;
   letter-spacing: 0.04em;
   color: transparent;
@@ -4126,7 +4158,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   font-size: 10px;
   letter-spacing: 0.12em;
   line-height: 1.75;
-  color: color-mix(in srgb, var(--ch) 34%, transparent);
+  color: color-mix(in srgb, var(--dv-sch) 44%, transparent);
   white-space: pre;
   pointer-events: none;
 }
@@ -4139,8 +4171,8 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   z-index: 0;
   pointer-events: none;
   background:
-    repeating-linear-gradient(90deg, color-mix(in srgb, var(--ch) 30%, transparent) 0 1px, transparent 1px 13px),
-    linear-gradient(0deg, transparent 0 3px, color-mix(in srgb, var(--ch) 18%, transparent) 3px 4px, transparent 4px);
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--dv-sch) 30%, transparent) 0 1px, transparent 1px 13px),
+    linear-gradient(0deg, transparent 0 3px, color-mix(in srgb, var(--dv-sch) 18%, transparent) 3px 4px, transparent 4px);
 }
 .dv-ruler-r {
   position: absolute;
@@ -4151,8 +4183,8 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   z-index: 0;
   pointer-events: none;
   background:
-    repeating-linear-gradient(0deg, color-mix(in srgb, var(--ch) 30%, transparent) 0 1px, transparent 1px 13px),
-    linear-gradient(90deg, transparent 0 3px, color-mix(in srgb, var(--ch) 18%, transparent) 3px 4px, transparent 4px);
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--dv-sch) 30%, transparent) 0 1px, transparent 1px 13px),
+    linear-gradient(90deg, transparent 0 3px, color-mix(in srgb, var(--dv-sch) 18%, transparent) 3px 4px, transparent 4px);
 }
 
 .dv-cell-in { animation: dv-cell-in 260ms steps(4) both; }
@@ -4161,20 +4193,20 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   to { opacity: 1; }
 }
 
-.dv-griddot { fill: color-mix(in srgb, var(--ch) 14%, transparent); }
-.dv-hatchline { fill: color-mix(in srgb, var(--ch) 30%, transparent); }
-.dv-checkdot { fill: color-mix(in srgb, var(--ch) 16%, transparent); }
+.dv-griddot { fill: color-mix(in srgb, var(--dv-sch) 16%, transparent); }
+.dv-hatchline { fill: color-mix(in srgb, var(--dv-sch) 30%, transparent); }
+.dv-checkdot { fill: color-mix(in srgb, var(--dv-sch) 18%, transparent); }
 
 .dv-cell.dv-legal { cursor: pointer; }
 
 /* arms: the circuit traces */
 .dv-arm {
-  stroke: color-mix(in srgb, var(--ch) 34%, var(--px-void));
+  stroke: color-mix(in srgb, var(--dv-sch) 44%, var(--px-void));
   shape-rendering: crispEdges;
   stroke-linecap: square;
 }
 .dv-own-p .dv-arm { stroke: var(--ch); }
-.dv-own-o .dv-arm { stroke: var(--ch2); }
+.dv-own-o .dv-arm { stroke: var(--dv-o); }
 .dv-arm-core { stroke: var(--ch-dim); }
 
 /* powered overlay: hot core line + marching current. The dash march
@@ -4190,8 +4222,8 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-lit-p .dv-armlit { display: inline; filter: drop-shadow(0 0 5px var(--px-glow)); }
 .dv-lit-o .dv-armlit {
   display: inline;
-  stroke: var(--ch2-hot);
-  filter: drop-shadow(0 0 5px var(--ch2-glow));
+  stroke: var(--dv-o-hot);
+  filter: drop-shadow(0 0 5px var(--dv-o-glow));
 }
 .dv-armlit.dv-flow-out { stroke-dasharray: 4 4; animation: dv-current 600ms linear infinite; }
 .dv-armlit.dv-flow-in { stroke-dasharray: 4 4; animation: dv-current-rev 600ms linear infinite; }
@@ -4209,20 +4241,20 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 /* junction hubs: pixel squares */
 .dv-node {
   fill: var(--px-void);
-  stroke: color-mix(in srgb, var(--ch) 40%, var(--px-void));
+  stroke: color-mix(in srgb, var(--dv-sch) 50%, var(--px-void));
   stroke-width: 2;
   shape-rendering: crispEdges;
 }
 .dv-own-p .dv-node { fill: var(--ch); stroke: var(--ch); }
 .dv-own-p.dv-lit-p .dv-node { fill: var(--ch-hot); stroke: var(--ch-hot); }
-.dv-own-o .dv-node { fill: var(--ch2); stroke: var(--ch2); }
-.dv-own-o.dv-lit-o .dv-node { fill: var(--ch2-hot); stroke: var(--ch2-hot); }
+.dv-own-o .dv-node { fill: var(--dv-o); stroke: var(--dv-o); }
+.dv-own-o.dv-lit-o .dv-node { fill: var(--dv-o-hot); stroke: var(--dv-o-hot); }
 
 .dv-weld { display: none; fill: var(--px-void); shape-rendering: crispEdges; }
 .dv-fused .dv-weld { display: inline; }
 /* a weld on unclaimed ground still needs to read: hot dot on the hollow hub */
 .dv-own-n.dv-fused .dv-weld { fill: var(--ch-hot); }
-.dv-own-n.dv-fused .dv-node { stroke: var(--ch-dim); }
+.dv-own-n.dv-fused .dv-node { stroke: var(--dv-sch-dim); }
 
 /* the machine's territory carries signal rot: monochrome glitch jitter */
 .dv-own-o .dv-jit { animation: dv-jitter 1.4s steps(1) infinite; }
@@ -4257,7 +4289,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 /* opponent telegraph: blinking brackets in its tone */
 .dv-aimed .dv-legalring {
-  stroke: var(--ch2-hot);
+  stroke: var(--dv-o-hot);
   stroke-width: 2.5;
   stroke-dasharray: 7 5;
   animation: dv-blink 0.5s steps(2) infinite;
@@ -4285,12 +4317,12 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-trap { display: none; }
 .dv-trapped .dv-trap { display: inline; }
 .dv-trap-p .dv-trap { fill: var(--px-void); stroke: var(--ch-hot); stroke-width: 2; }
-.dv-trap-o .dv-trap { fill: var(--px-void); stroke: var(--ch2-hot); stroke-width: 2; animation: dv-blink 1.3s steps(2) infinite; }
-.dv-trap-siphon .dv-trap { fill: color-mix(in srgb, var(--ch2) 30%, var(--px-void)); }
+.dv-trap-o .dv-trap { fill: var(--px-void); stroke: var(--dv-o-hot); stroke-width: 2; animation: dv-blink 1.3s steps(2) infinite; }
+.dv-trap-siphon .dv-trap { fill: color-mix(in srgb, var(--dv-o) 30%, var(--px-void)); }
 
 /* slag: dead sectors as checker-fill debris */
-.dv-slagbody { fill: url(#dvCheck); stroke: color-mix(in srgb, var(--ch) 26%, var(--px-void)); stroke-width: 1.5; }
-.dv-crack { fill: none; stroke: color-mix(in srgb, var(--ch) 30%, var(--px-void)); stroke-width: 1.5; }
+.dv-slagbody { fill: url(#dvCheck); stroke: color-mix(in srgb, var(--dv-sch) 30%, var(--px-void)); stroke-width: 1.5; }
+.dv-crack { fill: none; stroke: color-mix(in srgb, var(--dv-sch) 34%, var(--px-void)); stroke-width: 1.5; }
 .dv-ghostarm { stroke: var(--ch-hot); stroke-dasharray: 3 3; opacity: 0.6; shape-rendering: crispEdges; }
 .dv-ghostnode { fill: var(--ch-hot); opacity: 0.6; shape-rendering: crispEdges; }
 .dv-legal:hover .dv-ghostarm, .dv-legal:hover .dv-ghostnode { opacity: 1; }
@@ -4298,21 +4330,21 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 /* ports */
 .dv-portbody { fill: var(--px-void); stroke-width: 3; shape-rendering: crispEdges; }
 .dv-k-entryP .dv-portbody { stroke: var(--ch); }
-.dv-k-entryO .dv-portbody { stroke: var(--ch2); }
+.dv-k-entryO .dv-portbody { stroke: var(--dv-o); }
 .dv-porteye { shape-rendering: crispEdges; }
 .dv-k-entryP .dv-porteye { fill: var(--ch-hot); }
-.dv-k-entryO .dv-porteye { fill: var(--ch2-hot); }
+.dv-k-entryO .dv-porteye { fill: var(--dv-o-hot); }
 .dv-k-entryP .dv-arm { stroke: var(--ch); }
-.dv-k-entryO .dv-arm { stroke: var(--ch2); }
+.dv-k-entryO .dv-arm { stroke: var(--dv-o); }
 .dv-k-entryO .dv-arms, .dv-k-entryO .dv-portbody { animation: dv-jitter 1.7s steps(1) infinite; }
 
 .dv-tag {
   font-family: var(--kp-display);
   font-size: 8px;
   letter-spacing: 0.14em;
-  fill: var(--ch-dim);
+  fill: var(--dv-sch-dim);
 }
-.dv-tag-o { fill: var(--ch2-dimm); }
+.dv-tag-o { fill: var(--dv-o-dim); }
 
 /* the core: hatched component block, brackets flare when a flood arrives */
 .dv-corebody { fill: url(#dvHatch); stroke: var(--ch); stroke-width: 2.5; shape-rendering: crispEdges; }
@@ -4363,13 +4395,13 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   max-width: 80%;
   text-align: center;
   font-family: var(--kp-term);
-  font-size: 30px;
+  font-size: calc(var(--dv-fs-banner) * 1.25);
   line-height: 1.1;
   padding: 12px 22px;
-  color: var(--ch2-hot);
+  color: var(--dv-o-hot);
   background: var(--px-void);
-  box-shadow: inset 0 0 0 2px var(--ch2), 8px 8px 0 rgba(0, 0, 0, 0.75);
-  text-shadow: 2px 0 0 color-mix(in srgb, var(--ch2) 60%, transparent);
+  box-shadow: inset 0 0 0 2px var(--dv-o), 8px 8px 0 rgba(0, 0, 0, 0.75);
+  text-shadow: 2px 0 0 color-mix(in srgb, var(--dv-o) 60%, transparent);
   animation: dv-virus-in 2400ms steps(2) both;
   pointer-events: none;
 }
@@ -4386,7 +4418,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   inset: 0;
   z-index: 5;
   pointer-events: none;
-  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--ch2) 22%, transparent) 50%, transparent 100%);
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--dv-o) 22%, transparent) 50%, transparent 100%);
   background-size: 100% 120px;
   background-repeat: no-repeat;
   animation: dv-sweep-run 900ms steps(14) both;
@@ -4409,8 +4441,9 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   pointer-events: none;
 }
 .dv-threat {
+  position: relative;
   font-family: var(--kp-display);
-  font-size: 11px;
+  font-size: var(--dv-fs-banner);
   letter-spacing: 0.14em;
   padding: 7px 14px;
   background: var(--ch);
@@ -4422,20 +4455,10 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 /* ================= right rail ================= */
 
-.dv-turnpair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.dv-turncell {
-  font-family: var(--kp-display);
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-align: center;
-  padding: 10px 4px;
-  border: 3px solid var(--ch-faint);
-  color: var(--ch-dim);
-  white-space: nowrap;
-  overflow: hidden;
-}
-.dv-turncell.dv-turn-on { border-color: var(--ch); background: var(--ch); color: var(--px-void); }
-.dv-turncell.dv-turn-moving { animation: dv-blink 0.8s steps(2) infinite; }
+/* The YOU / INTRUSION turn chips that used to head this rail are gone
+ * (round 3): two side-by-side bordered cells read as false buttons. The
+ * status row's unboxed TURN readout absorbs the duty; side identity was
+ * already on the board's port tags and the INTRUSION box header. */
 
 .dv-oppbox { border: 3px solid var(--ch-dim); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 .dv-oppbox h3 {
@@ -4443,25 +4466,48 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   font-size: 11px;
   letter-spacing: 0.2em;
   color: var(--px-void);
-  background: var(--ch2);
-  display: block;
+  background: var(--dv-o);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 5px 9px;
   font-weight: 400;
   margin: -10px -12px 2px;
 }
+/* banked RAM as an inverse stamp on the INTRUSION header bar (law 8): the
+ * BANKED datarow it replaces made the rail grow mid-run, which is what
+ * shoved the device macro into the rail's clip edge on short desks. The
+ * bar is solid --dv-o with height nothing can change. */
+.dv-opp-banked {
+  font-style: normal;
+  font-weight: 400;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--dv-o-hot);
+  background: var(--px-void);
+  padding: 2px 5px;
+}
+.dv-opp-banked:empty { display: none; }
+
 .dv-tell {
   font-family: var(--kp-term);
-  font-size: 18px;
+  font-size: var(--dv-fs-body);
   line-height: 1.25;
   color: var(--ch-dim);
 }
 .dv-intent {
   font-family: var(--kp-term);
-  font-size: 18px;
+  font-size: var(--dv-fs-body);
   line-height: 1.25;
-  color: var(--ch2-hot);
+  color: var(--dv-o-hot);
+  /* equal-footprint slot (law 4): the INTENT line reserves its worst case
+   * (two lines of the longest engine intent) even while empty, so the
+   * telegraph arming never reflows the rail and the device macro below
+   * can never be pushed into the rail's clip edge */
+  min-height: 2lh;
 }
-.dv-intent:empty { display: none; }
 
 .dv-par-pop { animation: dv-par-pop 320ms steps(4); }
 @keyframes dv-par-pop { 40% { transform: scale(1.06); } }
@@ -4482,19 +4528,81 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .kp-datarow em b { font-weight: 600; }
 
-.dv-device { display: flex; flex-direction: column; gap: 7px; margin-top: auto; min-height: 0; }
-.dv-device .kp-photo-cell-full { width: 100%; }
-/* the macro composes edge to edge: show the full square, never a band crop */
-.dv-device .kp-photo-cell-full img { width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: cover; }
-@media (max-height: 860px) {
-  /* shorter panels trade to a 4:3 crop biased toward the screen label */
-  .dv-device .kp-photo-cell-full img { aspect-ratio: 4 / 3; object-position: 50% 30%; }
+.dv-device { display: flex; flex-direction: column; gap: 7px; margin-top: auto; min-height: 0; align-items: flex-start; }
+/* THE MACRO BEZEL (law 5). The shipped cell served the 880x880 dither at
+ * rail width, a browser downscale that mushes the dots to grey. This is
+ * loadout-eva's LIVE MONITOR mechanism instead: the image at its NATIVE
+ * size inside a fixed 200x150 window, CROPPED onto the device, never
+ * resampled. The FEED row swaps the treatment. */
+.dv-mon {
+  position: relative;
+  width: 200px;
+  height: 150px;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid var(--r-struct);
+  background: var(--px-void);
 }
+.dv-mon img {
+  position: absolute;
+  top: -330px;
+  left: -340px;
+  display: block;
+  image-rendering: pixelated;
+  filter: grayscale(1) contrast(1.15) brightness(1.05);
+}
+/* INK TINT: the 1-bit dither multiplied to --r-aux, the camera's own
+ * signal class; TRUE drops the tint; FULL COLOUR swaps in the colourised
+ * re-dither (art/cramdeck-color.png, pipeline/tools/colourise.py). */
+.dv-mon .tint {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.28) 0% 25%, transparent 0% 50%),
+    var(--r-aux);
+  background-size: 2px 2px, auto;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.dv-mon[data-feed="true"] .tint,
+.dv-mon[data-feed="color"] .tint { display: none; }
+.dv-mon[data-feed="color"] img { filter: none; }
 .dv-device-tag {
   font-family: var(--kp-display);
-  font-size: 8px;
+  font-size: var(--dv-fs-label);
   letter-spacing: 0.12em;
   color: var(--ch-dim);
+}
+
+/* ---- per-resolution tiers (round 2, re-seated round 3) ----
+ * These MUST sit after every base rule they override: same specificity,
+ * so only source order lets them win. Round 3 found them at the top of
+ * the sheet, dead, and the device macro clipping off the rail bottom at
+ * 768/800-high desks. Narrow OR short stages step the monitor to a
+ * smaller 1:1 window on the same subject (a smaller CROP, never a
+ * resample: img offsets keep the crop centred on the cramdeck board) and
+ * squeeze the rail's air: tighter gaps and the tell at the VT323 floor,
+ * no data cut. */
+@container dv (max-width: 1320px) {
+  .dv-mon { width: 150px; height: 100px; }
+  .dv-mon img { top: -355px; left: -365px; }
+}
+@container dv (max-height: 820px) {
+  .dv-mon { width: 150px; height: 100px; }
+  .dv-mon img { top: -355px; left: -365px; }
+  .dv-rail-r { gap: 7px; }
+  .dv-rail-r .kp-datarow { padding: 6px 12px; }
+  .dv-rail-r .kp-datarow-list { gap: 4px; }
+  .dv-oppbox { gap: 5px; padding: 8px 10px 10px; }
+  .dv-oppbox h3 { margin: -8px -10px 2px; }
+  .dv-oppbox .dv-tell, .dv-oppbox .dv-intent { font-size: 19px; line-height: 1.15; }
+  .dv-device { gap: 5px; }
+  .dv-device-tag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+}
+/* the binary breakpoint, declared for law compliance; no supported
+ * viewport reaches it (the 1280px laptop clears it by 580px) */
+@container dv (max-width: 699.98px) {
+  .dv-device { display: none; }
 }
 
 /* ================= console strip ================= */
@@ -4509,7 +4617,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .dv-console-label {
   font-family: var(--kp-display);
-  font-size: 10px;
+  font-size: var(--dv-fs-label);
   letter-spacing: 0.16em;
   color: var(--ch);
   white-space: nowrap;
@@ -4518,7 +4626,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   flex: 1;
   min-width: 0;
   font-family: var(--kp-term);
-  font-size: 21px;
+  font-size: var(--dv-fs-body);
   color: var(--ch);
   white-space: nowrap;
   overflow: hidden;
@@ -4559,7 +4667,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   color: var(--ch-hot);
   margin-bottom: 6px;
 }
-.dv-info p { font-family: var(--kp-term); font-size: 19px; line-height: 1.3; color: var(--ch); }
+.dv-info p { font-family: var(--kp-term); font-size: var(--dv-fs-body); line-height: 1.3; color: var(--ch); }
 
 /* ================= result overlay ================= */
 
@@ -4574,7 +4682,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .dv-overlay-on { display: flex; }
 .dv-result {
-  width: min(460px, 92vw);
+  width: min(460px, 92cqi);
   background: var(--px-void);
   border: 3px solid var(--ch);
   filter: drop-shadow(9px 9px 0 rgba(0, 0, 0, 0.8)) drop-shadow(0 0 26px var(--px-glow));
@@ -4586,25 +4694,109 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .dv-result h2 {
   font-family: var(--kp-display);
-  font-size: clamp(26px, 3.4vw, 40px);
+  font-size: clamp(26px, 3.4cqi, 40px);
   line-height: 1;
   letter-spacing: 0.04em;
   color: var(--ch);
   text-shadow: 0 0 22px var(--px-glow);
   font-weight: 400;
 }
-.dv-result-l h2 { color: var(--ch2-hot); text-shadow: 0 0 22px var(--ch2-glow); }
+.dv-result-l h2 { color: var(--dv-o-hot); text-shadow: 0 0 22px var(--dv-o-glow); }
 .dv-result .kp-frame-stripe { --stripe: var(--ch-dim); height: 6px; }
-.dv-result-l .kp-frame-stripe { --stripe: var(--ch2-dimm); }
+.dv-result-l .kp-frame-stripe { --stripe: var(--dv-o-dim); }
 .dv-result-reason { font-family: var(--kp-term); font-size: 21px; line-height: 1.3; color: var(--ch); }
 .dv-result-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+
+/* ================= v3 role re-pointing =================
+ * Gated on html[data-scheme] wherever v2 painted the element with the raw
+ * accent, so the DEFAULT collapse renders the poster study exactly. */
+
+/* labels NAME (r-note); values read hot (r-data) */
+html[data-scheme] .dv-shell .kp-datarow > span,
+html[data-scheme] .dv-ram-label,
+html[data-scheme] .dv-patch-head span,
+html[data-scheme] .dv-log-head,
+html[data-scheme] .dv-console-label,
+html[data-scheme] .dv-crumb-path,
+html[data-scheme] .dv-device-tag,
+html[data-scheme] .dv-round > span { color: var(--r-note); }
+html[data-scheme] .dv-shell .kp-datarow > em,
+html[data-scheme] .dv-round > em { color: var(--r-data); }
+
+/* NOMINAL is green: the ready chip, the your-move readout, legal ground */
+html[data-scheme] .dv-key-chip.dv-chip-rdy { color: var(--r-ok); }
+html[data-scheme] .dv-turnread > em.dv-turnval-you { color: var(--r-ok); }
+html[data-scheme] .dv-turnread > em.dv-turnval-opp { color: var(--dv-o-hot); }
+html[data-scheme] .dv-legal .dv-legalring { stroke: color-mix(in srgb, var(--r-ok) 55%, transparent); }
+html[data-scheme] .dv-legal:hover .dv-legalring {
+  stroke: var(--r-ok);
+  fill: color-mix(in srgb, var(--r-ok) 10%, transparent);
+}
+html[data-scheme] .dv-picked .dv-legalring { stroke: var(--r-ok); }
+html[data-scheme] .dv-end.kp-btn2-signal { background: var(--r-ok); box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.7), 0 0 18px var(--r-ok-glow); }
+html[data-scheme] .dv-result-w h2 { color: var(--r-ok); text-shadow: 0 0 22px var(--r-ok-glow); }
+
+/* THE ALARM (spec RISK OWNER): route-threat only. Colour + inverse video
+ * + a composited difference-blend pulse on a promoted layer; AT THE CORE
+ * (dv-threat-max / dv-warn-max) runs the same alarm's hottest cadence.
+ * Every other ex-warn condition (strain low band, hidden traps, banked
+ * RAM, over-par) is dv-hazrow: hazard colour + inverse, never motion. */
+.dv-warnrow { position: relative; }
+.dv-warnrow::after, .dv-threat::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+html[data-scheme] .dv-warnrow.kp-datarow-warn {
+  background: var(--r-warn);
+  border-color: var(--r-warn);
+}
+html[data-scheme] .dv-warnrow.kp-datarow-warn::after { animation: dv-warn-blink 1.2s steps(2) infinite; }
+html[data-scheme] .dv-warnrow.dv-warn-max.kp-datarow-warn::after { animation-duration: 0.6s; }
+.dv-warnrow:not(.kp-datarow-warn)::after { display: none; }
+html[data-scheme] .dv-threat {
+  background: var(--r-warn);
+  color: var(--px-void);
+}
+html[data-scheme] .dv-threat::after { animation: dv-warn-blink 1.2s steps(2) infinite; }
+html[data-scheme] .dv-threat-max { animation: none; }
+html[data-scheme] .dv-threat-max::after { animation-duration: 0.6s; }
+@keyframes dv-warn-blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+
+
+/* BEAT=TELEGRAPH ARMED holds the virus card past its burnout */
+.dv-virus.dv-virus-hold { animation: none; opacity: 1; }
+
+html[data-scheme] .dv-hazrow.kp-datarow-warn {
+  background: var(--r-hazard);
+  border-color: var(--r-hazard);
+}
+.dv-hazrow::after { display: none !important; }
+
+/* hazard-family furniture: the late-round segments and the bad pulses */
+html[data-scheme] .dv-roundsegs i.dv-seg-late { box-shadow: inset 0 2px 0 var(--r-hazard); }
+html[data-scheme] .dv-roundsegs i.dv-seg-late.dv-seg-on { background: var(--r-hazard); }
+html[data-scheme] .dv-pulse-bad {
+  background: var(--r-hazard);
+  color: var(--px-void);
+  box-shadow: inset 0 0 0 2px var(--r-hazard), 6px 6px 0 rgba(0, 0, 0, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dv-warnrow.kp-datarow-warn::after, .dv-threat::after { animation: none !important; opacity: 0; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .dv-cell-in, .dv-pop, .dv-armlit.dv-flow-out, .dv-armlit.dv-flow-in,
   .dv-log-lines > span:last-child:not(.dv-log-div)::after,
   .dv-traced .dv-trace, .dv-own-o .dv-jit,
   .dv-k-entryO .dv-arms, .dv-k-entryO .dv-portbody, .dv-seg-now,
-  .dv-key-arming, .dv-piece-armed, .dv-turncell, .dv-threat-max,
+  .dv-key-arming, .dv-piece-armed, .dv-turnread > em, .dv-threat-max,
   .dv-virus, .dv-sweep, .dv-pulse, .dv-aimed .dv-legalring,
   .dv-lit-p .dv-coreb, .dv-lit-o .dv-coreb, .dv-par-pop {
     animation: none;
@@ -4631,7 +4823,6 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   padding: 9px 16px;
 }
 
-.dv-meterbox { position: relative; }
 
 
 /* short desks: the expanded CUSTOMER.REC card compacts so the DIVE action
@@ -5041,4 +5232,3672 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   .kp-quad svg { height: 34px; }
   .kp-card-scope svg { height: 60px; }
   .kp-report .kp-hero-verdict { font-size: 24px; }
+}
+
+
+/* ==========================================================================
+   KP/OS v3 "INSTRUMENT PANEL" SHELL
+   Integrated 2026-08-01 from ui-demos/kpos-desktop-v3 (cycle
+   ux-2026-07-31-desktop-dive), per ui-demos/RULINGS.md.
+
+   Structure of this block mirrors the demo's own:
+     1. colour is ROLES (law 1), copied from loadout-eva, never retyped;
+     2. the desk container + chrome tokens (law 3: the desk IS the container);
+     3. the top status strip and the centered bottom DOCK (review round 3:
+        the Windows aesthetic is out);
+     4. role RE-POINTING, gated on html[data-scheme] wherever v2 painted an
+        element with the raw accent, so SCHEME=DEFAULT collapses onto the
+        shipped v2 desktop exactly (the reversibility law);
+     5. the six-layer CRT glass over the stage (law 6), replacing .kp-crt;
+     6. the idle-desk hero and the STRAIN alarm (the shell's one --r-warn);
+     7. the cuts (law 7): decorative motion goes still.
+   ========================================================================== */
+
+/* ---------- 1. colour is ROLES ---------- */
+
+:root {
+  --r-struct: var(--ch-dim);
+  --r-line: var(--ch);
+  --r-data: var(--ch-hot);
+  --r-ok: var(--ch);
+  --r-warn: var(--ch);
+  --r-aux: var(--ch);
+  --r-hazard: var(--ch);
+  --r-note: var(--ch-dim);
+  --r-ok-glow: var(--px-glow);
+  --r-warn-glow: var(--px-glow);
+}
+
+:root[data-scheme="nerv"] {
+  --px-void: #0a0603;
+  --ch: #ff9a1f;
+  --ch2: #c2431a;
+  --ch-hot: #ffe9c4;
+  --r-struct: #a86a22;
+  --r-line: #ff9a1f;
+  --r-data: #ffe9c4;
+  --r-ok: #8dff3a;
+  --r-warn: #ff2a17;
+  --r-aux: #23d3ff;
+  --r-hazard: #d1381a;
+  --r-note: #6ea8ff;
+  --r-ok-glow: color-mix(in srgb, #8dff3a 45%, transparent);
+  --r-warn-glow: color-mix(in srgb, #ff2a17 60%, transparent);
+}
+
+:root[data-scheme="tokyo"] {
+  --px-void: #16161e;
+  --ch: #7aa2f7;
+  --ch2: #414868;
+  --ch-hot: #c0caf5;
+  --r-struct: #414868;
+  --r-line: #7aa2f7;
+  --r-data: #c0caf5;
+  --r-ok: #9ece6a;
+  --r-warn: #f7768e;
+  --r-aux: #7dcfff;
+  --r-hazard: #ff9e64;
+  --r-note: #bb9af7;
+  --r-ok-glow: color-mix(in srgb, #9ece6a 45%, transparent);
+  --r-warn-glow: color-mix(in srgb, #f7768e 55%, transparent);
+}
+
+/* ---------- 2. the desk is the container (law 3) ---------- */
+
+.kp-os {
+  container-type: size;
+  container-name: desk;
+  /* chrome bands as tokens: under the tube the stage edges sit in the
+   * vignette falloff, so both grow and their content stays clear of it */
+  --ds-top-h: 40px;
+  --ds-edge-b: 6px;
+  --ds-dock-glyph: clamp(36px, 6cqb, 60px);
+  --ds-dock-h: calc(var(--ds-dock-glyph) + 46px);
+  --ds-dock-zone: calc(var(--ds-dock-h) + var(--ds-edge-b) + 10px);
+
+  /* cqi ramps: never vw. One binary breakpoint below for law compliance;
+   * no supported viewport (narrowest desk 1280px) reaches it. */
+  --ds-fs-hero: clamp(72px, 5cqi, 132px);
+  --ds-fs-boot: clamp(34px, 3cqi, 64px);
+  --ds-fs-body: clamp(19px, 0.6cqi + 17px, 21px);
+  --ds-fs-label: clamp(9px, 0.3cqi + 8.5px, 11px);
+  --ds-fs-val: clamp(11px, 0.4cqi + 10px, 13px);
+  --kp-fs-hero: clamp(40px, 6cqi, 88px);
+}
+.kp-os.kp-crt-on { --ds-top-h: 52px; --ds-edge-b: 18px; }
+
+@container desk (max-width: 699.98px) {
+  /* tiling fallback tier: unreachable on every supported viewport */
+  .kp-wallscope { display: none; }
+}
+
+.kp-os .kp-wallposter-tag,
+.kp-os .kp-wallposter-row span,
+.kp-os .kp-wallscope-tag,
+.kp-os .kp-wallclock span,
+.kp-os .ds-dock-label { font-size: var(--ds-fs-label); }
+.kp-os .kp-chip-pct em { font-size: var(--ds-fs-val); }
+
+/* ---------- 3a. the top status strip ---------- */
+
+.kp-os .kp-taskbar {
+  top: 0;
+  bottom: auto;
+  height: var(--ds-top-h);
+  border-top: none;
+  border-bottom: 3px solid var(--ch);
+}
+/* the ticker rides the strip's middle as its own crawl container, so the
+ * lead-in is 100cqi of the CRAWL BOX (was 100vw, a browser unit) */
+.kp-os .kp-taskbar .kp-ticker {
+  position: static;
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: stretch;
+  height: auto;
+  border-top: none;
+  background: transparent;
+  container-type: inline-size;
+  container-name: tick;
+}
+.kp-os .kp-ticker span { padding-left: 100cqi; }
+.kp-os .kp-wallpaper { inset: var(--ds-top-h) 0 0 0; }
+.kp-os .kp-startmenu { top: calc(var(--ds-top-h) + 8px); bottom: auto; }
+.kp-os-desk { inset: var(--ds-top-h) 0 var(--ds-dock-zone) 0; container-type: size; }
+/* wallpaper furniture rides clear of the dock zone: both bottom clusters
+ * must sit above the centered dock */
+.kp-os .kp-wallposter,
+.kp-os .kp-wallscope { bottom: calc(var(--ds-dock-zone) + 12px); }
+.kp-os .kp-wallreg i:nth-child(3),
+.kp-os .kp-wallreg i:nth-child(4) { bottom: calc(var(--ds-dock-zone) + 6px); }
+
+/* ---------- 3b. the dock: launcher AND running-window indicator ---------- */
+
+.ds-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--ds-edge-b);
+  margin-inline: auto;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  height: var(--ds-dock-h);
+  display: flex;
+  align-items: center;
+  gap: clamp(2px, 0.4cqi, 12px);
+  padding: 0 10px;
+  background: var(--px-void);
+  border: 1px solid var(--r-struct);
+  z-index: 125;
+}
+.ds-dock-icon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 9px;
+  background: transparent;
+  border: none;
+  color: var(--r-line);
+}
+.ds-dock-glyph {
+  position: relative;
+  width: var(--ds-dock-glyph);
+  height: var(--ds-dock-glyph);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ds-dock-glyph svg { shape-rendering: crispEdges; max-width: 100%; max-height: 100%; }
+.ds-dock-icon:hover .ds-dock-glyph svg { filter: drop-shadow(0 0 10px var(--px-glow)); }
+/* dock tags are CONTROL chrome, not annotation: r-struct. r-note read as
+ * WallPoster furniture (review round 2). */
+.ds-dock-label {
+  font-family: var(--kp-display);
+  line-height: 1;
+  letter-spacing: 0.1em;
+  background: var(--r-struct);
+  color: var(--px-void);
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+.ds-dock-icon:hover .ds-dock-label { background: var(--ch); }
+.ds-dock-icon:active { transform: translate(1px, 1px); }
+.ds-dock .kp-dicon-badge { min-width: 16px; height: 16px; font-size: 9px; top: -6px; right: -10px; }
+.ds-dock-run {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
+  height: 3px;
+  background: var(--r-line);
+  box-shadow: 0 0 8px var(--px-glow);
+  display: none;
+}
+.ds-dock-icon.ds-running .ds-dock-run { display: block; }
+
+/* ---------- 4. role re-pointing ---------- */
+
+/* unconditional where the v2 tone equals the role default */
+.kp-os .kp-wallposter-tag { background: var(--r-note); }
+.kp-os .kp-wallposter-row span,
+.kp-os .kp-wallclock span,
+.kp-os .kp-wallscope-tag { color: var(--r-note); }
+.kp-os .kp-fw { border-color: var(--r-struct); }
+.kp-os .kp-fw-focused { border-color: var(--ch); }
+.kp-os .kp-wallscope-box polyline { stroke: color-mix(in srgb, var(--r-line) 52%, var(--px-void)); }
+.kp-os .kp-wallclock em { color: color-mix(in srgb, var(--r-line) 52%, var(--px-void)); }
+
+/* gated on a named scheme: v2 painted these with the raw accent, so the
+ * DEFAULT collapse must leave them exactly as the shipped desktop */
+html[data-scheme] .kp-chip-pct span { color: var(--r-note); }
+html[data-scheme] .kp-chip-pct em { color: var(--r-data); }
+html[data-scheme] .kp-datarow > em { color: var(--r-data); }
+html[data-scheme] .ds-ok,
+html[data-scheme] .kp-wallscope-tag .ds-ok { color: var(--r-ok); }
+html[data-scheme] .kp-wallscope-pip { background: var(--r-ok); }
+html[data-scheme] .kp-login-granted { color: var(--r-ok); text-shadow: 0 0 12px var(--r-ok-glow); }
+html[data-scheme] .ds-hazard { color: var(--r-hazard); }
+html[data-scheme] .kp-task-danger { border-color: color-mix(in srgb, var(--r-hazard) 55%, var(--px-void)); color: var(--r-hazard); }
+html[data-scheme] .kp-task-danger:hover { background: var(--r-hazard); border-color: var(--r-hazard); color: var(--px-void); }
+html[data-scheme] .kp-modal-box h3 { background: var(--r-hazard); color: var(--px-void); }
+html[data-scheme] .kp-modal-box { border-color: var(--r-hazard); }
+html[data-scheme] .kp-btn2-danger { background: var(--r-hazard); color: var(--px-void); }
+html[data-scheme] .kp-ticker .ds-tickval { color: color-mix(in srgb, var(--r-line) 60%, var(--px-void)); }
+
+/* ---------- 5. the tube: six glass layers over the stage (law 6) ---------- */
+
+.ds-glass {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 640;
+  overflow: hidden;
+}
+.ds-glass > i { position: absolute; inset: 0; display: block; }
+.ds-glass .g-scan {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.55) 0 1px,
+    rgba(0, 0, 0, 0.12) 1px 2px,
+    rgba(255, 255, 255, 0.03) 2px 3px);
+  mix-blend-mode: multiply;
+  opacity: 0.85;
+}
+.ds-glass .g-mask {
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.05) 0 1px,
+    rgba(0, 255, 0, 0.05) 1px 2px,
+    rgba(0, 0, 255, 0.05) 2px 3px);
+  mix-blend-mode: screen;
+  opacity: 0.7;
+}
+.ds-glass .g-bloom {
+  background: radial-gradient(130% 95% at 50% 42%, var(--px-glow) 0%, transparent 62%);
+  opacity: 0.14;
+  mix-blend-mode: screen;
+}
+.ds-glass .g-spec {
+  background:
+    radial-gradient(58% 42% at 26% 14%, rgba(255, 255, 255, 0.11) 0%, transparent 70%),
+    linear-gradient(163deg, rgba(255, 255, 255, 0.055) 0%, transparent 34%);
+  mix-blend-mode: screen;
+}
+.ds-glass .g-vig {
+  background:
+    radial-gradient(102% 86% at 50% 48%, transparent 52%, rgba(0, 0, 0, 0.55) 82%, rgba(0, 0, 0, 0.92) 100%);
+  box-shadow:
+    inset 0 0 46px 12px rgba(0, 0, 0, 0.75),
+    inset 0 0 130px 40px rgba(0, 0, 0, 0.45);
+}
+.ds-glass .g-bezel {
+  box-shadow:
+    inset 0 0 0 3px rgba(0, 0, 0, 0.9),
+    inset 0 2px 2px 3px rgba(255, 255, 255, 0.07),
+    inset 0 -3px 3px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* ---------- 6a. the idle-desk hero ---------- */
+
+.ds-idle-hero .kp-wallposter-word {
+  font-size: 22px;
+  letter-spacing: 0.34em;
+}
+.ds-heropair { display: none; }
+.ds-idle-hero .ds-heropair {
+  display: flex;
+  gap: 34px;
+  align-items: baseline;
+}
+.ds-heropair b {
+  font-family: var(--kp-display);
+  font-weight: 400;
+  font-size: var(--ds-fs-hero);
+  line-height: 0.9;
+  color: var(--r-data);
+  text-shadow: 0 0 30px var(--px-glow);
+}
+.ds-heropair span {
+  display: block;
+  font-family: var(--kp-display);
+  font-size: var(--ds-fs-label);
+  letter-spacing: 0.2em;
+  color: var(--r-note);
+  margin-bottom: 8px;
+}
+.ds-heropair span::before { content: "// "; opacity: 0.7; }
+
+/* ---------- 6b. the STRAIN alarm: the shell's one --r-warn owner ---------- */
+
+.ds-strain { position: relative; }
+.ds-strain-alarm { background: var(--r-warn); border-color: var(--r-warn); }
+.ds-strain-alarm span, .ds-strain-alarm em { color: var(--px-void) !important; }
+/* colour + inverse video + a COMPOSITED difference-blend pulse (law 7:
+ * animate opacity on a promoted layer, never background/box-shadow) */
+.ds-riskflash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+.ds-strain-alarm .ds-riskflash { animation: ds-risk-blink 1.2s steps(2) infinite; }
+@keyframes ds-risk-blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+
+/* ---------- 7. the cuts (law 7): ambient chrome never moves ---------- */
+
+/* seeded decorative texture with no payload is exactly what the law exists
+ * to starve. Kept: the ticker (RULINGS carve-out), the bench clock seconds,
+ * the wallscope OK pip (a real alive signal). */
+.kp-os .kp-wallscope-roll { animation: none; }
+.kp-os .kp-mark-slice { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-strain-alarm .ds-riskflash { animation: none; opacity: 0; }
+}
+
+
+/* ==========================================================================
+   INBOX + CUSTOMER.REC (v3 instrument panel)
+   Integrated 2026-08-01 from ui-demos/inbox-v3 (ux-2026-07-31-inbox-v3).
+   ========================================================================== */
+
+/* the frame's width axis. The content takes its final width the instant the
+ * state flips, so this animation just clips over already-settled content;
+ * :has scopes both to the inbox, because no other window steps width. */
+.kp-fw:has(.ib-eva) { transition: width 200ms steps(4); overflow: hidden; }
+
+/* the container that drives every size on this surface */
+.ib-eva { container-type: inline-size; container-name: ib; }
+
+.ib-grid {
+  display: grid;
+  gap: 10px 12px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "mast" "list" "foot";
+  /* cqi, never vw: a tiled window scales to ITS tile. cqi inside a custom
+   * property resolves at the USE SITE, so a token used inside .ib-pane
+   * (its own container) lands on the pane's width, not the window's. */
+  --ib-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --ib-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --ib-fs-pill: clamp(9px, calc(0.5cqi + 8.5px), 10.5px);
+  --ib-fs-tickl: clamp(8px, calc(0.4cqi + 7.5px), 9px);
+  --ib-fs-tickv: clamp(12px, calc(0.8cqi + 10px), 14px);
+  --ib-fs-day: clamp(40px, 11cqi, 72px);
+  --ib-fs-dominant: clamp(46px, 16cqi, 72px);
+}
+
+/* ---------- Z1 masthead ---------- */
+
+.ib-mast {
+  grid-area: mast;
+  border: 3px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  padding: 5px 10px 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.ib-mast-l { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ib-eyebrow { font-family: var(--kp-display); font-size: var(--ib-fs-label); letter-spacing: 0.18em; color: var(--r-note); }
+.ib-dayline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+
+/* the LIST state's focal element. Demotes to a chip the moment a ticket
+ * opens: a handoff, not a shrink-everything move. */
+.ib-day {
+  font-family: var(--kp-display);
+  font-size: var(--ib-fs-day);
+  line-height: 0.84;
+  color: var(--r-data);
+  text-shadow: 0 0 20px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+}
+.ib-dayunit { font-family: var(--kp-display); font-size: var(--ib-fs-label); letter-spacing: 0.16em; color: var(--r-note); }
+.ib-line { font-family: var(--kp-term); font-size: var(--ib-fs-body); line-height: 1.15; color: var(--ch); }
+
+.ib-pouch { display: inline-flex; align-items: center; gap: 3px; }
+.ib-pouch > span { font-family: var(--kp-display); font-size: 8px; letter-spacing: 0.08em; color: var(--r-note); }
+
+/* CARD state: the day numeral becomes an ordinary chip */
+.ib-grid[data-state="card"] .ib-day {
+  font-family: var(--kp-mono);
+  font-size: var(--ib-fs-tickv);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ch-hot);
+  text-shadow: none;
+}
+.ib-grid[data-state="card"] .ib-daywrap { border: 2px solid var(--ch-faint); padding: 2px 7px 3px; }
+
+/* ---------- Z2 the ticket list ---------- */
+
+.ib-tickets { grid-area: list; align-self: start; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+
+.ib-div { display: flex; align-items: center; gap: 9px; }
+.ib-div i { flex: 1; height: 8px; background: repeating-linear-gradient(45deg, var(--r-hazard) 0 3px, transparent 3px 7px); }
+.ib-div span { font-family: var(--kp-display); font-size: var(--ib-fs-label); letter-spacing: 0.2em; color: var(--r-note); flex: none; }
+
+/* grid, not flex, so grid-auto-rows sizes EVERY row to the tallest: a
+ * CLEARED ticket and a three-line subject occupy exactly the same room,
+ * which is the equal-footprint law measured rather than asserted */
+.ib-list { display: grid; grid-auto-rows: 1fr; gap: 6px; }
+
+.ib-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+  min-height: 68px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  border: 2px solid var(--r-struct);
+  color: var(--ch);
+}
+.ib-item:hover:not(:disabled) { border-color: var(--ch); }
+/* solid, not dashed: a dashed faint edge rendered as a visibly narrower box
+ * than its solid siblings, and the equal-footprint law is about the RENDERED
+ * bounds, not just the box model. Done-ness keeps its other channels: faint
+ * ink, the strike-through, and the CLEARED tag. */
+.ib-item:disabled { cursor: not-allowed; border-color: var(--ch-faint); }
+.ib-subj { font-family: var(--kp-term); font-size: var(--ib-fs-body); line-height: 1.06; color: var(--ch); }
+.ib-item:disabled .ib-subj { color: var(--ch-faint); text-decoration: line-through; }
+.ib-alldone { justify-content: center; font-family: var(--kp-display); font-size: var(--ib-fs-label); letter-spacing: 0.16em; color: var(--ch-faint); }
+.ib-meta { display: flex; align-items: center; gap: 9px; margin-top: auto; }
+.ib-pay { margin-left: auto; font-family: var(--kp-mono); font-size: var(--ib-fs-tickv); font-weight: 600; color: var(--r-data); }
+/* NOMINAL: a resolved ticket, not an alarm */
+.ib-cleared { margin-left: auto; font-family: var(--kp-display); font-size: var(--ib-fs-pill); letter-spacing: 0.12em; color: var(--r-ok); }
+
+/* the open ticket: inverse-video fill AND a corner-tick reticle, the same
+ * two-channel treatment the reference gives its live mode. The reticles sit
+ * FLUSH with the border's outer edge, never outside it: at -4px they widened
+ * the open row by 4px a side, which made every other row read narrower. */
+.ib-item.sel { background: color-mix(in srgb, var(--r-ok) 14%, var(--px-void)); border-color: var(--r-ok); }
+.ib-item.sel::before, .ib-item.sel::after { content: ""; position: absolute; width: 9px; height: 9px; }
+.ib-item.sel::before { top: -2px; left: -2px; border-top: 3px solid var(--r-ok); border-left: 3px solid var(--r-ok); }
+.ib-item.sel::after { bottom: -2px; right: -2px; border-bottom: 3px solid var(--r-ok); border-right: 3px solid var(--r-ok); }
+
+.ib-eva .kp-pip-diamond { background: var(--ch-faint); }
+.ib-eva .kp-pip-diamond.kp-pip-on { background: var(--r-line); box-shadow: 0 0 6px var(--px-glow); }
+.ib-tierlabel { font-family: var(--kp-display); font-size: var(--ib-fs-tickl); letter-spacing: 0.12em; color: var(--r-note); }
+
+/* ---------- Z3 the record pane: the CARD state's focal column ---------- */
+
+.ib-pane {
+  grid-area: pane;
+  container-type: inline-size;
+  container-name: pane;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.ib-grid[data-state="list"] .ib-pane { display: none; }
+
+.ib-focal {
+  position: relative;
+  border: 1px solid var(--ch-faint);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 8px 12px 9px;
+}
+/* heavy corner brackets, scoped to the FOCAL panel only: applying them
+ * everywhere destroys the emphasis they exist to create (law 4) */
+.ib-bracket, .ib-bracket > i { position: absolute; pointer-events: none; }
+.ib-bracket { inset: -1px; }
+.ib-bracket > i { inset: 0; }
+.ib-bracket::before, .ib-bracket::after,
+.ib-bracket > i::before, .ib-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.ib-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.ib-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.ib-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.ib-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+/* THE FOCAL ELEMENT. Its ramp is capped by character count as well, because
+ * "ARM: SIPHON" is 11 characters and the ramp alone would overflow the pane.
+ * The floor still clears law 2's 2.2x. */
+.ib-dominant {
+  display: block;
+  font-family: var(--kp-display);
+  font-size: min(var(--ib-fs-dominant), calc((100cqi - 30px) / (var(--len, 8) * 0.82)));
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  margin: 2px 0 1px;
+  white-space: nowrap;
+}
+.ib-domlabel { font-family: var(--kp-display); font-size: var(--ib-fs-label); letter-spacing: 0.16em; color: var(--r-note); }
+.ib-tierrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.ib-tierval { font-family: var(--kp-mono); font-size: var(--ib-fs-tickv); font-weight: 600; color: var(--ch); }
+/* the tactical hint the glance order exists to serve, so it stays visible */
+.ib-tell { font-family: var(--kp-term); font-size: var(--ib-fs-body); line-height: 1.08; color: var(--ch); margin-top: 7px; min-height: 2.16em; }
+
+/* ---------- the verdict band ---------- */
+
+.ib-verdict { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; height: 164px; }
+/* the action stack SHARES the prints' row, so its buttons have to fit the
+ * 136px this column gets at the narrowest supported window. At the shared
+ * .kp-btn2 padding they wrapped to two lines and stretched the row to 208px,
+ * which is where the laptop blew its desk. */
+.ib-verdict .kp-btn2 { flex: none; text-align: center; font-size: 10px; padding: 9px 10px; white-space: nowrap; }
+.ib-rate { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: auto; }
+.ib-rate span { font-family: var(--kp-display); font-size: var(--ib-fs-tickl); letter-spacing: 0.14em; color: var(--r-note); }
+.ib-rate em { font-style: normal; font-family: var(--kp-display); font-size: clamp(18px, 3.4cqi, 26px); color: var(--r-data); text-shadow: 0 0 14px var(--px-glow); }
+
+/* ---------- the support band ---------- */
+
+/* Both prints are full 160x160 squares side by side on the pane's bottom
+ * row. The row they sit on is SHARED with the action stack, which is what
+ * pays for the height: a row you do not share is a row you pay for in full. */
+.ib-support { display: flex; flex-direction: column; gap: 7px; }
+.ib-bottom { display: grid; grid-template-columns: 336px minmax(0, 1fr); gap: 10px; align-items: start; }
+.ib-cells { display: flex; gap: 8px; }
+
+/* 1:1, cropped never downscaled: the PNGs are cut at exactly 160x160, so
+ * the cell needs no CSS scaling and one dither dot is one CSS pixel. The
+ * frame carries the same --r-aux signal class as the imagery it holds, so
+ * the prints are not the only bright thing of their colour on the surface:
+ * camera chrome wears the camera's colour. */
+.ib-cell {
+  position: relative;
+  width: 164px;
+  height: 164px;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid var(--r-aux);
+  background: var(--px-void);
+}
+.ib-cell img { position: absolute; top: 0; left: 0; display: block; image-rendering: pixelated; }
+.ib-celltag {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  padding: 2px 4px;
+  background: var(--px-void);
+  color: var(--r-note);
+}
+/* equal footprint again: a roster gap renders a plate of exactly the same
+ * size, so the row never reflows on art coverage */
+.ib-cell.ib-nofile {
+  border-style: dashed;
+  border-color: var(--ch-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-image: repeating-conic-gradient(color-mix(in srgb, var(--ch) 8%, transparent) 0% 25%, transparent 0% 50%);
+  background-size: 6px 6px;
+}
+.ib-cell.ib-nofile b { font-family: var(--kp-display); font-size: 9px; letter-spacing: 0.14em; color: var(--r-note); font-weight: 400; text-align: center; line-height: 1.6; }
+
+.ib-ticks { display: grid; grid-template-columns: 1fr 1.8fr 1fr 1.2fr; gap: 4px 14px; }
+.ib-tick { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ib-tick span { font-family: var(--kp-display); font-size: var(--ib-fs-tickl); letter-spacing: 0.12em; color: var(--r-note); }
+.ib-tick em { font-style: normal; font-family: var(--kp-term); font-size: var(--ib-fs-body); line-height: 1.02; color: var(--ch); }
+@container pane (max-width: 470px) { .ib-ticks { grid-template-columns: 1fr 1.8fr; } }
+
+/* THE ONE ALARM ON THIS SURFACE. --r-warn is used here and nowhere else.
+ * Two non-colour channels: the row floods inverse video permanently (the
+ * shipped danger idiom, which survives a colourblind reader and the CRT
+ * layer alike), and it MOVES on reveal.
+ *
+ * The blink is a 3-cycle BURST, not a continuous strobe: DAY_CONFIGS gives
+ * headStart >= 1 on seven of the ten days, so a permanent strobe here would
+ * be ambient motion and exactly the habituation law 1 warns about. Motion
+ * still means "something just happened". */
+.ib-warn {
+  position: relative;
+  align-self: start;
+  max-width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 5px 9px 6px;
+  background: var(--r-warn);
+}
+.ib-warn span { font-family: var(--kp-display); font-size: var(--ib-fs-label); letter-spacing: 0.16em; color: var(--px-void); flex: none; }
+.ib-warn em { font-style: normal; font-family: var(--kp-term); font-size: var(--ib-fs-body); line-height: 1.05; color: var(--px-void); }
+.ib-riskflash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+/* compositor-only: opacity on a promoted layer, never background/box-shadow */
+.ib-warn.reveal .ib-riskflash { animation: ib-risk-blink 1.2s steps(2) 3; }
+@keyframes ib-risk-blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+
+.ib-quote {
+  font-family: var(--kp-term);
+  font-size: var(--ib-fs-body);
+  line-height: 1.08;
+  color: var(--ch-hot);
+  padding: 6px 9px 7px;
+  border: 1px solid var(--ch-faint);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+}
+.ib-grid[data-state="list"] .ib-quote { display: none; }
+.ib-quote b { font-family: var(--kp-display); font-size: var(--ib-fs-tickl); letter-spacing: 0.16em; color: var(--r-note); font-weight: 400; display: block; margin-bottom: 2px; }
+
+/* ---------- Z5 footline ---------- */
+
+/* the run chips live on the footline, not the masthead: in the masthead they
+ * wrapped onto their own row at the laptop width and cost 42px, and they are
+ * ambient in both states anyway */
+.ib-foot {
+  grid-area: foot;
+  border: 2px solid var(--ch-faint);
+  padding: 3px 8px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+}
+.ib-foot .kp-chip-pct { padding: 3px 7px; gap: 6px; }
+.ib-foot .kp-chip-pct em { font-size: 12px; }
+.ib-hint {
+  margin-left: auto;
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  color: var(--ch-dim);
+}
+
+/* ================= WIDE TIER =================
+ * One binary breakpoint at 700px of content inline-size, so all three
+ * supported viewports render the SAME arrangement (law 3). The list column
+ * SHARES the pane's row rather than taking one of its own. */
+
+@container ib (min-width: 700px) {
+  .ib-grid[data-state="card"] {
+    grid-template-columns: 340px 1fr;
+    grid-template-areas:
+      "mast mast"
+      "list pane"
+      "foot foot";
+  }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container ib (max-width: 699.98px) {
+  .ib-grid[data-state="card"] { grid-template-areas: "mast" "pane" "list" "foot"; }
+  .ib-bottom { grid-template-columns: 1fr; }
+  .ib-cells { justify-content: center; }
+}
+
+/* ---------- open / close choreography ---------- */
+
+.ib-pane.grow { animation: ib-genie 210ms steps(6); }
+@keyframes ib-genie {
+  from { transform: scaleY(0.2); opacity: 0.2; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+.ib-pane.shrink { animation: ib-shrink 180ms steps(5) forwards; }
+@keyframes ib-shrink {
+  from { transform: scaleY(1); opacity: 1; }
+  to { transform: scaleY(0.2); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kp-fw:has(.ib-eva) { transition: none; }
+  .ib-pane.grow, .ib-pane.shrink { animation: none; }
+  .ib-warn.reveal .ib-riskflash { animation: none; opacity: 0; }
+}
+
+
+/* ==========================================================================
+   LOADOUT.CFG (v3 instrument panel) - the REFERENCE IMPLEMENTATION
+   Integrated 2026-08-01 from ui-demos/loadout-eva (ux-2026-07-31-loadout-eva).
+   ========================================================================== */
+
+.lo-eva { container-type: inline-size; container-name: lo; }
+
+.lo-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "mast" "trinity" "gutter" "support" "foot";
+  /* the fluid ramp. cqi, never vw: a tiled window scales to its own tile.
+   * cqi in a custom property resolves at the USE SITE, so a description
+   * inside a .lo-panel (its own container) lands at 19px while the masthead
+   * line lands at 21px. Both sit inside the VT323 floor, and the narrower
+   * column getting the smaller step is the behaviour you want. */
+  --lo-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --lo-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --lo-fs-pill: clamp(9px, calc(0.5cqi + 8.5px), 10.5px);
+  --lo-fs-slab: clamp(22px, 3.6cqi, 34px);
+  --lo-fs-strain: clamp(26px, 4.5cqi, 38px);
+  --lo-fs-tickl: clamp(8px, calc(0.4cqi + 7.5px), 9px);
+  --lo-fs-tickv: clamp(12px, calc(0.8cqi + 10px), 14px);
+}
+
+/* ---------- Z1 masthead ---------- */
+
+.lo-mast {
+  grid-area: mast;
+  border: 3px solid var(--ch-dim);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  padding: 7px 11px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.lo-mast-l { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lo-eyebrow { font-family: var(--kp-display); font-size: var(--lo-fs-label); letter-spacing: 0.18em; color: var(--r-note); }
+.lo-slabwrap { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.lo-slab {
+  font-family: var(--kp-display);
+  font-size: var(--lo-fs-slab);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--ch-hot);
+  padding: 4px 9px 6px;
+  text-shadow: 0 0 18px var(--px-glow);
+}
+/* NOMINAL: the kit is ready to dive */
+.lo-slab.is-ready { color: var(--r-ok); text-shadow: 0 0 20px var(--r-ok-glow); --tick: var(--r-ok); }
+.lo-line { font-family: var(--kp-term); font-size: var(--lo-fs-body); line-height: 1.2; color: var(--ch); }
+.lo-mast-r { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Z2 gutter: lowest glance priority, deliberately ambient ---------- */
+
+.lo-gutter { grid-area: gutter; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.lo-spine { font-family: var(--kp-display); font-size: var(--lo-fs-tickl); letter-spacing: 0.3em; color: var(--r-note); }
+
+/* the LIVE MONITOR bezel: the feed CROPPED, never scaled. The dither is a
+ * 1:1 dot grid; resampling it to a smaller box mushes it to grey noise, so
+ * the image sits at its native 304x227 inside a 200x150 window, framed on
+ * the bench itself rather than on dead centre. */
+.lo-mon {
+  position: relative;
+  width: 200px;
+  height: 150px;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid var(--r-struct);
+  background: var(--px-void);
+}
+.lo-mon img {
+  position: absolute;
+  top: -58px;
+  left: -100px;
+  display: block;
+  image-rendering: pixelated;
+  filter: grayscale(1) contrast(1.15) brightness(1.05);
+}
+/* FULL COLOUR: a colourisation, not a reveal (the source art is monochrome
+ * ink). The frame keeps its own palette, so it takes neither the grayscale
+ * pass nor the --r-aux tint. */
+.lo-mon[data-feed="true"] .tint,
+.lo-mon[data-feed="color"] .tint { display: none; }
+.lo-mon[data-feed="color"] img { filter: none; }
+/* the ink treatment tints to --r-aux: a camera is a different signal class
+ * from bench data, and under a named scheme that difference becomes visible */
+.lo-mon .tint {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.28) 0% 25%, transparent 0% 50%),
+    var(--r-aux);
+  background-size: 2px 2px, auto;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.lo-mon .shade { position: absolute; inset: 0; background: var(--px-void); transform-origin: bottom; transform: scaleY(1); }
+.lo-mon.on .shade { animation: lo-wipe 640ms steps(13) forwards; }
+@keyframes lo-wipe { to { transform: scaleY(0); } }
+.lo-mon .roll {
+  position: absolute;
+  inset: -40% 0 auto 0;
+  height: 34%;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--ch) 22%, transparent), transparent);
+  animation: lo-feedroll 5.5s steps(30) infinite;
+  pointer-events: none;
+}
+@keyframes lo-feedroll { to { transform: translateY(420%); } }
+/* a record light is red on every camera ever built */
+.lo-rec {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--r-hazard);
+  color: var(--ch-hot);
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  padding: 3px 5px;
+}
+.lo-rec i { width: 5px; height: 5px; background: var(--ch-hot); animation: kp-cursor-blink 1.1s steps(2) infinite; }
+.lo-clock {
+  position: absolute;
+  bottom: 3px;
+  left: 4px;
+  font-family: var(--kp-mono);
+  font-size: 10px;
+  color: var(--ch-hot);
+  text-shadow: 0 0 6px var(--px-void), 0 0 3px var(--px-void);
+}
+
+.lo-ticks { display: flex; flex-direction: column; gap: 3px; }
+.lo-tick { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.lo-tick span { font-family: var(--kp-display); font-size: var(--lo-fs-tickl); letter-spacing: 0.12em; color: var(--r-note); }
+.lo-tick em { font-style: normal; font-family: var(--kp-mono); font-size: var(--lo-fs-tickv); font-weight: 600; color: var(--ch); }
+
+/* ---------- Z3 trinity: the page's focal zone ---------- */
+
+.lo-trinity { grid-area: trinity; display: grid; gap: 10px; grid-template-columns: 1fr; min-width: 0; }
+
+.lo-panel {
+  container-type: inline-size;
+  position: relative;
+  border: 1px solid var(--ch-faint);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 12px 12px 11px;
+  min-width: 0;
+  display: grid;
+  gap: 6px 10px;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "hero name"
+    "hero meter"
+    "modes modes"
+    "desc desc";
+  align-items: center;
+}
+
+/* the heavy corner brackets carry the framing weight the hairline gives up.
+ * Scoped to the trinity ONLY, so the flourish never destabilises the rest of
+ * the shared system vocabulary. */
+.lo-bracket, .lo-bracket > i { position: absolute; pointer-events: none; }
+.lo-bracket { inset: -1px; }
+.lo-bracket > i { inset: 0; }
+.lo-bracket::before, .lo-bracket::after,
+.lo-bracket > i::before, .lo-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.lo-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.lo-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.lo-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.lo-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+.lo-pname { grid-area: name; font-family: var(--kp-display); font-size: var(--lo-fs-label); letter-spacing: 0.16em; color: var(--ch); align-self: end; }
+.lo-heroline { grid-area: hero; display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.lo-num {
+  font-family: var(--kp-display);
+  font-size: clamp(32px, 9cqi, 48px);
+  line-height: 0.82;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+}
+.lo-unit { font-family: var(--kp-display); font-size: var(--lo-fs-label); letter-spacing: 0.16em; color: var(--r-note); }
+.lo-meter { grid-area: meter; display: flex; align-items: center; gap: 7px; align-self: start; }
+.lo-tlabel { font-family: var(--kp-display); font-size: var(--lo-fs-tickl); letter-spacing: 0.14em; color: var(--r-note); }
+.lo-tseg { display: inline-flex; gap: 3px; }
+.lo-tseg i { display: block; width: 16px; height: 9px; background: transparent; border: 2px solid var(--ch-faint); }
+.lo-tseg i.on { background: var(--r-line); border-color: var(--r-line); box-shadow: 0 0 7px var(--px-glow); }
+.lo-tval { font-family: var(--kp-mono); font-size: var(--lo-fs-tickv); font-weight: 600; color: var(--ch); }
+
+.lo-modes { grid-area: modes; display: flex; flex-wrap: wrap; gap: 5px; }
+.lo-mode {
+  position: relative;
+  font-family: var(--kp-display);
+  font-size: var(--lo-fs-pill);
+  letter-spacing: 0.1em;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--ch);
+  border: 2px solid var(--ch-dim);
+}
+.lo-mode:hover:not(:disabled) { border-color: var(--ch); }
+.lo-mode:disabled { border-style: dashed; color: var(--ch-faint); border-color: var(--ch-faint); cursor: not-allowed; }
+/* NOMINAL: this configuration is the one that is live */
+.lo-mode.mode-on { background: var(--r-ok); color: var(--px-void); border-color: var(--r-ok); }
+/* the reticle: a second, colour-independent channel saying WHICH is live */
+.lo-mode.mode-on::before, .lo-mode.mode-on::after { content: ""; position: absolute; width: 8px; height: 8px; }
+.lo-mode.mode-on::before { top: -4px; left: -4px; border-top: 2px solid var(--r-ok); border-left: 2px solid var(--r-ok); }
+.lo-mode.mode-on::after { bottom: -4px; right: -4px; border-bottom: 2px solid var(--r-ok); border-right: 2px solid var(--r-ok); }
+
+.lo-desc { grid-area: desc; font-family: var(--kp-term); font-size: var(--lo-fs-body); line-height: 1.04; color: var(--ch); min-height: 1.04em; }
+.lo-more {
+  font-family: var(--kp-display);
+  font-size: var(--lo-fs-tickl);
+  letter-spacing: 0.12em;
+  background: transparent;
+  border: 2px solid var(--ch-dim);
+  color: var(--ch);
+  padding: 3px 6px;
+  margin-left: 6px;
+}
+
+/* ---------- Z4 support band ---------- */
+
+.lo-support { grid-area: support; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+
+.lo-div { display: flex; align-items: center; gap: 9px; }
+.lo-div i { flex: 1; height: 8px; background: repeating-linear-gradient(45deg, var(--r-hazard) 0 3px, transparent 3px 7px); }
+.lo-div span { font-family: var(--kp-display); font-size: var(--lo-fs-label); letter-spacing: 0.2em; color: var(--ch-dim); flex: none; }
+
+.lo-supgrid { display: grid; gap: 9px; grid-template-columns: 1fr; }
+.lo-sub {
+  border: 2px solid var(--ch-dim);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 6px 9px 7px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.lo-subhead { display: flex; align-items: center; gap: 8px; }
+.lo-subhead strong { font-family: var(--kp-display); font-size: var(--lo-fs-label); letter-spacing: 0.16em; color: var(--ch); font-weight: 400; }
+.lo-subhead em { font-style: normal; margin-left: auto; font-family: var(--kp-mono); font-size: var(--lo-fs-tickv); font-weight: 600; color: var(--ch-hot); }
+
+/* boost bays: equal-footprint pills so a sparse run takes the same room */
+.lo-baywrap { display: flex; flex-wrap: wrap; gap: 5px; position: relative; }
+.lo-baywrap > * { display: contents; }
+.lo-bay {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 5px 7px;
+  font-family: var(--kp-display);
+  font-size: var(--lo-fs-pill);
+  letter-spacing: 0.08em;
+  background: var(--ch);
+  color: var(--px-void);
+  border: 2px solid var(--ch);
+}
+/* a filled bay says, permanently, that it holds more than its name. Empty
+ * and future bays hold nothing, so they carry no marker. */
+.lo-bay.lo-has span { border-bottom: 2px dotted var(--px-void); padding-bottom: 1px; }
+.lo-bay-empty { background: transparent; color: var(--ch-dim); border: 2px dashed var(--ch-dim); }
+.lo-bay-future { color: var(--ch-faint); border-color: var(--ch-faint); }
+
+/* pouch: the four line paragraph is gone, the pointer sentence is not */
+.lo-pouchbtn { display: flex; flex-direction: column; gap: 7px; background: transparent; border: none; padding: 0; text-align: left; width: 100%; }
+.lo-rack { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.lo-rack > span { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.lo-rack > span > span { font-family: var(--kp-display); font-size: var(--lo-fs-tickl); letter-spacing: 0.06em; color: var(--r-note); }
+.lo-hole { width: 30px; height: 30px; border: 2px dashed var(--ch-faint); display: block; }
+.lo-pouchfoot { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.lo-pointer { font-family: var(--kp-term); font-size: var(--lo-fs-body); line-height: 1.1; color: var(--ch); }
+
+/* strain: loud, but subordinate to the trinity by design. The one readout
+ * whose COLOUR carries state: nominal above 70, watch between, risk at or
+ * below 35. Colour is never the only channel; in the risk band the number
+ * also floods inverse video, the shipped danger idiom, which survives both a
+ * colourblind reader and the CRT layer. */
+.lo-strainrow { display: flex; align-items: center; gap: 10px; }
+.lo-strainnum {
+  position: relative;
+  font-family: var(--kp-display);
+  font-size: var(--lo-fs-strain);
+  line-height: 0.9;
+  padding: 2px 5px;
+  color: var(--r-data);
+  text-shadow: 0 0 16px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+}
+.lo-strainnum b { font-weight: 400; }
+.lo-strainbar { position: relative; display: flex; gap: 2px; flex: 1; height: 16px; min-width: 0; }
+.lo-strainbar i { flex: 1; background: var(--ch-faint); }
+.lo-strainbar i.on { background: var(--r-line); box-shadow: 0 0 6px var(--px-glow); }
+
+.lo-strain-ok .lo-strainnum { color: var(--r-ok); text-shadow: 0 0 16px var(--r-ok-glow); }
+.lo-strain-ok .lo-strainbar i.on { background: var(--r-ok); box-shadow: 0 0 6px var(--r-ok-glow); }
+
+/* THE ALARM. Static distinction cannot beat habituation: a page with five
+ * red-family shapes on every healthy visit trains the eye to stop sampling
+ * hue and fill for the one time it matters. What the ambient chrome
+ * structurally does not have is MOTION, so the alarm takes it and the chrome
+ * never does. */
+.lo-strain-low .lo-strainnum { background: var(--r-warn); color: var(--px-void); text-shadow: none; }
+.lo-strain-low .lo-strainbar i.on { background: var(--r-warn); box-shadow: 0 0 6px var(--r-warn-glow); }
+.lo-strain-low .lo-strainnote { color: var(--r-warn); }
+/* composited, not painted: animating background/box-shadow inside a filtered
+ * subtree measured 50ms p95; this opacity fade on a promoted layer measured
+ * 9.3ms against a 9.0ms do-nothing baseline. At full opacity the difference
+ * blend inverts what is underneath, which is the same inverse-video idiom
+ * reached a cheaper way. */
+.lo-riskflash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+.lo-strain-low .lo-riskflash { animation: lo-risk-blink 1.2s steps(2) infinite; }
+@keyframes lo-risk-blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+.lo-strainnote { font-family: var(--kp-display); font-size: var(--lo-fs-tickl); letter-spacing: 0.16em; color: var(--ch-dim); }
+
+/* ---------- Z5 footline ---------- */
+
+.lo-foot {
+  grid-area: foot;
+  border: 2px solid var(--ch-faint);
+  padding: 3px 9px 4px;
+  font-family: var(--kp-term);
+  font-size: var(--lo-fs-body);
+  line-height: 1.1;
+  color: var(--ch-dim);
+}
+
+/* ================= WIDE TIER: the monumental arrangement =================
+ * One binary breakpoint on the window's own inline-size, so EVERY supported
+ * viewport renders the same arrangement. */
+
+@container lo (min-width: 700px) {
+  .lo-grid {
+    /* the gutter used to be a left column BESIDE the trinity. Enlarging the
+     * feed to something readable made that column expensive: it took 232px
+     * off the trinity and the descriptions wrapped two lines deeper. The
+     * trinity now takes the FULL width and the operator rig drops to the
+     * bottom band, where a 200px cell is cheap. */
+    grid-template-columns: 232px 1fr;
+    grid-template-areas:
+      "mast    mast"
+      "gutter  trinity"
+      "support support"
+      "foot    foot";
+    gap: 9px 12px;
+  }
+
+  .lo-gutter { padding-top: 2px; }
+  .lo-gutter-top { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+  .lo-spine { writing-mode: vertical-rl; transform: rotate(180deg); height: 150px; letter-spacing: 0.34em; align-self: flex-start; }
+
+  /* the three bays sit on ONE baseline. An earlier round offset ATTACK.EXE
+   * by 10px as an asymmetry device; it read as a misalignment bug. */
+  .lo-trinity { grid-template-columns: repeat(3, 1fr); gap: 9px; }
+
+  .lo-panel { display: block; padding: 11px 11px 10px; }
+  .lo-pname { display: block; margin-bottom: 2px; }
+  .lo-heroline { align-items: flex-end; margin: 0 0 3px; }
+  .lo-num { font-size: clamp(64px, 42cqi, 116px); line-height: 0.76; }
+  .lo-unit { padding-bottom: 5px; }
+  .lo-meter { margin-bottom: 5px; }
+  .lo-modes { margin-bottom: 5px; gap: 4px; }
+  .lo-mode { padding: 5px 7px; }
+  .lo-desc { min-height: 3.1em; }
+
+  /* two-up bays: five stacked pills cost 70px of desk for no extra
+   * information, and the desk is the scarce resource */
+  .lo-supgrid { grid-template-columns: 1.2fr 1.3fr 1fr; }
+  .lo-baywrap { display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+  .lo-bay { flex: none; justify-content: flex-start; text-align: left; }
+}
+
+/* the tight end of WIDE: a 232px gutter beside a 3-column trinity is more
+ * than 726px of content can carry, so the feed steps down to a 150x113
+ * window on the SAME region of the SAME image, still a 1:1 crop, and the
+ * spine stacks above it instead of beside it. */
+@container lo (min-width: 700px) and (max-width: 800px) {
+  .lo-grid { grid-template-columns: 172px 1fr; }
+  .lo-gutter-top { display: block; }
+  .lo-spine { writing-mode: horizontal-tb; transform: none; height: auto; letter-spacing: 0.2em; display: block; margin-bottom: 5px; }
+  .lo-mon { width: 150px; height: 113px; }
+  .lo-mon img { top: -77px; left: -125px; }
+  .lo-clock { font-size: 9px; }
+  .lo-sub { padding: 5px 8px 6px; }
+  .lo-panel { padding: 9px 9px 8px; }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container lo (max-width: 699.98px) {
+  .lo-gutter { flex-direction: row; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .lo-gutter-top { display: contents; }
+  .lo-ticks { flex: 1; min-width: 150px; }
+  .lo-spine { align-self: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lo-mon.on .shade, .lo-mon .roll { animation: none; }
+  .lo-mon .shade { transform: scaleY(0); }
+  /* the risk alarm falls back to the static full flood, which is still
+   * inverse video and still colourblind-safe */
+  .lo-strain-low .lo-riskflash { animation: none; opacity: 0; }
+}
+
+
+/* ==========================================================================
+   SOLDER.BAY (v3 instrument panel)
+   Integrated 2026-08-01 from ui-demos/solder-v3 (ux-2026-07-31-solder-v3).
+   ========================================================================== */
+
+.sv-panel { container-type: inline-size; container-name: sv; --sv-faint: var(--ch-faint); }
+
+.sv-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "read" "deck" "status" "caption";
+  --sv-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --sv-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --sv-fs-pill: clamp(9px, calc(0.5cqi + 8.5px), 10.5px);
+  --sv-fs-armcount: clamp(13px, calc(0.9cqi + 10px), 19px);
+  --sv-fs-tickv: clamp(12px, calc(0.8cqi + 10px), 14px);
+  --sv-fs-hero: clamp(38px, 13cqi, 62px);
+}
+
+/* ---------- Z1 THE READ: the surface's focal zone ---------- */
+
+.sv-read {
+  grid-area: read;
+  position: relative;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 12px 14px 13px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* the heavy corner brackets, scoped to the FOCAL panel only */
+.sv-bracket, .sv-bracket > i { position: absolute; pointer-events: none; }
+.sv-bracket { inset: -1px; }
+.sv-bracket > i { inset: 0; }
+.sv-bracket::before, .sv-bracket::after,
+.sv-bracket > i::before, .sv-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.sv-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.sv-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.sv-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.sv-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+/* flex:1 with a fixed min-height, so the hero's bounding box is IDENTICAL
+ * in all four interaction states and the idle placeholder cannot shrink
+ * the band */
+.sv-heroline { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.sv-eyebrow { font-family: var(--kp-display); font-size: var(--sv-fs-label); letter-spacing: 0.18em; color: var(--r-note); white-space: nowrap; }
+.sv-hero {
+  font-family: var(--kp-display);
+  font-size: var(--sv-fs-hero);
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  white-space: nowrap;
+  display: block;
+}
+.sv-hero.is-idle { color: var(--sv-faint); text-shadow: none; }
+/* the empty reservation has to be the FILLED line box, not a guess under
+ * it: at 1.1em against Silkscreen's ~1.52em normal this row grew 8px the
+ * instant a piece was picked up, which walked the whole window down */
+.sv-armcount {
+  font-family: var(--kp-display);
+  font-size: var(--sv-fs-armcount);
+  letter-spacing: 0.16em;
+  color: var(--r-note);
+  line-height: 1.52;
+  min-height: 1.52em;
+}
+
+/* the SCHEMATIC, demoted from a full column to an --r-aux satellite plate.
+ * The tag gets a band of its own rather than overlaying the drawing: on a
+ * vertical STRAIGHT it sat on the top arm. */
+.sv-schem {
+  position: relative;
+  flex: none;
+  width: 168px;
+  height: 146px;
+  padding-top: 20px;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--r-aux) 4%, var(--px-void));
+}
+.sv-schem svg { display: block; width: 100%; height: 100%; }
+.sv-schem line.grid { stroke: color-mix(in srgb, var(--r-aux) 26%, var(--px-void)); stroke-width: 1; }
+.sv-schem .arm { stroke: var(--r-aux); stroke-width: 13; stroke-linecap: square; shape-rendering: crispEdges; }
+.sv-schem .arm-gain { stroke: var(--r-data); animation: kp-cursor-blink 0.9s steps(2) infinite; }
+.sv-schem .hub { fill: var(--r-data); }
+.sv-schem .hole { fill: none; stroke: color-mix(in srgb, var(--r-aux) 45%, var(--px-void)); stroke-width: 3; stroke-dasharray: 8 6; }
+.sv-schem-tag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--px-void);
+  background: var(--r-aux);
+  padding: 3px 7px;
+}
+
+/* ---------- Z2 STATUS + Z4 FOOT: the bench-state column ---------- */
+
+.sv-side { grid-area: status; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+.sv-status {
+  flex: 1;
+  position: relative;
+  border: 3px solid var(--r-struct);
+  background: var(--px-void);
+  padding: 10px 12px 12px;
+  font-family: var(--kp-term);
+  font-size: var(--sv-fs-body);
+  line-height: 1.16;
+  color: var(--r-line);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.sv-status-label { font-family: var(--kp-display); font-size: var(--sv-fs-label); letter-spacing: 0.18em; color: var(--r-note); flex: none; }
+/* NOMINAL: the weld is ready to commit */
+.sv-status.is-ready { color: var(--r-ok); }
+/* RISK: the line is refusing something you JUST TRIED. Never the passive
+ * "this piece has no partners anywhere" case, which stays --r-line. */
+.sv-status.is-reject { color: var(--r-warn); }
+
+/* ---------- Z3 THE RACK: where the hands go ---------- */
+
+.sv-deck {
+  grid-area: deck;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  border: 2px solid var(--r-struct);
+  background: repeating-conic-gradient(color-mix(in srgb, var(--ch2) 12%, transparent) 0% 25%, transparent 0% 50%);
+  background-size: 8px 8px;
+  padding: 11px 13px 12px;
+  min-width: 0;
+}
+.sv-deckhead { display: flex; align-items: baseline; gap: 10px; }
+.sv-deckhead strong { font-family: var(--kp-display); font-size: var(--sv-fs-label); letter-spacing: 0.16em; color: var(--r-note); font-weight: 400; }
+.sv-rack { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+
+.sv-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  /* the height budget came in under target, and on a drag-to-craft surface
+   * the best thing to spend that on is the tap target itself */
+  min-height: 104px;
+  padding: 10px 4px 9px;
+  border: 3px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 5%, var(--px-void));
+}
+.sv-slot:is(button) { cursor: grab; }
+.sv-slot:is(button):hover:not(:disabled) { border-color: var(--r-line); }
+.sv-slot:is(button):disabled { cursor: default; }
+.sv-slot > span { font-family: var(--kp-display); font-size: var(--sv-fs-pill); letter-spacing: 0.04em; color: var(--r-note); white-space: nowrap; }
+.sv-slot .kp-pp-arm { stroke: var(--r-line); }
+.sv-slot .kp-pp-node { fill: var(--r-data); }
+
+/* one promoted layer per slot; opacity only, so nothing on this surface
+ * ever animates a paint property */
+.sv-fx { position: absolute; inset: -1px; display: block; opacity: 0; pointer-events: none; will-change: opacity; }
+
+/* DEAD: cannot join the held piece. Deliberately colour-ABSENT, not red: a
+ * held piece can leave 4 of 5 slots dead at once, and red that common is
+ * the habituation failure the reference cycle had to fix from the other
+ * direction. The slash carries it instead. */
+.sv-slot-dead { border-color: var(--sv-faint); background: color-mix(in srgb, var(--ch) 2%, var(--px-void)); }
+.sv-slot-dead > svg, .sv-slot-dead > span { opacity: 0.3; }
+.sv-slot-dead::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to top right,
+    transparent calc(50% - 2px), var(--sv-faint) calc(50% - 2px),
+    var(--sv-faint) calc(50% + 2px), transparent calc(50% + 2px));
+}
+
+/* NOMINAL: your current selection. The reticle is the second, colour
+ * independent channel. */
+.sv-slot-carry {
+  border-color: var(--r-ok);
+  background: color-mix(in srgb, var(--r-ok) 12%, var(--px-void));
+  box-shadow: 0 0 14px var(--r-ok-glow);
+}
+.sv-slot-carry::before, .sv-slot-carry::after { content: ""; position: absolute; width: 8px; height: 8px; }
+.sv-slot-carry::before { top: -6px; left: -6px; border-top: 2px solid var(--r-ok); border-left: 2px solid var(--r-ok); }
+.sv-slot-carry::after { bottom: -6px; right: -6px; border-bottom: 2px solid var(--r-ok); border-right: 2px solid var(--r-ok); }
+
+/* hover-legal: the dashed border is a one-time static paint; the PULSE is
+ * an opacity animation on the promoted plate */
+.sv-slot-legal { border: 3px dashed var(--r-ok); }
+.sv-slot-legal .sv-fx { background: var(--r-ok); animation: sv-pulse 1s steps(2) infinite; }
+@keyframes sv-pulse { 0%, 100% { opacity: 0; } 50% { opacity: 0.22; } }
+
+/* hover-illegal: RISK, and static by design. It exists only while a pointer
+ * is physically over that slot mid-drag, so it can never habituate the eye;
+ * the motion requirement is carried by the deny flash, which is the branch
+ * that survives the pointer leaving. */
+.sv-slot-illegal { border-color: var(--r-warn); }
+
+/* deny flash: a difference-blend plate fading on a promoted layer */
+.sv-slot-deny .sv-fx { background: var(--r-warn); mix-blend-mode: difference; animation: sv-deny 140ms steps(2) both; }
+@keyframes sv-deny { from { opacity: 1; } to { opacity: 0; } }
+
+.sv-slot-empty { cursor: default; }
+.sv-slot-empty .kp-piece-hole { border-color: var(--sv-faint); }
+
+.sv-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 300;
+  pointer-events: none;
+  width: 96px;
+  transition: transform 40ms steps(2);
+  will-change: transform;
+}
+body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: grabbing; }
+
+.sv-join {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  font-family: var(--kp-term);
+  font-size: var(--sv-fs-body);
+  line-height: 1;
+  color: var(--r-note);
+}
+.sv-join svg { flex: none; }
+.sv-join .kp-pp-arm { stroke: var(--r-line); }
+.sv-join .kp-pp-node { fill: var(--r-line); }
+
+.sv-actions { display: flex; gap: 10px; min-height: 36px; }
+.sv-btn {
+  font-family: var(--kp-display);
+  font-size: var(--sv-fs-pill);
+  letter-spacing: 0.14em;
+  padding: 9px 16px;
+  background: transparent;
+  border: 2px solid var(--r-struct);
+  color: var(--r-line);
+}
+.sv-btn:hover { border-color: var(--r-line); }
+/* NOMINAL: CRAFT only ever exists while a legal candidate exists */
+.sv-btn-craft { background: var(--r-ok); border-color: var(--r-ok); color: var(--px-void); }
+.sv-btn-craft:hover { border-color: var(--r-ok); }
+
+/* Z4 the bookkeeping foot: a shared row costs nothing, an unshared one
+ * costs its full height */
+.sv-footchips { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: none; }
+.sv-panel .kp-chip-pct span { color: var(--r-note); }
+.sv-panel .kp-chip-pct em { color: var(--r-data); }
+.sv-weldbox { display: flex; align-items: center; gap: 9px; }
+.sv-weldcell {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--r-data);
+}
+.sv-weldcell .kp-pp-arm { stroke: var(--px-void); }
+.sv-weldcell .kp-pp-node { fill: var(--px-void); }
+.sv-weldcell-empty { background: transparent; border: 3px dashed var(--sv-faint); }
+
+/* ---------- Z5 the caption: full text, lowest box weight ---------- */
+
+.sv-caption { grid-area: caption; display: flex; flex-direction: column; gap: 7px; }
+.sv-div { display: flex; align-items: center; gap: 9px; }
+.sv-div i { flex: 1; height: 8px; background: repeating-linear-gradient(45deg, var(--r-hazard) 0 3px, transparent 3px 7px); }
+.sv-div span { font-family: var(--kp-display); font-size: var(--sv-fs-label); letter-spacing: 0.2em; color: var(--r-note); flex: none; }
+.sv-foot {
+  border: 2px solid var(--r-struct);
+  padding: 4px 10px 6px;
+  font-family: var(--kp-term);
+  font-size: var(--sv-fs-body);
+  line-height: 1.14;
+  color: var(--r-note);
+}
+
+/* the spark and weld dot: the commit moment, --r-data. Electrical, but not
+ * a risk state, so --r-warn and --r-hazard both stay away from it. */
+.sv-spark { position: fixed; left: 0; top: 0; z-index: 310; pointer-events: none; animation: sv-spark 140ms steps(3) both; }
+@keyframes sv-spark { from { opacity: 1; } to { opacity: 0.7; } }
+.sv-weldwrap { position: fixed; left: 0; top: 0; z-index: 305; pointer-events: none; animation: sv-weld 180ms steps(4) both; }
+@keyframes sv-weld { from { opacity: 0; } to { opacity: 0.9; } }
+.sv-weldwrap .kp-dweld { fill: var(--r-data); }
+
+/* ================= WIDE TIER =================
+ * Z1 spans both columns; Z2's short box sits beside the tall deck for free. */
+
+@container sv (min-width: 700px) {
+  .sv-grid {
+    grid-template-columns: minmax(230px, 30cqi) minmax(0, 1fr);
+    grid-template-areas:
+      "read    read"
+      "status  deck"
+      "caption caption";
+    gap: 12px 14px;
+    /* pinned by measuring Silkscreen's real advance against the 8-glyph
+     * worst case (STRAIGHT) in the band's actual width at each viewport */
+    --sv-fs-hero: clamp(56px, 12.1cqi, 112px);
+  }
+  .sv-read { min-height: 166px; }
+  .sv-heroline { min-height: 132px; }
+}
+
+/* the tight end of WIDE: the schematic steps down one size so the hero
+ * keeps its share of the band. Same arrangement. */
+@container sv (min-width: 700px) and (max-width: 780px) {
+  .sv-schem { width: 140px; height: 125px; }
+  .sv-read { gap: 14px; }
+  /* an empty rack has to occupy exactly the room a full one does */
+  .sv-slot { min-height: 96px; padding: 8px 3px 8px; }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container sv (max-width: 699.98px) {
+  .sv-read { flex-wrap: wrap; }
+  .sv-heroline { min-height: 70px; }
+  .sv-schem { width: 140px; height: 125px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sv-schem .arm-gain, .sv-slot-legal .sv-fx, .sv-slot-deny .sv-fx,
+  .sv-spark, .sv-weldwrap { animation: none; }
+  .sv-ghost { transition: none; }
+  .sv-slot-deny .sv-fx { opacity: 0; }
+  .sv-weldwrap { opacity: 0.9; }
+}
+
+
+/* ==========================================================================
+   REPAIR.LOG (v3 instrument panel)
+   Integrated 2026-08-01 from ui-demos/repair-log-v3 (ux-2026-07-31-repair-log-v3).
+   ========================================================================== */
+
+.rl-wrap { container-type: inline-size; container-name: rl; }
+
+.rl-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "mast" "bill" "trace" "cache" "cam" "gutter";
+  --rl-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --rl-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --rl-fs-pill: clamp(9px, calc(0.5cqi + 8.5px), 10.5px);
+  --rl-fs-hero: clamp(44px, 7.8cqi, 68px);
+  --rl-fs-slab: clamp(18px, 2.5cqi, 25px);
+  --rl-fs-tickl: clamp(8px, calc(0.4cqi + 7.5px), 9px);
+  --rl-fs-tickv: clamp(12px, calc(0.8cqi + 10px), 14px);
+  --rl-fs-log: clamp(15px, calc(0.7cqi + 13px), 17px);
+}
+
+/* ---------- CLICKABLE MEANS OUTLINED ----------
+ * Every interactive control carries a 1px --r-ok outline, so clickable and
+ * static are discriminable at a glance; static plates never take it. A
+ * channel on top of the existing idioms, not a replacement: hover and the
+ * inverse-video press floods stay, and the corner-tick reticle stays
+ * reserved for the ACTIVE option. Outline, not border, so no layout shift;
+ * a disabled control drops it, because a control you cannot press is not
+ * clickable. */
+.rl-card:not(:disabled),
+.rl-more,
+.rl-skipcard:not(:disabled),
+.rl-div .kp-btn2:not(:disabled),
+.rl-cacherail .kp-btn2:not(:disabled) {
+  outline: 1px solid var(--r-ok);
+  outline-offset: 1px;
+}
+
+/* ---------- Z1 MASTHEAD ----------
+ * A COLUMN, not a two-up row: sitting the client chips beside the verdict
+ * squeezed the win line into a 340px measure, which wrapped it to three
+ * lines and cost 24px of desk for nothing. */
+.rl-mast {
+  grid-area: mast;
+  border: 3px solid var(--ch-dim);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  padding: 3px 11px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rl-mast-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.rl-eyebrow { font-family: var(--kp-display); font-size: var(--rl-fs-label); letter-spacing: 0.18em; color: var(--r-note); }
+.rl-slab {
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-slab);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--r-ok);
+  --tick: var(--r-ok);
+  padding: 2px 8px 4px;
+  text-shadow: 0 0 20px var(--r-ok-glow);
+}
+/* the measure is reserved at two lines whatever the line's length, so a
+ * short win line and a long one leave the masthead the same height */
+.rl-quote { font-family: var(--kp-term); font-size: var(--rl-fs-body); line-height: 1.12; color: var(--ch); min-height: 2.24em; }
+/* the chips shrink and truncate rather than dropping to a second masthead
+ * row, which cost 38px at the laptop tier for no extra information */
+.rl-mast-r { display: flex; align-items: center; gap: 6px; justify-content: flex-end; min-width: 0; }
+.rl-mast-r .kp-chip-pct { min-width: 0; overflow: hidden; }
+.rl-mast-r .kp-chip-pct em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-mast-mid { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.rl-mast-act { display: flex; align-items: center; gap: 6px; flex: none; min-width: 0; }
+.rl-mast-act .kp-chip-pct { min-width: 0; overflow: hidden; }
+.rl-mast-act .kp-chip-pct em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 15ch; }
+
+/* ---------- Z2 GUTTER: ambient, never competing ---------- */
+
+/* this stack must never OUT-TALL the trace: the row it shares is paid at
+ * the taller of the two */
+.rl-gutter { grid-area: gutter; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* the CLIENT CAM STILL. The print inside is a 1:1 crop, never a downscale:
+ * the art is cut at the LARGEST box any viewport renders, anchored top
+ * centre, and the box crops it. object-fit: none scales nothing. */
+.rl-cam {
+  grid-area: cam;
+  position: relative;
+  width: 201px;
+  height: 204px;
+  overflow: hidden;
+  border: 2px solid var(--r-struct);
+  background: var(--px-void);
+}
+.rl-cam img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: none;
+  object-position: 50% 0;
+  image-rendering: pixelated;
+  filter: grayscale(1) contrast(1.15) brightness(1.05);
+}
+/* FULL COLOUR keeps its own palette: neither the grayscale pass nor the tint */
+.rl-cam[data-feed="true"] .tint,
+.rl-cam[data-feed="color"] .tint { display: none; }
+.rl-cam[data-feed="color"] img { filter: none; }
+.rl-cam .tint {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.28) 0% 25%, transparent 0% 50%),
+    var(--r-aux);
+  background-size: 2px 2px, auto;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+/* a roster gap keeps the cell's exact footprint */
+.rl-camnone {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-conic-gradient(color-mix(in srgb, var(--ch) 8%, transparent) 0% 25%, transparent 0% 50%);
+  background-size: 6px 6px;
+}
+/* the label NAMES the cell, so it takes the annotation role */
+.rl-camlabel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--px-void);
+  color: var(--r-note);
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 5px;
+}
+.rl-camtag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--r-aux);
+  color: var(--px-void);
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 5px;
+  text-align: center;
+}
+
+/* what is left of the shipped window's four boxed sparklines, which are CUT:
+ * four boxes of the same idea, none of which survived being shrunk to fit
+ * the ceiling. The VALUES survive as unboxed ticks at the gutter's own
+ * lowest priority, which is the honest weight for them. */
+.rl-ticks { display: flex; flex-direction: column; gap: 1px; }
+.rl-tick { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; line-height: 1.05; }
+.rl-tick span { font-family: var(--kp-display); font-size: var(--rl-fs-tickl); letter-spacing: 0.12em; color: var(--r-note); }
+.rl-tick em { font-style: normal; font-family: var(--kp-mono); font-size: var(--rl-fs-tickv); font-weight: 600; color: var(--ch); }
+
+/* equal-footprint slots, so a full pouch and an empty one take the same room */
+.rl-pouch { display: flex; flex-direction: column; gap: 3px; }
+.rl-pouchrow { display: flex; gap: 4px; align-items: center; }
+.rl-pslot { width: 26px; height: 26px; flex: none; border: 2px solid var(--ch-faint); display: flex; align-items: center; justify-content: center; }
+.rl-pslot.empty { border-style: dashed; }
+.rl-pslot.fresh { border-color: var(--r-ok); box-shadow: 0 0 8px var(--r-ok-glow); }
+.rl-pslot.fresh .kp-pp-arm { stroke: var(--r-ok); }
+.rl-pslot.fresh .kp-pp-node { fill: var(--r-ok); }
+
+/* ---------- Z3 THE BILL: the focal zone ---------- */
+
+.rl-bill { grid-area: bill; display: grid; gap: 8px; grid-template-columns: 1fr; min-width: 0; }
+
+/* NOT a container. Making each cell one meant cqi inside resolved against
+ * the CELL: the two hero numerals came out different sizes because BILLED's
+ * cell is wider, and card body text fell under the VT323 floor. */
+.rl-cell {
+  position: relative;
+  border: 1px solid var(--ch-faint);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 7px 10px 8px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rl-bracket, .rl-bracket > i { position: absolute; pointer-events: none; }
+.rl-bracket { inset: -1px; }
+.rl-bracket > i { inset: 0; }
+.rl-bracket::before, .rl-bracket::after,
+.rl-bracket > i::before, .rl-bracket > i::after { content: ""; position: absolute; width: 22px; height: 22px; }
+.rl-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.rl-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.rl-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.rl-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+/* one line, always: a two-line label on one branch and a one-line label on
+ * another moved the whole focal row by 17px */
+.rl-cname {
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-label);
+  letter-spacing: 0.16em;
+  color: var(--ch);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* reserved at the hero numeral's own line box: CLEAN renders as a word at a
+ * smaller size than a numeral, and without this the focal row shrinks by
+ * 22px on exactly the ticket that billed nothing */
+.rl-heroline { display: flex; align-items: flex-end; gap: 7px; min-width: 0; min-height: calc(var(--rl-fs-hero) * 0.8 + 8px); }
+.rl-num {
+  position: relative;
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-hero);
+  line-height: 0.8;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+  padding: 2px 4px;
+}
+.rl-unit { font-family: var(--kp-display); font-size: var(--rl-fs-label); letter-spacing: 0.16em; color: var(--r-note); padding-bottom: 6px; }
+.rl-num.is-clean { color: var(--r-ok); text-shadow: 0 0 20px var(--r-ok-glow); font-size: clamp(26px, 4.4cqi, 40px); }
+
+/* the itemized receipt. Values are --r-line: live data, not alarms. Nothing
+ * in a receipt is ever allowed to reach for red. Three rows are reserved
+ * whatever the branch bills, so a clean sweep, a chip breakdown and a capped
+ * bill all leave the cell the same height.
+ *
+ * padding: 0 matters: a bare <ul> keeps the browser's 40px list indent, and
+ * every receipt row was losing 40px of its cell. */
+.rl-receipt { display: flex; flex-direction: column; gap: 1px; margin-top: 1px; padding: 0; min-height: 3.2em; }
+.rl-receipt li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  list-style: none;
+  font-family: var(--kp-term);
+  font-size: var(--rl-fs-log);
+  line-height: 1.06;
+  color: var(--ch-dim);
+  min-width: 0;
+}
+/* one row is one line, always: a wrapped receipt row is what makes a capped
+ * bill a different height from a plain one */
+.rl-receipt li > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rl-receipt li em { font-style: normal; font-family: var(--kp-mono); font-size: var(--rl-fs-tickv); font-weight: 600; color: var(--r-line); flex: none; }
+/* the capped bill row: inverse video, the shipped idiom for "this is the
+ * rule biting", and hazard rather than warn so the alarm keeps its colour */
+.rl-receipt li.inv { background: var(--r-hazard); color: var(--px-void); padding: 0 3px; gap: 6px; }
+.rl-receipt li.inv em { color: var(--px-void); }
+
+.rl-cellfoot {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-tickl);
+  letter-spacing: 0.14em;
+  color: var(--r-note);
+}
+.rl-cellfoot em { font-style: normal; font-family: var(--kp-mono); font-size: var(--rl-fs-tickv); font-weight: 600; color: var(--ch); }
+
+/* THE ALARM. --r-warn appears on exactly one thing per surface, and here it
+ * is the strain the run has LEFT. With hazard red already on the window
+ * edge, the brackets and the stripe, STATIC distinction cannot beat
+ * habituation, so the alarm takes the one channel the ambient chrome
+ * structurally does not have: MOTION. If the chrome ever animates, this fix
+ * is void. The inverse flip is COMPOSITED, not painted. */
+.rl-cell.is-risk .rl-num { background: var(--r-warn); color: var(--px-void); text-shadow: none; }
+.rl-cell.is-risk .rl-cellfoot { color: var(--r-warn); }
+.rl-cell.is-risk .rl-cellfoot em { color: var(--r-warn); }
+.rl-riskflash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+.rl-cell.is-risk .rl-riskflash { animation: rl-risk-blink 1.2s steps(2) infinite; }
+@keyframes rl-risk-blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+
+/* the strain-left meter, the alarm's fourth channel: position on a scale */
+.rl-strainbar { position: relative; display: flex; gap: 2px; height: 9px; margin-top: 3px; }
+.rl-strainbar i { flex: 1; background: var(--ch-faint); }
+.rl-strainbar i.on { background: var(--r-line); box-shadow: 0 0 6px var(--px-glow); }
+.rl-cell.is-ok .rl-strainbar i.on { background: var(--r-ok); box-shadow: 0 0 6px var(--r-ok-glow); }
+.rl-cell.is-risk .rl-strainbar i.on { background: var(--r-warn); box-shadow: 0 0 6px var(--r-warn-glow); }
+
+/* the RECOVERED cell. The shipped window gave the patch piece a full poster
+ * card with a title, a flavour paragraph and a status band; it is a line
+ * item on a receipt, so it becomes the bill's third cell at the same weight
+ * as the two numerals, with the glyph doing the numeral's work. */
+.rl-piece { display: flex; align-items: center; gap: 9px; }
+.rl-piecestage {
+  width: 62px;
+  height: 62px;
+  flex: none;
+  border: 2px solid var(--ch-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--px-void);
+}
+.rl-piecestage.void { border-style: dashed; }
+.rl-piecemeta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rl-noun { font-family: var(--kp-display); font-size: var(--rl-fs-label); letter-spacing: 0.16em; color: var(--r-note); }
+.rl-pstatus {
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-tickl);
+  letter-spacing: 0.1em;
+  color: var(--r-ok);
+  align-self: flex-start;
+  padding: 2px 4px;
+  border: 1px solid var(--r-ok);
+}
+.rl-pstatus.capped { color: var(--px-void); background: var(--r-hazard); border-color: var(--r-hazard); }
+/* recovered nothing: neither a win nor a loss, so it takes the annotation
+ * role rather than borrowing either verdict colour */
+.rl-pstatus.none { color: var(--r-note); border-color: var(--r-note); }
+/* five lines, reserved AND capped: the longest branch line is the capped
+ * drop at 96 chars, and reserving four let it spill and moved the focal row
+ * by 18px. Reserved and clamped to the same number means the cell is the
+ * same height whichever branch fired, and nothing is actually hidden. */
+.rl-pline {
+  font-family: var(--kp-term);
+  font-size: var(--rl-fs-log);
+  line-height: 1.06;
+  color: var(--ch-dim);
+  margin-top: 3px;
+  min-height: 5.3em;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- Z4 THE TRACE ---------- */
+
+.rl-trace { grid-area: trace; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rl-scope { border: 1px solid var(--ch-faint); background: color-mix(in srgb, var(--ch) 3%, var(--px-void)); padding: 3px 8px 1px; }
+.rl-scopetag { display: flex; align-items: baseline; gap: 8px; }
+.rl-scopetag span { font-family: var(--kp-display); font-size: var(--rl-fs-tickl); letter-spacing: 0.16em; color: var(--r-note); }
+.rl-scopetag b { font-family: var(--kp-mono); font-size: var(--rl-fs-tickl); font-weight: 600; color: var(--ch-dim); margin-left: auto; }
+.rl-scope svg { display: block; width: 100%; }
+.rl-scope line.grid { stroke: var(--ch-faint); stroke-width: 1; }
+.rl-scope polyline { fill: none; stroke: var(--r-line); stroke-width: 2; }
+/* trap markers: hazard, so a spike is legible as an EVENT without spending
+ * the alarm colour on a readout */
+.rl-scope line.trap { stroke: var(--r-hazard); stroke-width: 2; stroke-dasharray: 3 3; }
+
+/* the dive log. The shipped rail typed 14 lines in a narrow column; here it
+ * sits under the trace it annotates, two columns wide, capped at 4 lines. */
+.rl-log { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
+.rl-logline { font-family: var(--kp-term); font-size: var(--rl-fs-log); line-height: 1.02; color: var(--ch-dim); white-space: nowrap; overflow: hidden; }
+.rl-logline.hot { color: var(--r-line); }
+
+/* ---------- Z5 THE CACHE ---------- */
+
+.rl-cache {
+  grid-area: cache;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "cdiv" "cbody" "crail";
+  min-width: 0;
+}
+.rl-cachebody { grid-area: cbody; min-width: 0; }
+.rl-cacherail { grid-area: crail; display: flex; flex-direction: column; min-width: 0; }
+/* a dry cache has nothing to decline, so the rail row collapses and the dry
+ * box takes the full width at the same reserved height as a live draft */
+.rl-cache.no-choice { grid-template-areas: "cdiv" "cbody"; }
+.rl-cache.no-choice .rl-cacherail { display: none; }
+
+/* the decline slot: dashed is the house vocabulary for "nothing here",
+ * which is exactly what skipping banks. Subordinate to the picks by
+ * treatment, part of the group by position. */
+.rl-skipcard {
+  flex: 1;
+  min-height: 44px;
+  border: 2px dashed var(--ch-dim);
+  background: transparent;
+  color: var(--ch);
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-label);
+  letter-spacing: 0.14em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6px 8px;
+  position: relative;
+}
+.rl-cacherail .kp-btn2 { align-self: stretch; padding: 11px 8px; }
+.rl-skipcard:hover:not(:disabled) { border-color: var(--ch); }
+.rl-skipcard:active:not(:disabled) { background: var(--ch); color: var(--px-void); }
+.rl-skipcard:disabled { opacity: 0.4; cursor: not-allowed; }
+/* skipped IS the taken option, so it gets the picked treatment */
+.rl-skipcard.skipped { opacity: 1; border-color: var(--r-ok); color: var(--r-ok); }
+.rl-skipcard.skipped::before, .rl-skipcard.skipped::after { content: ""; position: absolute; width: 9px; height: 9px; }
+.rl-skipcard.skipped::before { top: -4px; left: -4px; border-top: 3px solid var(--r-ok); border-left: 3px solid var(--r-ok); }
+.rl-skipcard.skipped::after { bottom: -4px; right: -4px; border-bottom: 3px solid var(--r-ok); border-right: 3px solid var(--r-ok); }
+
+.rl-div { grid-area: cdiv; display: flex; align-items: center; gap: 9px; }
+.rl-div i { flex: 1; height: 8px; background: repeating-linear-gradient(45deg, var(--r-hazard) 0 3px, transparent 3px 7px); }
+.rl-div span { font-family: var(--kp-display); font-size: var(--rl-fs-label); letter-spacing: 0.2em; color: var(--ch-dim); flex: none; }
+.rl-div em {
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-tickl);
+  letter-spacing: 0.16em;
+  color: var(--r-ok);
+  border: 1px solid var(--r-ok);
+  padding: 2px 5px;
+  flex: none;
+}
+.rl-div em.done { color: var(--ch-dim); border-color: var(--ch-dim); }
+/* the window's advance action rides the divider's right end at chip scale,
+ * never the masthead: the top right carries no buttons */
+.rl-div .kp-btn2 { padding: 1px 9px 2px; flex: none; }
+
+.rl-draft { display: grid; gap: 7px; grid-template-columns: 1fr; }
+.rl-card {
+  position: relative;
+  text-align: left;
+  border: 2px solid var(--ch-dim);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 7px 9px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.rl-card:hover:not(:disabled) { border-color: var(--ch); }
+.rl-kind { font-family: var(--kp-display); font-size: var(--rl-fs-tickl); letter-spacing: 0.12em; color: var(--r-note); }
+.rl-card strong { font-family: var(--kp-display); font-size: var(--rl-fs-label); letter-spacing: 0.12em; color: var(--ch-hot); font-weight: 400; }
+/* the description is BODY text and takes the body size: a draft card is
+ * where the player meets an augment for the first time, so it never drops
+ * below the VT323 floor to win space. Clamped to THREE RENDERED LINES by
+ * CSS rather than by a character budget in JS. */
+.rl-card p { font-family: var(--kp-term); font-size: var(--rl-fs-body); line-height: 1.02; color: var(--ch); min-height: 3.06em; }
+.rl-card p.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* the MORE row is reserved on EVERY card, shown only where there is more,
+ * so a long card and a short one are the same height. A hidden remainder
+ * always carries a visible control: a bare name with no marker is a dead end. */
+.rl-morerow { display: flex; margin-top: auto; padding-top: 1px; min-height: 18px; }
+.rl-more {
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-tickl);
+  letter-spacing: 0.12em;
+  background: transparent;
+  border: 2px solid var(--ch-dim);
+  color: var(--ch);
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.rl-more.hidden { visibility: hidden; }
+.rl-card.picked { border-color: var(--r-ok); background: color-mix(in srgb, var(--r-ok) 10%, var(--px-void)); }
+/* the reticle: a second, colour-independent channel saying WHICH was taken */
+.rl-card.picked::before, .rl-card.picked::after { content: ""; position: absolute; width: 9px; height: 9px; }
+.rl-card.picked::before { top: -4px; left: -4px; border-top: 3px solid var(--r-ok); border-left: 3px solid var(--r-ok); }
+.rl-card.picked::after { bottom: -4px; right: -4px; border-bottom: 3px solid var(--r-ok); border-right: 3px solid var(--r-ok); }
+.rl-card.dimmed { opacity: 0.4; }
+.rl-stamp {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: var(--rl-fs-tickl);
+  letter-spacing: 0.12em;
+  background: var(--r-ok);
+  color: var(--px-void);
+  padding: 2px 5px;
+}
+/* a dry cache occupies exactly the room a live draft does, reserved from
+ * the SAME parts a draft card is built from rather than a magic number */
+.rl-dry {
+  border: 2px dashed var(--ch-dim);
+  padding: 9px 11px;
+  font-family: var(--kp-term);
+  font-size: var(--rl-fs-body);
+  line-height: 1.1;
+  color: var(--ch-dim);
+  min-height: calc(3.06em + 18px + 1.62em + 26px);
+  display: flex;
+  align-items: center;
+}
+/* the eject flow. Bays full means the pick becomes a swap, so the panel
+ * replaces the draft row IN PLACE rather than opening below it: an extra
+ * row here would blow the ceiling on the state that needs the most room. */
+.rl-swap { display: flex; flex-direction: column; gap: 6px; }
+.rl-swap h4 { font-family: var(--kp-display); font-size: var(--rl-fs-tickl); letter-spacing: 0.14em; color: var(--ch-hot); font-weight: 400; }
+.rl-swaprow { display: grid; gap: 6px; grid-template-columns: 1fr; }
+
+/* ================= WIDE TIER ================= */
+
+@container rl (min-width: 700px) {
+  .rl-grid {
+    /* THE RAIL TRACK. The cam still lands at exactly a transaction cell's
+     * footprint: RECOVERED is (bill - 16px of gaps) / 3.6fr of the content
+     * column, and the content column is 100cqi - rail - 11px gap, so
+     * rail = recovered solves to rail = (100cqi - 27px) / 4.6. One equation,
+     * and the equality holds at every viewport by construction. */
+    --rl-rail: calc((100cqi - 27px) / 4.6);
+    grid-template-columns: var(--rl-rail) 1fr;
+    grid-template-areas:
+      "mast    mast"
+      "cam     bill"
+      "gutter  trace"
+      "cache   cache";
+    gap: 8px 11px;
+  }
+
+  /* the cam shares the BILL's row, so its box is the row's height: the same
+   * footprint as the three cells beside it, with no second number to keep in
+   * sync. The art is cut at the largest box this renders, and the box crops. */
+  .rl-cam { width: auto; height: auto; }
+
+  /* the stats sit BESIDE the trace on purpose: both are short stacks, and a
+   * row you do not share is a row you pay for in full */
+  .rl-gutter { padding-top: 1px; }
+
+  .rl-cache {
+    grid-template-columns: var(--rl-rail) 1fr;
+    gap: 4px 11px;
+    grid-template-areas:
+      "cdiv  cdiv"
+      "crail cbody";
+  }
+  .rl-cache.no-choice { grid-template-areas: "cdiv cdiv" "cbody cbody"; }
+
+  /* BILLED gets a wide cell: it is the one that carries an itemized receipt,
+   * and at 1fr the rows wrapped to two lines each. minmax(0, Nfr), never a
+   * bare Nfr: a bare fr is minmax(AUTO, Nfr), so BILLED's nowrap rows set a
+   * min-content floor that squeezed the other two and truncated their labels. */
+  .rl-bill { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 1fr); }
+
+  .rl-log { grid-template-columns: 1fr 1fr; }
+  /* the draft rides the BILL's own tracks, not equal thirds: same ratios,
+   * same gap, so every vertical line the cards draw is one the cells above
+   * already drew */
+  .rl-draft { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 1fr); gap: 8px; }
+  .rl-swaprow { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
+}
+
+/* the tight end of WIDE: the receipt and the alarm's note take their floors
+ * rather than truncating. Both are annotation rows, not body text. */
+@container rl (min-width: 700px) and (max-width: 800px) {
+  .rl-grid { --rl-fs-log: 15px; }
+  .rl-cellfoot { letter-spacing: 0.08em; gap: 5px; }
+  .rl-cell { padding: 7px 9px 8px; }
+  .rl-card { padding: 6px 8px 7px; }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container rl (max-width: 699.98px) {
+  .rl-gutter { flex-direction: row; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .rl-ticks { flex: 1; min-width: 150px; }
+  /* the still keeps the print's own size here: the box never scales it */
+  .rl-cam { justify-self: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* the alarm falls back to the static inverse flood underneath, which is
+   * still inverse video and still colourblind safe */
+  .rl-cell.is-risk .rl-riskflash { animation: none; opacity: 0; }
+}
+
+
+/* ==========================================================================
+   DAD.LOG (v3 instrument panel)
+   Integrated 2026-08-01 from ui-demos/dadlog-v3 (ux-2026-07-31-dadlog-v3).
+   ========================================================================== */
+
+.dl { container-type: inline-size; container-name: dl; }
+
+.dl-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "mast" "main" "foot";
+  --dl-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --dl-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --dl-fs-micro: clamp(8px, calc(0.4cqi + 7.5px), 9px);
+  --dl-fs-mono: clamp(12px, calc(0.5cqi + 11px), 14px);
+  /* a filename is the IDENTITY of a file, so the budget is set by the
+   * longest shipped one rather than letting it ellipsis */
+  --dl-fs-file: clamp(11px, calc(0.4cqi + 10.5px), 13px);
+  --dl-fs-hero: clamp(30px, 5.4cqi, 56px);
+  --dl-fs-rec: clamp(20px, 2.6cqi, 28px);
+  --dl-rail: 226px;
+  --dl-media: 256px;
+  /* ten 48px rows plus their gaps need 516px of rail. The document body
+   * gets the room too, so fewer artifacts page. */
+  --dl-mainh: 560px;
+}
+
+/* ---------- Z4 masthead ---------- */
+
+.dl-mast {
+  grid-area: mast;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  padding: 6px 10px 7px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+/* the gated volume string, verbatim but DEMOTED. Its left rule is the
+ * masthead's ambient hazard channel, and it is static forever. */
+.dl-volline {
+  font-family: var(--kp-mono);
+  font-size: clamp(11px, calc(0.35cqi + 10px), 13px);
+  color: var(--ch-dim);
+  border-left: 4px solid var(--r-hazard);
+  padding-left: 8px;
+  flex: none;
+}
+.dl-recwrap { display: flex; align-items: center; gap: 7px; flex: none; }
+.dl-recnum {
+  font-family: var(--kp-display);
+  font-size: var(--dl-fs-rec);
+  line-height: 0.9;
+  color: var(--r-data);
+  text-shadow: 0 0 16px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+}
+.dl-recnum em { font-style: normal; }
+.dl-recnum b { font-weight: 400; color: var(--r-note); font-size: 0.55em; }
+.dl-recbar { display: flex; gap: 2px; }
+.dl-recbar i { display: block; width: 7px; height: 15px; background: transparent; border: 2px solid var(--ch-faint); }
+.dl-recbar i.on { background: var(--r-line); border-color: var(--r-line); box-shadow: 0 0 6px var(--px-glow); }
+.dl-reclabel { font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.16em; color: var(--r-note); }
+
+.dl-tabs { display: flex; gap: 4px; margin-left: auto; flex: none; }
+.dl-tabs button {
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  padding: 6px 7px;
+  background: transparent;
+  border: 2px solid var(--ch-dim);
+  color: var(--ch);
+}
+.dl-tabs button:hover { border-color: var(--ch-hot); }
+/* the live filter is NOMINAL, and carries a reticle so the signal is never
+ * colour alone */
+.dl-tabs button.on { background: var(--r-ok); border-color: var(--r-ok); color: var(--px-void); position: relative; }
+.dl-tabs button.on::before, .dl-tabs button.on::after { content: ""; position: absolute; width: 7px; height: 7px; }
+.dl-tabs button.on::before { top: -4px; left: -4px; border-top: 2px solid var(--r-ok); border-left: 2px solid var(--r-ok); }
+.dl-tabs button.on::after { bottom: -4px; right: -4px; border-bottom: 2px solid var(--r-ok); border-right: 2px solid var(--r-ok); }
+
+/* ---------- the fixed-height main row ---------- */
+
+.dl-main { grid-area: main; display: grid; grid-template-columns: 1fr; gap: 10px; height: var(--dl-mainh); min-height: 0; }
+
+/* ---------- Z3 rail: the index ---------- */
+
+.dl-rail {
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 8px 8px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.dl-railhead { font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.16em; color: var(--r-note); flex: none; }
+.dl-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+
+/* The filename owns the whole top line; the doctype tag and the state
+ * caption share the line below. All three on one line ellipsised every long
+ * filename, which on an index of ten files makes half of them
+ * unidentifiable. EVERY line-height here is explicit: with the inherited
+ * default the two lines needed 53px inside a 44px row and the doctype tag
+ * climbed on top of the filename. Type at a fixed row height has to be
+ * measured, not assumed. */
+.dl-row {
+  --dl-rowpx: 8px;
+  --dl-rowpt: 6px;
+  --dl-rowpb: 7px;
+  position: relative;
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  column-gap: 7px;
+  row-gap: 3px;
+  align-items: center;
+  padding: var(--dl-rowpt) var(--dl-rowpx) var(--dl-rowpb);
+  border: 2px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  color: var(--ch);
+  height: 48px;
+  flex: none;
+}
+.dl-row:hover:not(.ghost) { border-color: var(--ch-hot); }
+.dl-row > b {
+  grid-area: 1 / 1 / 3 / 2;
+  align-self: center;
+  font-family: var(--kp-display);
+  font-size: var(--dl-fs-micro);
+  line-height: 1;
+  font-weight: 400;
+  color: var(--r-note);
+}
+.dl-row > span {
+  grid-area: 1 / 2 / 2 / 4;
+  font-family: var(--kp-mono);
+  font-size: var(--dl-fs-file);
+  line-height: 1.1;
+  font-weight: 600;
+  color: var(--r-data);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* :not(.dl-flash) throughout, because the alarm plate is also an <i>: it
+ * would otherwise take a GRID AREA, and an absolutely positioned grid item
+ * is bounded by its area, so the whole-row inverse flip rendered as a small
+ * blinking box at the end of the DAMAGED tag. */
+.dl-row > i:not(.dl-flash) {
+  grid-area: 2 / 2 / 3 / 3;
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  background: var(--r-struct);
+  color: var(--px-void);
+  padding: 3px 5px;
+}
+.dl-row > em {
+  grid-area: 2 / 3 / 3 / 4;
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  color: var(--r-note);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the open file: NOMINAL, inverse-filled, plus corner ticks */
+.dl-row.on { background: var(--r-ok); border-color: var(--r-ok); }
+.dl-row.on > b, .dl-row.on > span, .dl-row.on > em { color: var(--px-void); }
+.dl-row.on > i:not(.dl-flash) { background: var(--px-void); color: var(--r-ok); }
+.dl-row.on::before, .dl-row.on::after { content: ""; position: absolute; width: 8px; height: 8px; }
+.dl-row.on::before { top: -5px; left: -5px; border-top: 2px solid var(--r-ok); border-left: 2px solid var(--r-ok); }
+.dl-row.on::after { bottom: -5px; right: -5px; border-bottom: 2px solid var(--r-ok); border-right: 2px solid var(--r-ok); }
+
+/* THE ALARM: the damaged segment, and nothing else on this surface. */
+.dl-row.dmg { border-color: var(--r-warn); background: color-mix(in srgb, var(--r-warn) 12%, var(--px-void)); }
+/* the damaged row's filename is four characters, so its DAMAGED tag moves
+ * up beside it and the caption gets the whole second line: it was
+ * ellipsising the shipped copy that tells the player the file is not lost */
+.dl-row.dmg > span { grid-area: 1 / 2 / 2 / 3; }
+.dl-row.dmg > i:not(.dl-flash) { grid-area: 1 / 3 / 2 / 4; justify-self: end; }
+.dl-row.dmg > em { grid-area: 2 / 2 / 3 / 4; }
+.dl-row.dmg > span, .dl-row.dmg > b { color: var(--r-warn); }
+.dl-row.dmg > i:not(.dl-flash) { background: var(--r-warn); color: var(--px-void); }
+.dl-row.dmg > em { color: var(--r-warn); text-transform: none; letter-spacing: 0.06em; }
+.dl-row.dmg.on { background: var(--r-warn); border-color: var(--r-warn); }
+.dl-row.dmg.on > b, .dl-row.dmg.on > span, .dl-row.dmg.on > em { color: var(--px-void); }
+.dl-row.dmg.on > i:not(.dl-flash) { background: var(--px-void); color: var(--r-warn); }
+.dl-row.dmg.on::before { border-top-color: var(--r-warn); border-left-color: var(--r-warn); }
+.dl-row.dmg.on::after { border-bottom-color: var(--r-warn); border-right-color: var(--r-warn); }
+/* An absolutely positioned child of a GRID container with no placement is
+ * bounded by the grid's PADDING box, so the insets derive from the row's own
+ * padding tokens plus its 2px border. Hard-coding -2px left the flip inset
+ * by the padding on every side. */
+.dl-flash {
+  position: absolute;
+  inset:
+    calc(-1 * var(--dl-rowpt) - 2px)
+    calc(-1 * var(--dl-rowpx) - 2px)
+    calc(-1 * var(--dl-rowpb) - 2px);
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+/* steps() applies PER KEYFRAME INTERVAL, so steps(2) over 0/50/100 produces
+ * 0, 0.5, 1, 0.5: half the cycle sits at a 50% difference blend, which on a
+ * full-row plate is an unreadable muddy block rather than an inverse flip.
+ * steps(1, end) holds each interval flat and jumps at its end, which is the
+ * square wave the idiom actually wants. */
+.dl-row.dmg .dl-flash { animation: dl-alarm 1.2s steps(1, end) infinite; }
+@keyframes dl-alarm { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+
+/* equal-footprint empty state: an unrecovered segment holds exactly the room
+ * a recovered one does, so a day-1 volume and a finished volume are the same
+ * shape and the recovery meter has something to mean */
+.dl-row.ghost { background: transparent; border: 2px dashed var(--ch-faint); cursor: not-allowed; }
+.dl-row.ghost > b, .dl-row.ghost > em { color: var(--ch-faint); }
+.dl-row.ghost > span { color: var(--ch-faint); letter-spacing: 0.08em; }
+.dl-row.ghost > i:not(.dl-flash) { background: transparent; border: 1px solid var(--ch-faint); color: var(--ch-faint); padding: 2px 4px; }
+
+.dl-railempty { font-family: var(--kp-term); font-size: var(--dl-fs-body); line-height: 1.1; color: var(--ch-dim); padding: 4px 2px; }
+
+/* ---------- Z1/Z2 document: the focal panel ---------- */
+
+.dl-doc {
+  position: relative;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 11px 13px 10px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+.dl-bracket, .dl-bracket > i { position: absolute; pointer-events: none; }
+.dl-bracket { inset: -1px; }
+.dl-bracket > i { inset: 0; }
+.dl-bracket::before, .dl-bracket::after,
+.dl-bracket > i::before, .dl-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.dl-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.dl-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.dl-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.dl-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+/* the recovery beat */
+.dl-beat {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--px-void);
+  font-family: var(--kp-display);
+  font-size: var(--dl-fs-label);
+  letter-spacing: 0.16em;
+  color: var(--ch);
+}
+.dl-beat.mounted { color: var(--r-ok); }
+.dl-beat.fold { animation: dl-fold 90ms steps(3) forwards; }
+@keyframes dl-fold { to { transform: scaleY(0); opacity: 0; } }
+
+.dl-metarow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none; }
+.dl-chip { display: inline-flex; align-items: baseline; gap: 5px; border: 2px solid var(--ch-faint); padding: 2px 6px 3px; }
+.dl-chip span { font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.14em; color: var(--r-note); }
+.dl-chip span::before { content: "// "; opacity: 0.7; }
+.dl-chip em { font-style: normal; font-family: var(--kp-mono); font-size: var(--dl-fs-mono); font-weight: 600; color: var(--ch-hot); }
+
+/* THE FOCAL ELEMENT. Everything else on this surface is annotation around a
+ * recovered document title. */
+.dl-hero {
+  font-family: var(--kp-display);
+  font-size: var(--dl-fs-hero);
+  line-height: 0.94;
+  letter-spacing: 0.02em;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  flex: none;
+  min-height: 0.94em;
+}
+.dl-doc.dmg .dl-hero { color: var(--r-warn); text-shadow: 0 0 20px var(--r-warn-glow); }
+
+.dl-prov { font-family: var(--kp-term); font-size: var(--dl-fs-body); line-height: 1.05; color: var(--r-note); flex: none; }
+.dl-prov::before { content: "// "; }
+
+/* hazard-stripe divider: ambient chrome, static forever */
+.dl-stripe { height: 7px; flex: none; background: repeating-linear-gradient(45deg, var(--r-hazard) 0 3px, transparent 3px 7px); }
+
+/* the paged body region. Fixed height, overflow hidden: a document that does
+ * not fit does not scroll, it turns a page. */
+.dl-page { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.dl-pagein { display: flex; flex-direction: column; gap: 8px; }
+.dl-block { font-family: var(--kp-term); font-size: var(--dl-fs-body); line-height: 1.1; color: var(--ch); }
+.dl-block.hide { display: none; }
+
+/* the player's voice stays quarantined in its own dashed box: the artifact
+ * is Dad's, the annotation is not */
+.dl-bench { border: 2px dashed var(--ch-dim); padding: 6px 9px 7px; display: flex; flex-direction: column; gap: 2px; }
+.dl-bench b { font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.18em; color: var(--r-note); font-weight: 400; }
+.dl-bench p { font-family: var(--kp-term); font-size: var(--dl-fs-body); line-height: 1.1; color: var(--ch-hot); }
+
+/* min-height pins this row, so hiding the page buttons cannot change the
+ * page box, which would repaginate, which could change whether the buttons
+ * are hidden. A feedback loop is a real risk once layout feeds the
+ * paginator that feeds layout. */
+.dl-docfoot { display: flex; align-items: center; gap: 10px; flex: none; min-height: 26px; }
+.dl-wave { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dl-wave svg { display: block; }
+.dl-wave polyline { fill: none; stroke: var(--r-line); stroke-width: 1; }
+.dl-wave span { font-family: var(--kp-mono); font-size: 10px; color: var(--ch-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.dl-pager { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.dl-pager em { font-style: normal; font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.14em; color: var(--r-note); }
+.dl-pager button {
+  font-family: var(--kp-display);
+  font-size: var(--dl-fs-micro);
+  letter-spacing: 0.1em;
+  padding: 4px 8px;
+  background: transparent;
+  border: 2px solid var(--ch-dim);
+  color: var(--ch);
+}
+.dl-pager button:hover:not(:disabled) { border-color: var(--ch-hot); }
+.dl-pager button:disabled { border-style: dashed; color: var(--ch-faint); border-color: var(--ch-faint); cursor: not-allowed; }
+/* at the reviewed height every shipped artifact lands on one page, so the
+ * two step buttons would be permanently dead chrome. The PAGE readout stays,
+ * because it is a true statement about the document; visibility rather than
+ * display keeps the row from moving. */
+.dl-pager[data-single="1"] button { visibility: hidden; }
+
+/* ---------- Z2 media: the attachment ---------- */
+
+.dl-media { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 0; }
+
+/* 1:1, never downscaled: the source is 240x320 exactly, so one dither dot is
+ * one CSS pixel. 244x324 outer, because box-sizing is border-box repo wide:
+ * the 2px bezel each side has to be PAID FOR, or the print gets silently
+ * cropped by 4px, which is the accidental resample law 5 forbids. */
+.dl-scan {
+  position: relative;
+  width: 244px;
+  height: 324px;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid var(--r-struct);
+  background: var(--px-void);
+}
+.dl-scan img { position: absolute; top: 0; left: 0; display: block; image-rendering: pixelated; }
+.dl-scan .tint {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.28) 0% 25%, transparent 0% 50%),
+    var(--r-aux);
+  background-size: 2px 2px, auto;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+/* FULL COLOUR is a COLOURISATION of the same frame, not a reveal of colour
+ * that was there, so it drops the tint and keeps its own palette. */
+.dl-media[data-scan="true"] .tint, .dl-media[data-scan="color"] .tint { display: none; }
+.dl-scan .shade { position: absolute; inset: 0; background: var(--px-void); transform-origin: top; transform: scaleY(1); }
+.dl-scan.on .shade { animation: dl-wipe 620ms steps(13) forwards; }
+@keyframes dl-wipe { to { transform: scaleY(0); } }
+.dl-scantag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  background: var(--r-aux);
+  color: var(--px-void);
+  padding: 3px 5px;
+}
+.dl-scancap { font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.14em; color: var(--r-note); flex: none; }
+
+/* the no-payload cell holds exactly the room a scan does */
+.dl-nopay {
+  width: 244px;
+  height: 324px;
+  flex: none;
+  border: 2px dashed var(--ch-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--ch) 5%, transparent) 0% 25%, transparent 0% 50%) 0 0 / 8px 8px;
+}
+.dl-nopay b { font-family: var(--kp-display); font-size: var(--dl-fs-label); letter-spacing: 0.16em; color: var(--ch-dim); font-weight: 400; }
+.dl-nopay i { font-style: normal; font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.14em; color: var(--r-note); }
+
+/* the source-media plate: ambient furniture that fills the media column to
+ * the doc column's height, so nothing pays for a row of its own */
+.dl-plate {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--ch-faint);
+  padding: 5px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+.dl-plate > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dl-plate span { font-family: var(--kp-display); font-size: var(--dl-fs-micro); letter-spacing: 0.12em; color: var(--r-note); }
+.dl-plate em { font-style: normal; font-family: var(--kp-mono); font-size: 11px; color: var(--ch); }
+
+/* ---------- Z4 footline ---------- */
+
+.dl-foot {
+  grid-area: foot;
+  border: 1px solid var(--ch-faint);
+  padding: 4px 9px 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dl-foot button {
+  font-family: var(--kp-display);
+  font-size: var(--dl-fs-micro);
+  letter-spacing: 0.12em;
+  padding: 5px 10px;
+  background: transparent;
+  border: 2px solid var(--ch-dim);
+  color: var(--ch);
+}
+.dl-foot button:hover:not(:disabled) { background: var(--ch); color: var(--px-void); }
+.dl-foot button:disabled { border-style: dashed; color: var(--ch-faint); border-color: var(--ch-faint); cursor: not-allowed; }
+.dl-banks { margin-left: auto; display: flex; gap: 12px; min-width: 0; overflow: hidden; }
+.dl-banks div { display: flex; gap: 7px; align-items: baseline; }
+.dl-banks b { font-family: var(--kp-display); font-size: 8px; letter-spacing: 0.14em; color: var(--r-note); font-weight: 400; }
+.dl-banks span { font-family: var(--kp-mono); font-size: 10px; color: var(--ch-faint); white-space: nowrap; }
+
+/* ================= WIDE TIER ================= */
+
+@container dl (min-width: 700px) {
+  .dl-main { grid-template-columns: var(--dl-rail) minmax(0, 1fr) var(--dl-media); }
+}
+
+/* the tight end of WIDE: the rail gives back 20px and the media column keeps
+ * its 240px cell untouched, because cropping a 1:1 print smaller is the one
+ * thing law 5 forbids */
+@container dl (min-width: 700px) and (max-width: 960px) {
+  .dl-grid { --dl-rail: 208px; }
+  .dl-doc { padding: 10px 11px 9px; }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container dl (max-width: 699.98px) {
+  .dl-main { grid-template-rows: auto minmax(0, 1fr); height: auto; }
+  .dl-media { display: none; }
+  .dl-list { flex-direction: row; overflow: hidden; }
+  .dl-row { width: 190px; }
+  .dl-doc { min-height: 420px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-scan.on .shade, .dl-beat.fold { animation: none; }
+  .dl-scan .shade { transform: scaleY(0); }
+  /* the alarm falls back to the static inverse flood, which is still
+   * inverse video and still colourblind safe */
+  .dl-row.dmg .dl-flash { animation: none; opacity: 0; }
+}
+
+
+/* ==========================================================================
+   DARKNET.LNK (v3 instrument panel)
+   Integrated 2026-08-01 from ui-demos/darknet-v3 (ux-2026-07-31-darknet-v3).
+   The stepped-notch chrome is this window's IDENTITY and stays unmapped to
+   any role, per the panel queue.
+   ========================================================================== */
+
+.dn { container-type: inline-size; container-name: dn; }
+
+.dn-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "focal" "status" "log" "prompt" "cmds" "foot";
+  /* cqi in a custom property resolves at the USE SITE, so the focal tokens
+   * land against .dn-focal's own container and everything else against the
+   * window's */
+  --dn-fs-body: clamp(19px, calc(0.6cqi + 17px), 21px);
+  --dn-fs-label: clamp(9px, calc(0.5cqi + 8px), 11px);
+  --dn-fs-val: clamp(12px, calc(0.8cqi + 10px), 14px);
+  --dn-fs-loghero: clamp(20px, calc(4cqi + 12px), 28px);
+  --dn-fs-hero: clamp(56px, 26cqi, 104px);
+  --dn-fs-deadhero: clamp(26px, 13cqi, 42px);
+}
+
+/* ---------- Z1 THE FOCAL CELL ----------
+ * Four states, ONE footprint: min-height is set by the tallest real content,
+ * so the window never reflows as the channel's state moves. The
+ * equal-footprint rule for empty slots, generalised to empty STATES. */
+
+.dn-focal {
+  grid-area: focal;
+  container-type: inline-size;
+  container-name: dnf;
+  position: relative;
+  min-height: 196px;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 11px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.dn-bracket, .dn-bracket > i { position: absolute; pointer-events: none; }
+.dn-bracket { inset: -1px; }
+.dn-bracket > i { inset: 0; }
+.dn-bracket::before, .dn-bracket::after,
+.dn-bracket > i::before, .dn-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.dn-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.dn-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.dn-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.dn-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+.dn-eyebrow {
+  position: relative;
+  align-self: flex-start;
+  font-family: var(--kp-display);
+  font-size: var(--dn-fs-label);
+  letter-spacing: 0.18em;
+  color: var(--r-note);
+  padding: 1px 2px;
+}
+.dn-eyebrow::before { content: "// "; opacity: 0.7; }
+
+.dn-focal-body { flex: 1; display: flex; align-items: center; gap: 18px; min-width: 0; }
+.dn-focal-hero { flex: none; display: flex; align-items: flex-end; gap: 7px; min-width: 0; }
+.dn-focal-rows { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* DEAD stacks instead of sharing the row: the alarm hero is a wide slab, and
+ * beside it the rows column had 10px of width and the epilogue wrapped one
+ * character per line. There is no 3-row block in this state anyway. */
+.dn-focal[data-state="dead"] .dn-focal-body { flex-direction: column; align-items: flex-start; gap: 9px; }
+.dn-focal[data-state="dead"] .dn-focal-rows { flex: none; width: 100%; }
+.dn-deadsub { font-family: var(--kp-term); font-size: var(--dn-fs-body); line-height: 1.2; color: color-mix(in srgb, var(--r-line) 74%, var(--px-void)); }
+.dn-focal-rows .kp-datarow { padding: 5px 10px; gap: 10px; border-color: var(--r-struct); }
+.dn-focal-rows .kp-datarow > span { font-size: var(--dn-fs-label); color: var(--r-note); }
+.dn-focal-rows .kp-datarow > em { font-size: var(--dn-fs-val); color: var(--r-line); }
+
+/* OFFER: tonight's price, the largest glyphs on the page and the only
+ * numeral that takes --r-data. This number used to live in a 13px chip. */
+.dn-num {
+  font-family: var(--kp-display);
+  font-size: var(--dn-fs-hero);
+  line-height: 0.8;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+}
+.dn-unit { font-family: var(--kp-display); font-size: var(--dn-fs-label); letter-spacing: 0.16em; color: var(--r-note); padding-bottom: 5px; }
+/* the one-shot lock-in flash when the channel resolves and the offer lands */
+.dn-focal.dn-lock .dn-num { animation: dn-lock-flash 200ms steps(4); }
+@keyframes dn-lock-flash {
+  0%, 100% { background: transparent; color: var(--r-data); }
+  50% { background: var(--r-ok); color: var(--px-void); }
+}
+
+/* PENDING: nothing is known yet. Ambient and structural, and it holds the
+ * footprint so the flip to OFFER does not move the window. */
+.dn-pend {
+  font-family: var(--kp-display);
+  font-size: var(--dn-fs-hero);
+  line-height: 0.8;
+  color: var(--r-struct);
+  animation: kp-cursor-blink 0.9s steps(2) infinite;
+}
+
+/* REVEAL: the piece that just landed, at hero scale. --r-aux, because it
+ * arrived from the far end of the wire; it settles to --r-line once filed
+ * into the pouch rack in the log. */
+.dn-drop { display: block; filter: drop-shadow(0 0 12px var(--px-glow)); }
+.dn-drop .kp-pp-arm { stroke: var(--r-aux); }
+.dn-drop .kp-pp-node { fill: var(--r-aux); }
+.dn-drop-scramble { opacity: 0.55; }
+
+/* DEAD: the alarm. Colour + inverse video + motion, and the only thing on
+ * this surface that takes --r-warn. */
+.dn-dead {
+  position: relative;
+  display: inline-block;
+  font-family: var(--kp-display);
+  font-size: var(--dn-fs-deadhero);
+  line-height: 1.02;
+  letter-spacing: 0.02em;
+  background: var(--r-warn);
+  color: var(--px-void);
+  padding: 5px 10px 7px;
+}
+.dn-alarm-flash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+.dn-focal[data-state="dead"] .dn-alarm-flash { animation: dn-alarm-blink 1.2s steps(2) infinite; }
+/* HOLD each half rather than stepping THROUGH it: steps(2) applies to each
+ * keyframe INTERVAL, so 0%,100%{0} 50%{1} actually samples 0, 0.5, 1, 0.5,
+ * and half the cycle sits at half opacity. On a 375px alarm slab that is a
+ * pink wash that eats the text; holding each half gives the square wave the
+ * idiom is supposed to be, and both phases stay legible. */
+@keyframes dn-alarm-blink {
+  0%, 49.99% { opacity: 0; }
+  50%, 100% { opacity: 1; }
+}
+
+/* the jackpot: the same composited technique, --r-ok, and it STOPS. Three
+ * iterations, not infinite, so a celebration can never be mistaken for the
+ * alarm, which is the one thing here that loops forever. */
+.dn-jack-flash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-ok);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+.dn-eyebrow.dn-jack .dn-jack-flash { animation: dn-jack-blink 1.2s steps(2) 3; }
+@keyframes dn-jack-blink {
+  0%, 49.99% { opacity: 0; }
+  50%, 100% { opacity: 1; }
+}
+
+/* ---------- Z2 STATUS STRIP ----------
+ * Four chips (RATE is gone: its number lives in the focal cell now, never
+ * restated at two scales). ONE column, not two: a 2x2 block sized itself on
+ * the widest chip in each column and left the focal cell too little width. */
+
+.dn-status {
+  grid-area: status;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  align-content: start;
+  align-self: start;
+}
+.dn-status .kp-chip-pct { justify-content: space-between; border-color: var(--r-struct); }
+.dn-status .kp-chip-pct span { color: var(--r-note); font-size: var(--dn-fs-label); }
+.dn-status .kp-chip-pct em { color: var(--r-line); font-size: var(--dn-fs-val); }
+
+/* the value-change flash: the only way BAL or POUCH moves on this surface is
+ * a completed trade, so the flash is --r-ok by role, not by decoration */
+.chip-flash { animation: chip-flash 240ms steps(2); }
+@keyframes chip-flash {
+  from { background: var(--r-ok); }
+  to { background: transparent; }
+}
+/* ROUTE in its dead state takes the alarm's colour and inverse flood but NOT
+ * its motion: three simultaneously pulsing reds read as noise, and the law
+ * only demands the alarm have a channel the chrome does not. */
+.chip-alarm { background: var(--r-warn); border-color: var(--r-warn); }
+.chip-alarm span, .chip-alarm em { color: var(--px-void) !important; }
+
+/* ---------- Z3 THE LOG ---------- */
+
+.dn-log-clip {
+  grid-area: log;
+  position: relative;
+  height: 280px;
+  overflow: hidden;
+  border: 2px solid var(--r-struct);
+  /* IDENTITY: the heavier dither. A coarse 8px --ch2 checker OVER the house
+   * 4px --ch grain, which no other window carries. */
+  background-image:
+    repeating-conic-gradient(color-mix(in srgb, var(--ch2) 11%, transparent) 0% 25%, transparent 0% 50%),
+    repeating-conic-gradient(color-mix(in srgb, var(--ch) 4%, transparent) 0% 25%, transparent 0% 50%);
+  background-size: 8px 8px, 4px 4px;
+}
+.dn-log-clip::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 54px;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--px-void), transparent);
+}
+.dn-log {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px 10px;
+}
+
+/* ---------- Z4 PROMPT, Z5 TRADES, Z6 FOOTLINE ---------- */
+
+.dn-prompt {
+  grid-area: prompt;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 7px 12px;
+  border: 2px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  cursor: text;
+}
+.dn-plabel { font-family: var(--kp-term); font-size: var(--dn-fs-body); color: var(--r-note); white-space: nowrap; }
+.dn-pinput { font-family: var(--kp-term); font-size: var(--dn-fs-body); color: var(--r-data); white-space: pre; overflow: hidden; }
+.dn-caret {
+  display: inline-block;
+  width: 10px;
+  height: 17px;
+  background: var(--r-data);
+  vertical-align: text-bottom;
+  animation: kp-cursor-blink 0.9s steps(2) infinite;
+}
+.dn-prompt.dead { opacity: 0.35; border-style: dashed; }
+.dn-prompt.dead .dn-caret { animation: none; background: var(--r-struct); }
+
+.dn-cmds { grid-area: cmds; display: flex; gap: 6px; flex-wrap: wrap; }
+.dn-cmds button {
+  font-family: var(--kp-display);
+  font-size: var(--dn-fs-label);
+  letter-spacing: 0.12em;
+  padding: 6px 11px;
+  background: transparent;
+  border: 2px solid var(--r-struct);
+  color: var(--r-line);
+}
+.dn-cmds button:hover:not(:disabled) { background: var(--r-line); color: var(--px-void); border-color: var(--r-line); }
+.dn-cmds button:active:not(:disabled) { transform: translate(1px, 1px); }
+.dn-cmds button:disabled { color: var(--ch-faint); border-color: var(--r-struct); border-style: dashed; cursor: not-allowed; }
+
+.dn-footwrap { grid-area: foot; display: flex; flex-direction: column; gap: 6px; }
+.dn-stripe { --stripe: var(--r-hazard); }
+.dn-foot { font-family: var(--kp-term); font-size: var(--dn-fs-body); line-height: 1.15; color: color-mix(in srgb, var(--r-line) 55%, var(--px-void)); }
+
+/* ================= WIDE TIER ================= */
+
+@container dn (min-width: 700px) {
+  .dn-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "focal  status"
+      "log    log"
+      "prompt prompt"
+      "cmds   cmds"
+      "foot   foot";
+    gap: 8px 10px;
+  }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container dn (max-width: 699.98px) {
+  .dn-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dn-focal-body { flex-wrap: wrap; }
+  .dn-log-clip { height: 240px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip-flash, .dn-caret, .dn-pend, .dn-focal.dn-lock .dn-num,
+  .dn-eyebrow.dn-jack .dn-jack-flash { animation: none; }
+  /* the alarm falls back to the static inverse flood it already has, which
+   * is still colourblind safe and still survives the CRT layer */
+  .dn-focal[data-state="dead"] .dn-alarm-flash { animation: none; opacity: 0; }
+}
+
+/* ---------- DARKNET.LNK: the log's own vocabulary ---------- */
+
+.t-line { font-family: var(--kp-term); font-size: var(--dn-fs-body); line-height: 1.22; color: var(--r-line); min-height: 1.22em; overflow-wrap: anywhere; }
+/* your own machine talking: r-line, stepped down in weight, never a new role */
+.t-sys { color: color-mix(in srgb, var(--r-line) 74%, var(--px-void)); }
+.t-dim { color: color-mix(in srgb, var(--r-line) 46%, var(--px-void)); }
+.t-you { color: var(--r-line); }
+/* the far end. Everything the peer sends arrives over the wire and reads as
+ * a different signal class, which is exactly what --r-aux is for. */
+.t-ven { color: var(--r-aux); }
+.t-ven::before { content: "??> "; opacity: 0.8; }
+/* the UNREGISTERED CHANNEL line is structural red: this channel is not on
+ * any registry and the OS says so once, statically, forever */
+.t-haz { color: var(--r-hazard); }
+.t-hop { color: var(--r-note); }
+.t-ok { color: var(--r-ok); }
+.t-gap { height: 8px; flex: none; }
+
+/* the log's own alarm line: colour + inverse, demoted from the shipped 40px
+ * hero now that the focal cell carries the primary alarm-scale statement */
+.dn-hero {
+  align-self: flex-start;
+  font-family: var(--kp-display);
+  font-size: var(--dn-fs-loghero);
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  background: var(--r-warn);
+  color: var(--px-void);
+  padding: 4px 10px 6px;
+  margin: 4px 0 2px;
+}
+/* SHORT is a DENY, not the alarm. It takes the ambient structural red, a
+ * static inverse flood that never moves, so nobody reaches for red twice. */
+.dn-deny {
+  align-self: flex-start;
+  background: var(--r-hazard);
+  color: var(--px-void);
+  padding: 1px 10px;
+  font-family: var(--kp-term);
+  font-size: var(--dn-fs-body);
+  line-height: 1.22;
+}
+.dn-landed { animation: kp-shake-sm 180ms steps(4); }
+
+/* the vendor banner: a splash the log scrolls like output */
+.banner {
+  position: relative;
+  margin: 8px 2px 4px;
+  padding: 13px 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 2px solid var(--r-aux);
+  background-image: repeating-conic-gradient(color-mix(in srgb, var(--ch2) 16%, transparent) 0% 25%, transparent 0% 50%);
+  background-size: 8px 8px;
+}
+.banner-mark { flex: none; display: flex; }
+.banner-mark svg { display: block; shape-rendering: crispEdges; filter: drop-shadow(0 0 10px var(--px-glow)); }
+.banner-mark rect.a { fill: var(--r-aux); }
+.banner-mark rect.b { fill: var(--ch-hot); }
+.banner-word {
+  font-family: var(--kp-display);
+  font-size: clamp(22px, calc(2.4cqi + 12px), 30px);
+  line-height: 1;
+  letter-spacing: 0.12em;
+  color: var(--r-aux);
+  -webkit-mask-image: repeating-linear-gradient(0deg, #000 0 2px, transparent 2px 4px);
+  mask-image: repeating-linear-gradient(0deg, #000 0 2px, transparent 2px 4px);
+}
+.banner-tag {
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  background: var(--r-aux);
+  color: var(--px-void);
+  padding: 4px 8px;
+  margin-top: 7px;
+  display: inline-block;
+}
+/* the occasional monochrome glitch slip: ambient identity flavour, on a
+ * compositor property only */
+.banner-glitch { animation: banner-slip 6s steps(1) infinite; }
+@keyframes banner-slip {
+  0%, 91% { transform: translate(0, 0); }
+  92%, 94% { transform: translate(-3px, 1px); }
+  95%, 97% { transform: translate(2px, -1px); }
+  98%, 100% { transform: translate(0, 0); }
+}
+
+/* rich output blocks inside the log. LIST is DEMOTED: once the focal cell
+ * carries the surface's one big visual statement, this card no longer needs
+ * card-sized scale to read. */
+.o-card {
+  position: relative;
+  margin: 6px 2px;
+  padding: 9px 11px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border: 2px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+}
+.o-cell {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--r-struct);
+  background-image: repeating-conic-gradient(color-mix(in srgb, var(--ch2) 18%, transparent) 0% 25%, transparent 0% 50%);
+  background-size: 8px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.o-q { font-family: var(--kp-display); font-size: 20px; color: var(--r-aux); animation: o-q-pulse 1.4s steps(2) infinite; }
+@keyframes o-q-pulse { 50% { opacity: 0.45; } }
+.o-rows { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.o-rows .kp-datarow { padding: 4px 10px; border-color: var(--r-struct); }
+.o-rows .kp-datarow > span { font-size: var(--dn-fs-label); color: var(--r-note); }
+.o-rows .kp-datarow > em { font-size: var(--dn-fs-val); color: var(--r-line); }
+.o-tag {
+  position: absolute;
+  top: -11px;
+  left: 8px;
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  background: var(--r-aux);
+  color: var(--px-void);
+  padding: 3px 8px;
+}
+.o-help { margin: 6px 2px; border: 2px solid var(--r-struct); padding: 7px 12px; display: flex; flex-direction: column; gap: 1px; }
+.o-help p { font-family: var(--kp-term); font-size: var(--dn-fs-body); line-height: 1.28; color: var(--r-line); }
+.o-help p b { display: inline-block; min-width: 96px; font-weight: 400; color: var(--r-note); }
+.o-escrow { display: flex; align-items: center; gap: 12px; margin: 2px 0; }
+.o-escrow span { font-family: var(--kp-display); font-size: var(--dn-fs-label); letter-spacing: 0.14em; color: var(--r-note); }
+.o-escrow span::before { content: "// "; opacity: 0.7; }
+.o-escrow .kp-bar-hatch { flex: 1; max-width: 240px; border-color: var(--r-struct); }
+.o-escrow .kp-bar-hatch i { background: repeating-linear-gradient(45deg, var(--r-line) 0 3px, transparent 3px 6px); }
+.o-escrow em { font-style: normal; font-family: var(--kp-mono); font-size: var(--dn-fs-val); font-weight: 600; color: var(--r-line); }
+.o-row1 { margin: 3px 0; max-width: 240px; }
+.o-row1 .kp-datarow { padding: 5px 10px; border-color: var(--r-struct); }
+.o-row1 .kp-datarow > span { font-size: var(--dn-fs-label); color: var(--r-note); }
+.o-row1 .kp-datarow > em { font-size: var(--dn-fs-val); color: var(--r-line); }
+/* a piece is drawn in --r-aux the instant it lands in the focal cell, then
+ * settles to --r-line here once it is filed: a deliberate handoff from
+ * ARRIVING to HELD */
+.o-pouch { display: flex; align-items: center; gap: 9px; margin: 3px 0 2px; }
+.o-pouch .kp-piece-hole { width: 26px; height: 26px; border-width: 2px; border-color: var(--r-struct); }
+.o-pouch i.slot { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--r-struct); }
+.o-pouch .kp-pp-arm { stroke: var(--r-line); }
+.o-pouch .kp-pp-node { fill: var(--r-data); }
+.o-pouch span, .o-pouchtag { font-family: var(--kp-display); font-size: var(--dn-fs-label); letter-spacing: 0.14em; color: var(--r-note); }
+.dn-jackpot {
+  align-self: flex-start;
+  background: var(--r-ok);
+  color: var(--px-void);
+  padding: 1px 10px;
+  font-family: var(--kp-term);
+  font-size: var(--dn-fs-body);
+  line-height: 1.22;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .o-q, .banner-glitch, .dn-landed { animation: none; }
+}
+
+
+/* ==========================================================================
+   NIGHT.SYS (v3 instrument panel) - the system's low-density proof
+   Integrated 2026-08-01 from ui-demos/night-v3 (ux-2026-07-31-night-v3).
+   ========================================================================== */
+
+.nt-eva { container-type: inline-size; container-name: nt; }
+
+.nt-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "top" "hero" "strip" "shop" "foot";
+  --nt-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --nt-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --nt-fs-pill: clamp(10px, calc(0.6cqi + 9px), 12px);
+  --nt-fs-slab: clamp(18px, 2.4cqi, 24px);
+  --nt-fs-strain: clamp(22px, 3.2cqi, 30px);
+  --nt-fs-tickl: clamp(8px, calc(0.4cqi + 7.5px), 9px);
+  /* THE FOCAL TOKEN. cqi in a custom property resolves at the USE SITE, and
+   * this one is only ever used inside .nt-hero, which is its own container,
+   * so it resolves against the hero CARD's width rather than the window's.
+   * That is deliberate: it is what keeps the glyph inside its card, and it
+   * holds the hero:strain ratio at ~2.3x on every supported viewport. */
+  --nt-fs-hero: clamp(48px, 13.5cqi, 82px);
+}
+
+/* ---------- Z1 TOP STRIP: day marker + strain, one row ---------- */
+
+.nt-top {
+  grid-area: top;
+  border: 3px solid var(--ch-dim);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  padding: 7px 11px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 18px;
+}
+.nt-mast-l { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 300px; }
+.nt-eyebrow { font-family: var(--kp-display); font-size: var(--nt-fs-label); letter-spacing: 0.18em; color: var(--r-note); }
+/* THE DEMOTED DAY MARKER. Rejected as the focal element: it is pure state
+ * with no decision attached, a chapter marker read once per night. It takes
+ * NO role token (not --r-data, which is the hero's) and renders in plain
+ * ambient ink, so it signals its demotion by treatment as well as by size. */
+.nt-slab { font-family: var(--kp-display); font-size: var(--nt-fs-slab); line-height: 1; letter-spacing: 0.04em; color: var(--ch); }
+.nt-slab b { font-weight: 400; color: var(--ch-hot); }
+.nt-line { font-family: var(--kp-term); font-size: var(--nt-fs-body); line-height: 1.15; color: var(--ch-dim); }
+
+/* strain: 2nd in the glance order. Loud, never focal. */
+.nt-strainzone { display: flex; flex-direction: column; gap: 4px; flex: 0 1 auto; min-width: 0; }
+.nt-strainhead { display: flex; align-items: baseline; gap: 9px; }
+.nt-strainlabel { font-family: var(--kp-display); font-size: var(--nt-fs-label); letter-spacing: 0.2em; color: var(--r-note); }
+/* the regen pop keeps its room whether or not it fires, so the silent branch
+ * occupies the identical footprint */
+.nt-pop {
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: var(--nt-fs-tickl);
+  letter-spacing: 0.14em;
+  color: var(--r-ok);
+  min-width: 84px;
+  visibility: hidden;
+}
+.nt-pop.on { visibility: visible; }
+
+.nt-strainrow { display: flex; align-items: center; gap: 10px; }
+/* line-height must be >= 1 here, not the 0.9 crush the reference uses at its
+ * larger size: at 26px Silkscreen's glyph box is 29px tall, and against a 0.9
+ * line box the digits overflowed their padding box, so the RISK band's
+ * inverse-video flood painted a red slab with the digits hanging outside it,
+ * dark on dark. Channel 2 of the alarm has to actually cover its own number.
+ * font-weight stays 400: Silkscreen Bold mushes into the scanlines. */
+.nt-strainnum {
+  position: relative;
+  font-family: var(--kp-display);
+  font-size: var(--nt-fs-strain);
+  font-weight: 400;
+  line-height: 1.15;
+  padding: 3px 7px;
+  color: var(--r-data);
+  text-shadow: 0 0 16px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.4ch;
+  text-align: right;
+}
+.nt-strainnum b { font-weight: 400; }
+.nt-strainbar { position: relative; display: flex; gap: 2px; width: 264px; height: 18px; flex: none; }
+.nt-strainbar i { flex: 1; background: var(--ch-faint); }
+.nt-strainbar i.on { background: var(--r-line); box-shadow: 0 0 6px var(--px-glow); }
+
+.nt-strain-ok .nt-strainnum { color: var(--r-ok); text-shadow: 0 0 16px var(--r-ok-glow); }
+.nt-strain-ok .nt-strainbar i.on { background: var(--r-ok); box-shadow: 0 0 6px var(--r-ok-glow); }
+
+/* the RISK band, at or below 35. POLARITY: strain counts DOWN as the run
+ * wears, so risk is the LOW end of the meter. */
+.nt-strain-low .nt-strainnum { background: var(--r-warn); color: var(--px-void); text-shadow: none; }
+.nt-strain-low .nt-strainbar i.on { background: var(--r-warn); box-shadow: 0 0 6px var(--r-warn-glow); }
+.nt-strain-low .nt-strainlabel { color: var(--r-warn); }
+
+.nt-riskflash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+/* steps(1), NOT steps(2), and three stops rather than two. steps(2)
+ * subdivides each keyframe INTERVAL, so the plate spends half its cycle at
+ * opacity 0.5, which is precisely the value at which a difference plate
+ * destroys the readout: it maps both the red flood and the void digits to the
+ * same mid tone, so the alarm renders as a featureless red slab with its
+ * number gone, half the time. steps(1) across three stops holds 0 for 600ms
+ * then 1 for 600ms, a true two-state flip. */
+.nt-strain-low .nt-riskflash { animation: nt-risk-blink 1.2s steps(1) infinite; }
+@keyframes nt-risk-blink { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---------- Z2 PICK ROW: the focal zone ---------- */
+
+.nt-hero {
+  grid-area: hero;
+  container-type: inline-size;
+  container-name: nthero;
+  position: relative;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 13px 14px 12px;
+  min-width: 0;
+  min-height: 186px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nt-hero.is-empty { border-style: dashed; }
+
+.nt-bracket, .nt-bracket > i { position: absolute; pointer-events: none; }
+.nt-bracket { inset: -1px; }
+.nt-bracket > i { inset: 0; }
+.nt-bracket::before, .nt-bracket::after,
+.nt-bracket > i::before, .nt-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.nt-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.nt-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.nt-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.nt-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+/* the reticle: the house idiom for an active option, INSET from the hazard
+ * brackets so the two corner treatments never collide. The outer brackets say
+ * "this is the focal panel" and are always present; this inner one says "this
+ * option is selected" and appears only once a pick exists. */
+.nt-reticle { position: absolute; inset: 7px; pointer-events: none; }
+.nt-hero.is-picked .nt-reticle::before,
+.nt-hero.is-picked .nt-reticle::after { content: ""; position: absolute; width: 8px; height: 8px; }
+.nt-hero.is-picked .nt-reticle::before { top: 0; left: 0; border-top: 2px solid var(--r-ok); border-left: 2px solid var(--r-ok); }
+.nt-hero.is-picked .nt-reticle::after { bottom: 0; right: 0; border-bottom: 2px solid var(--r-ok); border-right: 2px solid var(--r-ok); }
+
+.nt-pname { font-family: var(--kp-display); font-size: var(--nt-fs-label); letter-spacing: 0.16em; color: var(--r-note); min-height: 1.2em; }
+.nt-heroline { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.nt-num {
+  font-family: var(--kp-display);
+  font-size: var(--nt-fs-hero);
+  line-height: 0.82;
+  color: var(--r-data);
+  text-shadow: 0 0 22px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nt-hero.is-empty .nt-num { color: var(--ch-faint); text-shadow: none; }
+.nt-stamp {
+  font-style: normal;
+  font-family: var(--kp-display);
+  font-size: var(--nt-fs-tickl);
+  letter-spacing: 0.16em;
+  color: var(--px-void);
+  background: var(--r-ok);
+  padding: 4px 6px;
+  margin-bottom: 5px;
+  white-space: nowrap;
+}
+.nt-detail { font-family: var(--kp-term); font-size: var(--nt-fs-body); line-height: 1.06; color: var(--ch); min-height: 2.12em; margin-top: auto; }
+
+/* the option strip: every option that is not in the hero slot */
+.nt-strip { grid-area: strip; display: flex; flex-direction: column; gap: 6px; align-content: start; min-width: 0; }
+.nt-opt {
+  position: relative;
+  text-align: left;
+  font-family: var(--kp-display);
+  font-size: var(--nt-fs-pill);
+  letter-spacing: 0.1em;
+  line-height: 1.25;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--ch);
+  border: 2px solid var(--r-struct);
+  min-height: 36px;
+}
+/* CLICKABLE-CONTROL AFFORDANCE, the shared cross-panel treatment: every LIVE
+ * control carries a visible 1px --r-ok outline outside its chrome, on top of
+ * the existing idioms. Disabled controls keep their dashed --r-struct chrome
+ * and take no outline, so live vs capped is readable at a glance without
+ * reaching for --r-warn. Outlines do not participate in layout, so the
+ * equal-footprint law is untouched. */
+.nt-opt:not(:disabled) { outline: 1px solid var(--r-ok); outline-offset: 2px; cursor: pointer; }
+.nt-opt:hover:not(:disabled) { background: var(--ch); color: var(--px-void); border-color: var(--ch); }
+.nt-opt:active:not(:disabled) { transform: translate(1px, 1px); }
+/* MAXED options take --r-struct, never --r-warn: nobody reaches for red twice */
+.nt-opt:disabled { border-style: dashed; color: var(--ch-faint); border-color: var(--ch-faint); cursor: not-allowed; }
+
+/* ---------- Z3 SHOP ROW: three purchases, one row ---------- */
+
+.nt-shop { grid-area: shop; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.nt-div { display: flex; align-items: center; gap: 9px; }
+.nt-div i { flex: 1; height: 8px; background: repeating-linear-gradient(45deg, var(--r-hazard) 0 3px, transparent 3px 7px); }
+.nt-div span { font-family: var(--kp-display); font-size: var(--nt-fs-label); letter-spacing: 0.2em; color: var(--ch-dim); flex: none; }
+
+/* THE CREDITS BALANCE: the one number every shop decision is judged against
+ * rides the spend zone's own header, so the balance and the three costs it
+ * gates share a single glance and the player never leaves the zone to find
+ * it. Sized at the DAY marker's step: prominent, but below STRAIN and less
+ * than half the hero, so it supports the decision without becoming a second
+ * hero. font-weight stays 400: Silkscreen Bold mushes into the scanlines. */
+.nt-crbal {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex: none;
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--ch) 4%, var(--px-void));
+  padding: 3px 9px 4px;
+}
+.nt-div .nt-crlab { font-size: var(--nt-fs-label); letter-spacing: 0.18em; color: var(--r-note); }
+.nt-crbal b {
+  font-family: var(--kp-display);
+  font-weight: 400;
+  font-size: var(--nt-fs-slab);
+  line-height: 1;
+  color: var(--r-data);
+  text-shadow: 0 0 14px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+.nt-div .nt-crunit { font-size: var(--nt-fs-label); letter-spacing: 0.08em; color: var(--r-note); }
+
+.nt-shopgrid { display: grid; gap: 9px; grid-template-columns: 1fr; }
+.nt-cell {
+  border: 2px solid var(--ch-dim);
+  background: color-mix(in srgb, var(--ch) 3%, var(--px-void));
+  padding: 8px 9px 9px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* min-height reserves TWO lines of label whether or not this button needs
+ * them: without it a capped late-run night was 16px shorter than a live
+ * early-run one, and the window jumped between visits. The equal-footprint
+ * rule reaches control labels, not just empty slots.
+ * Deliberately NOT display:flex: flexing this button promotes its text nodes
+ * to flex items and drops the whitespace-only ones, so "300 cr" rendered
+ * "300CR". It stays a block. */
+.nt-buy {
+  font-family: var(--kp-display);
+  font-size: var(--nt-fs-pill);
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  text-align: left;
+  padding: 8px 9px;
+  background: transparent;
+  color: var(--ch);
+  border: 2px solid var(--ch-dim);
+  display: block;
+  min-height: calc(2.6em + 20px);
+}
+.nt-buy:not(:disabled) { outline: 1px solid var(--r-ok); outline-offset: 2px; cursor: pointer; }
+.nt-buy:hover:not(:disabled) { background: var(--ch); color: var(--px-void); border-color: var(--ch); }
+.nt-buy:active:not(:disabled) { transform: translate(1px, 1px); }
+/* unaffordable and capped states take --r-struct, never --r-warn */
+.nt-buy:disabled { border-style: dashed; color: var(--ch-faint); border-color: var(--ch-faint); cursor: not-allowed; }
+.nt-buy .cr { color: var(--r-note); }
+.nt-buy .amt { color: var(--r-line); }
+.nt-buy:hover:not(:disabled) .cr, .nt-buy:hover:not(:disabled) .amt { color: var(--px-void); }
+.nt-buy:disabled .cr, .nt-buy:disabled .amt { color: var(--ch-faint); }
+
+/* the shop row is deliberately ambient: its status sentences stay plain dim
+ * text with no per-token colour splitting */
+.nt-status { font-family: var(--kp-term); font-size: var(--nt-fs-body); line-height: 1.08; color: var(--ch-dim); min-height: 2.16em; }
+.nt-aux { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; min-height: 34px; }
+
+.nt-rack { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.nt-rack > span { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.nt-hole { width: 26px; height: 26px; border: 2px dashed var(--ch-faint); display: block; }
+
+/* ---------- Z4 FOOTER ---------- */
+
+.nt-foot {
+  grid-area: foot;
+  border: 2px solid var(--ch-faint);
+  padding: 7px 10px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.nt-pointer { font-family: var(--kp-term); font-size: var(--nt-fs-body); line-height: 1.1; color: var(--ch-dim); min-width: 0; }
+/* CLOSE THE NIGHT: --r-ok owns the ARMED state, --r-struct the locked one.
+ * The lock is the third of the pick state machine's three guarantees. */
+.nt-close {
+  font-family: var(--kp-display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  padding: 11px 18px;
+  border: 2px solid var(--ch-faint);
+  background: transparent;
+  color: var(--ch-faint);
+  flex: none;
+  cursor: not-allowed;
+}
+.nt-close.is-armed {
+  background: var(--r-ok);
+  border-color: var(--r-ok);
+  color: var(--px-void);
+  cursor: pointer;
+  outline: 1px solid var(--r-ok);
+  outline-offset: 2px;
+  filter: drop-shadow(4px 4px 0 rgba(0, 0, 0, 0.7));
+}
+.nt-close.is-armed:active { transform: translate(2px, 2px); filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.7)); }
+
+/* ================= WIDE TIER ================= */
+
+@container nt (min-width: 700px) {
+  .nt-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-areas:
+      "top  top"
+      "hero strip"
+      "shop shop"
+      "foot foot";
+    gap: 10px 12px;
+  }
+  /* three purchases on ONE row. Stacked, they cost three full-width rows for
+   * three short controls; beside each other their height is free. */
+  .nt-shopgrid { grid-template-columns: 1fr 1.15fr 1fr; }
+  .nt-strainbar { width: 300px; }
+}
+
+@container nt (min-width: 700px) and (max-width: 800px) {
+  .nt-strainbar { width: 232px; }
+  .nt-cell { padding: 7px 8px 8px; }
+  .nt-hero { padding: 11px 12px 10px; min-height: 172px; }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container nt (max-width: 699.98px) {
+  .nt-top { flex-direction: column; align-items: stretch; }
+  .nt-strainbar { width: auto; flex: 1; }
+  /* the strip spends the now-full width and saves the now-precious height */
+  .nt-strip { flex-direction: row; flex-wrap: wrap; }
+  .nt-opt { flex: 1 1 46%; }
+  .nt-hero { min-height: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* the alarm falls back to the static inverse flood, still inverse video
+   * and still colourblind-safe */
+  .nt-strain-low .nt-riskflash { animation: none; opacity: 0; }
+}
+
+
+/* ==========================================================================
+   MORNING.LOG / the story scene player (v3 instrument panel)
+   Integrated 2026-08-01 from ui-demos/morning-log (ux-2026-07-31-morning-log).
+   ========================================================================== */
+
+.ml-eva { container-type: inline-size; container-name: ml; }
+
+.ml-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-rows: auto 1fr;
+  --ml-fs-body: clamp(19px, calc(1cqi + 17px), 21px);
+  --ml-fs-label: clamp(9px, calc(0.6cqi + 8px), 11px);
+  --ml-fs-tickl: clamp(8px, calc(0.4cqi + 7.5px), 9px);
+  --ml-fs-tickv: clamp(11px, calc(0.7cqi + 9.5px), 13px);
+  /* THE FOCAL ELEMENT: 3.6x to 4.3x the body cap across the supported
+   * viewports. Law 2 asks for one focal element at extreme scale and warns
+   * that 1.3x is not hierarchy; this is the only element on a surface made
+   * of prose that is allowed to grow. */
+  --ml-fs-num: clamp(76px, 10cqi, 128px);
+}
+.ml-card { cursor: pointer; }
+
+/* ---------- ROW 1: the masthead ---------- */
+
+.ml-mast {
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--r-line) 4%, var(--px-void));
+  padding: 9px 12px 11px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.ml-mast-l { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ml-eyebrow { font-family: var(--kp-display); font-size: var(--ml-fs-label); letter-spacing: 0.18em; color: var(--r-note); }
+.ml-numwrap { display: flex; align-items: flex-end; gap: 10px; position: relative; padding: 2px 8px 0 2px; }
+.ml-unit { font-family: var(--kp-display); font-size: var(--ml-fs-label); letter-spacing: 0.16em; color: var(--r-note); padding-bottom: 10px; }
+.ml-num {
+  font-family: var(--kp-display);
+  font-size: var(--ml-fs-num);
+  line-height: 0.78;
+  color: var(--r-data);
+  text-shadow: 0 0 24px var(--px-glow);
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-bracket, .ml-bracket > i { position: absolute; pointer-events: none; }
+.ml-bracket { inset: 0; }
+.ml-bracket > i { inset: 0; }
+.ml-bracket::before, .ml-bracket::after,
+.ml-bracket > i::before, .ml-bracket > i::after { content: ""; position: absolute; width: 24px; height: 24px; }
+.ml-bracket::before { top: 0; left: 0; border-top: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.ml-bracket::after { top: 0; right: 0; border-top: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+.ml-bracket > i::before { bottom: 0; left: 0; border-bottom: 4px solid var(--r-hazard); border-left: 4px solid var(--r-hazard); }
+.ml-bracket > i::after { bottom: 0; right: 0; border-bottom: 4px solid var(--r-hazard); border-right: 4px solid var(--r-hazard); }
+
+.ml-mast-r { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* the register chip. NOMINAL by default; the ONE alarm on this surface arms
+ * here and nowhere else, and when it does it floods inverse video AND moves. */
+.ml-regchip { position: relative; border-color: var(--r-struct); }
+.ml-regchip span { color: var(--r-note); }
+.ml-regchip em { color: var(--r-ok); }
+.ml-regchip.is-warn { background: var(--r-warn); border-color: var(--r-warn); }
+.ml-regchip.is-warn span, .ml-regchip.is-warn em { color: var(--px-void); }
+.ml-riskflash {
+  position: absolute;
+  inset: -2px;
+  background: var(--r-warn);
+  mix-blend-mode: difference;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+.ml-regchip.is-warn .ml-riskflash { animation: ml-risk-blink 1.2s steps(2) infinite; }
+@keyframes ml-risk-blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+
+/* beat position: unboxed and tiny, by design rather than after hitting the
+ * ceiling */
+.ml-beatdots { display: inline-flex; gap: 5px; align-items: center; }
+.ml-beatdots i { display: block; width: 9px; height: 9px; border: 2px solid var(--r-struct); background: transparent; }
+.ml-beatdots i.on { background: var(--r-line); border-color: var(--r-line); }
+.ml-beatdots i.done { background: var(--r-struct); border-color: var(--r-struct); }
+
+/* ---------- ROW 2: the body. FIXED HEIGHT. ----------
+ * HEIGHT, not min-height. A minimum is not a guarantee: once the log
+ * accumulates, a min-height row grows with it and the window reflows again,
+ * which is the exact defect this panel exists to fix. */
+
+.ml-body { display: grid; grid-template-columns: 288px 1fr; gap: 12px; height: 360px; }
+.ml-body > * { min-height: 0; }
+
+/* the image stage: one cell, three fills. The frame and tag carry --r-aux,
+ * not the tint: FULL COLOUR is the default treatment here, which drops the
+ * ink tint, so if --r-aux lived only in the tint the role would stop
+ * painting in the default state. Putting it on the cell's own chrome is the
+ * more honest assignment anyway: --r-aux means "a different signal class",
+ * which is true of the camera whatever treatment its picture is in. */
+.ml-stagecol { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ml-stage {
+  position: relative;
+  width: 288px;
+  height: 216px;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid var(--r-aux);
+  background: var(--px-void);
+}
+.ml-plate { position: absolute; inset: 0; }
+.ml-stage img { position: absolute; top: 0; left: 0; display: block; image-rendering: pixelated; filter: grayscale(1) contrast(1.15) brightness(1.05); }
+.ml-stage .tint {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.28) 0% 25%, transparent 0% 50%),
+    var(--r-aux);
+  background-size: 2px 2px, auto;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.ml-stage[data-feed="true"] .tint,
+.ml-stage[data-feed="color"] .tint { display: none; }
+.ml-stage[data-feed="color"] img { filter: none; }
+
+/* STANDBY: no camera is framed, so there is nothing to tint and no REC
+ * light. A dead channel, not a decorated one, and NO SIGNAL has to read as
+ * a dead channel rather than a box someone forgot to fill. */
+.ml-stage[data-fill="standby"] img,
+.ml-stage[data-fill="standby"] .tint { display: none; }
+.ml-nosig {
+  position: absolute;
+  inset: 0;
+  display: none;
+  background-image:
+    repeating-conic-gradient(color-mix(in srgb, var(--r-struct) 55%, transparent) 0% 25%, transparent 0% 50%),
+    repeating-conic-gradient(color-mix(in srgb, var(--r-struct) 32%, transparent) 0% 25%, transparent 0% 50%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.55) 0 1px, transparent 1px 3px);
+  background-size: 4px 4px, 8px 8px, auto;
+  background-position: 0 0, 2px 2px, 0 0;
+  opacity: 0.5;
+}
+.ml-nosig::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 44%;
+  height: 26px;
+  background: repeating-linear-gradient(90deg,
+    color-mix(in srgb, var(--r-struct) 70%, transparent) 0 7px,
+    transparent 7px 13px,
+    color-mix(in srgb, var(--r-struct) 45%, transparent) 13px 22px,
+    transparent 22px 31px);
+}
+.ml-stage[data-fill="standby"] .ml-nosig { display: block; }
+
+.ml-camtag {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--r-aux);
+  background: var(--px-void);
+  padding: 3px 5px;
+}
+/* no signal is not a channel, so it takes neither the aux role nor its frame */
+.ml-stage[data-fill="standby"] .ml-camtag { color: var(--r-struct); }
+.ml-stage[data-fill="standby"] { border-color: color-mix(in srgb, var(--r-struct) 60%, var(--px-void)); }
+
+.ml-rec {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  background: var(--r-hazard);
+  color: var(--ch-hot);
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  padding: 3px 5px;
+}
+.ml-stage[data-fill="counter"] .ml-rec { display: flex; }
+.ml-rec i { width: 5px; height: 5px; background: var(--ch-hot); }
+
+/* the cut between cameras: opacity only, on a promoted layer. A directional
+ * wipe would compete with the text panel's own motion. */
+.ml-plate { animation: ml-cut 140ms steps(4); will-change: opacity; }
+@keyframes ml-cut { from { opacity: 0; } to { opacity: 1; } }
+
+/* the shift readout, pinned to the bottom of the column so the camera sits
+ * under the masthead and the readout shares a baseline with the text
+ * panel's own footer rather than floating in the slack */
+.ml-ticks { display: flex; flex-direction: column; gap: 3px; margin-top: auto; }
+.ml-tick { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ml-tick span { font-family: var(--kp-display); font-size: var(--ml-fs-tickl); letter-spacing: 0.12em; color: var(--r-note); }
+.ml-tick span::before { content: "// "; opacity: 0.7; }
+.ml-tick em { font-style: normal; font-family: var(--kp-mono); font-size: var(--ml-fs-tickv); font-weight: 600; color: var(--r-line); }
+
+/* ---------- the text panel ---------- */
+
+.ml-text {
+  border: 1px solid var(--r-struct);
+  background: color-mix(in srgb, var(--r-line) 3%, var(--px-void));
+  padding: 14px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+.ml-name {
+  align-self: flex-start;
+  font-family: var(--kp-display);
+  font-size: var(--ml-fs-label);
+  letter-spacing: 0.16em;
+  color: var(--r-note);
+  border: 2px solid var(--r-struct);
+  padding: 4px 8px;
+}
+.ml-name::before { content: "// "; opacity: 0.7; }
+.ml-lines { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: hidden; }
+/* bottom-anchored via an auto margin on the FIRST entry, not via
+ * justify-content: flex-end */
+.ml-lines > .ml-entry:first-child { margin-top: auto; }
+.ml-entry { display: flex; flex-direction: column; gap: 5px; }
+.ml-line { font-family: var(--kp-term); font-size: var(--ml-fs-body); line-height: 1.3; color: var(--r-line); min-height: 1.3em; }
+/* already read: demoted, never deleted */
+.ml-entry.is-past .ml-line { color: var(--r-struct); }
+.ml-past-name { font-family: var(--kp-display); font-size: var(--ml-fs-tickl); letter-spacing: 0.16em; color: var(--r-struct); }
+.ml-past-name::before { content: "// "; opacity: 0.7; }
+
+.ml-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ml-hint { font-family: var(--kp-display); font-size: var(--ml-fs-tickl); letter-spacing: 0.14em; color: var(--r-struct); }
+/* the control is a readout as much as a button: --r-ok once the beat is
+ * fully revealed and it is genuinely ready to advance */
+.ml-next {
+  font-family: var(--kp-display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  color: var(--r-struct);
+  box-shadow: inset 0 0 0 2px var(--r-struct);
+  filter: none;
+}
+.ml-next.is-ready { background: var(--r-ok); color: var(--px-void); box-shadow: none; filter: drop-shadow(4px 4px 0 rgba(0, 0, 0, 0.7)); }
+.ml-next.is-ready:hover { background: var(--r-data); }
+.ml-next:active { transform: translate(2px, 2px); }
+
+/* ================= WIDE TIER ================= */
+
+@container ml (min-width: 700px) {
+  .ml-body { grid-template-columns: 288px 1fr; }
+}
+
+/* ================= NARROW TIER: a tiling fallback ================= */
+
+@container ml (max-width: 699.98px) {
+  .ml-body { grid-template-columns: 1fr; }
+  .ml-stagecol { flex-direction: row; align-items: flex-start; gap: 12px; }
+  .ml-ticks { flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* the settled state in one frame: no cut, no blink */
+  .ml-plate { animation: none; }
+  .ml-regchip.is-warn .ml-riskflash { animation: none; opacity: 0; }
 }
