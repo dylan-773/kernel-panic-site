@@ -66,12 +66,25 @@ const WIN_DEFS: WinDef[] = [
  * `run.strain > 70` danger check lit the chip at full health. */
 const STRAIN_ALARM_AT = 35;
 
-type Scheme = "default" | "nerv" | "tokyo";
-const SCHEME_LABEL: Record<Scheme, string> = {
-  default: "DEFAULT",
-  nerv: "NERV",
-  tokyo: "TOKYO NIGHT",
-};
+/* The theme picker carries BOTH generations, because v3 kept v2's law
+ * rather than replacing it: with no scheme set, all eight role tokens
+ * collapse onto the single accent, so the three HUES are the v2
+ * single-phosphor look in three colours, and the two SCHEMES pull the
+ * roles apart. A named scheme sets its own --ch/--px-void, so it wins over
+ * whatever hue is underneath it. */
+interface Theme {
+  id: string;
+  label: string;
+  hue: "lavender" | "magenta" | "phosphor";
+  scheme: "nerv" | "tokyo" | null;
+}
+const THEMES: Theme[] = [
+  { id: "lavender", label: "LAVENDER", hue: "lavender", scheme: null },
+  { id: "magenta", label: "MAGENTA", hue: "magenta", scheme: null },
+  { id: "phosphor", label: "PHOSPHOR", hue: "phosphor", scheme: null },
+  { id: "nerv", label: "NERV", hue: "lavender", scheme: "nerv" },
+  { id: "tokyo", label: "TOKYO NIGHT", hue: "lavender", scheme: "tokyo" },
+];
 
 /** The six glass layers of law 6. FLAT and OFF are the only modes; OFF
  * removes every layer outright rather than fading them. */
@@ -152,14 +165,17 @@ export function ShopOS() {
   // The inbox's staged width (the content reports the wide phase).
   const [inboxWide, setInboxWide] = useState(false);
   // v3 ruling 14, desktop-wide: colour is eight ROLE tokens, and a scheme
-  // is a remap of those tokens and nothing else. DEFAULT sets no attribute
-  // at all, so every role collapses onto the single v2 accent and the shell
-  // renders exactly as it shipped. That reversibility is the point.
-  const [scheme, setScheme] = useState<Scheme>("default");
+  // is a remap of those tokens and nothing else. A hue-only theme sets no
+  // scheme attribute at all, so every role collapses onto the single accent
+  // and the shell renders exactly as v2 shipped. That reversibility is the
+  // point, and it is what lets both generations share one picker.
+  const [themeIndex, setThemeIndex] = useState(0);
+  const theme = THEMES[themeIndex];
   useEffect(() => {
-    if (scheme === "default") delete document.documentElement.dataset.scheme;
-    else document.documentElement.dataset.scheme = scheme;
-  }, [scheme]);
+    document.documentElement.dataset.hue = theme.hue;
+    if (theme.scheme === null) delete document.documentElement.dataset.scheme;
+    else document.documentElement.dataset.scheme = theme.scheme;
+  }, [theme]);
   // The tube: FLAT (default) or OFF. Both chrome bands grow under the glass
   // so their content sits clear of the bezel falloff.
   const [crt, setCrt] = useState<"flat" | "off">("flat");
@@ -564,10 +580,10 @@ export function ShopOS() {
               type="button"
               onClick={() => {
                 sfx("hueSwap", { bus: "ui" });
-                setScheme((s) => (s === "default" ? "nerv" : s === "nerv" ? "tokyo" : "default"));
+                setThemeIndex((i) => (i + 1) % THEMES.length);
               }}
             >
-              SCHEME: {SCHEME_LABEL[scheme]}
+              THEME: {theme.label}
             </button>
             <button
               type="button"
