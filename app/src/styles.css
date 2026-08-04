@@ -3918,6 +3918,54 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 }
 .dv-snd:hover { background: var(--ch); color: var(--px-void); }
 
+/* ---- viewport tabs: which grid is on the stage ---- */
+.dv-viewtabs {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  margin-right: auto;
+}
+.dv-viewtab {
+  position: relative;
+  font-family: var(--kp-display);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 5px 10px;
+  background: transparent;
+  border: 2px solid var(--ch-dim);
+  color: var(--ch-dim);
+  cursor: pointer;
+}
+.dv-viewtab + .dv-viewtab { border-left-width: 0; }
+.dv-viewtab:hover { color: var(--ch); }
+.dv-viewtab-on { background: var(--ch); color: var(--px-void); border-color: var(--ch); }
+.dv-viewtab-o { border-color: var(--dv-o-dim); color: var(--dv-o-dim); }
+.dv-viewtab-o:hover { color: var(--dv-o); }
+.dv-viewtab-o.dv-viewtab-on {
+  background: var(--dv-o);
+  color: var(--px-void);
+  border-color: var(--dv-o);
+}
+/* Something is happening on the grid you are not watching. Shape, not just
+   colour: an unmissable square pip in the tab corner. */
+.dv-viewtab-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  background: var(--r-hazard, var(--dv-o));
+  animation: dv-blink 0.5s steps(2) infinite;
+}
+.dv-viewtab-key {
+  align-self: center;
+  margin-left: 7px;
+  font-family: var(--kp-display);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--dv-sch-dim);
+}
+
 /* ================= stage ================= */
 
 .dv-stage {
@@ -4149,6 +4197,33 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 .dv-board { width: 100%; height: 100%; position: relative; z-index: 1; }
 
+/* ---- viewport slide ----
+   The two grids run opposite ways and occupy the same screen position, so a
+   switch is a pan across one continuous board rather than a cut. Transform
+   and opacity only, so it stays on the compositor, and NOT steps(): steps is
+   reserved for alarms, and a stepped pan would read as a fault rather than a
+   move. `.dv-boardwrap` already clips, so nothing escapes the frame. */
+.dv-slidein {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+.dv-slidein-l { animation: dv-pan-l 260ms cubic-bezier(0.22, 0.7, 0.28, 1) both; }
+.dv-slidein-r { animation: dv-pan-r 260ms cubic-bezier(0.22, 0.7, 0.28, 1) both; }
+@keyframes dv-pan-l {
+  from { transform: translate3d(48%, 0, 0); opacity: 0.15; }
+  to { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+@keyframes dv-pan-r {
+  from { transform: translate3d(-48%, 0, 0); opacity: 0.15; }
+  to { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+
 /* dithered haze pooling at the frame edges, clean center (a real
  * element, not ::before - the frame ticks own those slots) */
 .dv-boardtex {
@@ -4361,14 +4436,14 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 /* ports */
 .dv-portbody { fill: var(--px-void); stroke-width: 3; shape-rendering: crispEdges; }
-.dv-k-entryP .dv-portbody { stroke: var(--ch); }
-.dv-k-entryO .dv-portbody { stroke: var(--dv-o); }
+.dv-b-p.dv-k-entry .dv-portbody { stroke: var(--ch); }
+.dv-b-o.dv-k-entry .dv-portbody { stroke: var(--dv-o); }
 .dv-porteye { shape-rendering: crispEdges; }
-.dv-k-entryP .dv-porteye { fill: var(--ch-hot); }
-.dv-k-entryO .dv-porteye { fill: var(--dv-o-hot); }
-.dv-k-entryP .dv-arm { stroke: var(--ch); }
-.dv-k-entryO .dv-arm { stroke: var(--dv-o); }
-.dv-k-entryO .dv-arms, .dv-k-entryO .dv-portbody { animation: dv-jitter 1.7s steps(1) infinite; }
+.dv-b-p.dv-k-entry .dv-porteye { fill: var(--ch-hot); }
+.dv-b-o.dv-k-entry .dv-porteye { fill: var(--dv-o-hot); }
+.dv-b-p.dv-k-entry .dv-arm { stroke: var(--ch); }
+.dv-b-o.dv-k-entry .dv-arm { stroke: var(--dv-o); }
+.dv-b-o.dv-k-entry .dv-arms, .dv-b-o.dv-k-entry .dv-portbody { animation: dv-jitter 1.7s steps(1) infinite; }
 
 .dv-tag {
   font-family: var(--kp-display);
@@ -4382,9 +4457,21 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 .dv-corebody { fill: url(#dvHatch); stroke: var(--ch); stroke-width: 2.5; shape-rendering: crispEdges; }
 .dv-coreeye { fill: var(--ch); shape-rendering: crispEdges; }
 .dv-coreb { fill: none; stroke: var(--ch-dim); stroke-width: 2.5; shape-rendering: crispEdges; }
-.dv-lit-p .dv-corebody, .dv-lit-o .dv-corebody { stroke: var(--ch-hot); filter: drop-shadow(0 0 9px var(--px-glow)); }
-.dv-lit-p .dv-coreeye, .dv-lit-o .dv-coreeye { fill: var(--ch-hot); }
-.dv-lit-p .dv-coreb, .dv-lit-o .dv-coreb { stroke: var(--ch-hot); animation: dv-blink 0.7s steps(2) infinite; }
+.dv-lit-p .dv-corebody { stroke: var(--ch-hot); filter: drop-shadow(0 0 9px var(--px-glow)); }
+.dv-lit-o .dv-corebody { stroke: var(--dv-o-hot); filter: drop-shadow(0 0 9px var(--dv-o)); }
+.dv-lit-p .dv-coreeye { fill: var(--ch-hot); }
+.dv-lit-o .dv-coreeye { fill: var(--dv-o-hot); }
+.dv-lit-p .dv-coreb { stroke: var(--ch-hot); animation: dv-blink 0.7s steps(2) infinite; }
+.dv-lit-o .dv-coreb { stroke: var(--dv-o-hot); animation: dv-blink 0.7s steps(2) infinite; }
+
+/* BUILT BUT DARK: they cut this line. Ownership tint stays (the work is
+   still yours), the hub hollows out and the arms drop to the dim schematic
+   channel, so a cut reads as a break in the current and not as lost ground.
+   Never colour alone: the hub goes from filled to hollow. */
+.dv-cut .dv-node { fill: var(--px-void); }
+.dv-cut .dv-arm { stroke: var(--dv-sch-dim); }
+.dv-b-p.dv-cut .dv-node { stroke: var(--ch-dim); }
+.dv-b-o.dv-cut .dv-node { stroke: var(--dv-o); opacity: 0.7; }
 
 /* ---- board overlays ---- */
 
@@ -4408,7 +4495,9 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
   background: var(--px-void);
   color: var(--ch-hot);
   box-shadow: inset 0 0 0 2px var(--ch-hot), 6px 6px 0 rgba(0, 0, 0, 0.7);
-  animation: dv-pulse-in 1500ms steps(5) both;
+  /* 1500 -> 2300ms. These labels are the only running commentary on what just
+     hit you, and at 1.5s a trap fire scrolled past before it could be read. */
+  animation: dv-pulse-in 2300ms steps(6) both;
 }
 .dv-pulse-bad { background: var(--ch); color: var(--px-void); box-shadow: inset 0 0 0 2px var(--ch), 6px 6px 0 rgba(0, 0, 0, 0.7); }
 @keyframes dv-pulse-in {
@@ -4827,10 +4916,11 @@ html[data-scheme] .dv-pulse-bad {
   .dv-cell-in, .dv-pop, .dv-armlit.dv-flow-out, .dv-armlit.dv-flow-in,
   .dv-log-lines > span:last-child:not(.dv-log-div)::after,
   .dv-traced .dv-trace, .dv-own-o .dv-jit,
-  .dv-k-entryO .dv-arms, .dv-k-entryO .dv-portbody, .dv-seg-now,
+  .dv-b-o.dv-k-entry .dv-arms, .dv-b-o.dv-k-entry .dv-portbody, .dv-seg-now,
   .dv-key-arming, .dv-piece-armed, .dv-turnread > em, .dv-threat-max,
   .dv-virus, .dv-sweep, .dv-pulse, .dv-aimed .dv-legalring,
-  .dv-lit-p .dv-coreb, .dv-lit-o .dv-coreb, .dv-par-pop {
+  .dv-slidein-l, .dv-slidein-r,
+  .dv-lit-p .dv-coreb, .dv-lit-o .dv-coreb, .dv-viewtab-dot, .dv-par-pop {
     animation: none;
   }
 }

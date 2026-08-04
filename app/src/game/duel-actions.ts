@@ -1,7 +1,9 @@
 import {
   DefendMode,
-  GRIDLOCK_CHIP,
   LOCK_ROUNDS,
+  PRESSURE_RANGE,
+  PRESSURE_STRAIN_PER,
+  REDIRECT_STRAIN_PER,
   OppMode,
   PAR_STRAIN_PER,
   PROGRAM_COST,
@@ -12,28 +14,37 @@ import {
   WARD_RADIUS,
   WARD_ROUNDS,
   cascadeRam,
+  surgeTierOf,
 } from "./content/kit";
-import { canPlace, computeDuelPower, routeCost, routePlan, runFlood } from "./duel-power";
-import {
-  DuelEndKind,
-  DuelState,
-  PIECE_I,
-  PIECE_L,
-  PIECE_T,
-  PIECE_X,
-  ROUND_CAP,
-  Side,
-  TrapKind,
-  otherSide,
-} from "./duel-types";
-import { PLACE_COST, armCount, shapeClassOf } from "./patch-cells";
+import { routeCost, routePlan, settlePower } from "./duel-power";
+import { Board, DuelEndKind, DuelState, ROUND_CAP, Side, TrapKind, otherSide } from "./duel-types";
+import { PLACE_COST } from "./patch-cells";
 import { nextU32 } from "./rng";
 
 /**
- * Shared state-mutation helpers for the flood-claim duel. Both sides play
+ * Shared state-mutation helpers for the split-board duel. Both sides play
  * by exactly these rules; the reducer validates player input and the
  * opponent planner picks moves, but resolution lives here.
+ *
+ * Which board a verb acts on is fixed by the verb, never by the payload:
+ *
+ *   rotate / place  -> your own board
+ *   ATTACK modes    -> the enemy's board (redirect, halt, siphon)
+ *   DEFEND modes    -> your own board   (purge, lock, ward)
+ *
+ * Deriving it rather than tagging it is deliberate: a mistagged index would
+ * mutate the wrong grid, and there is no way for the reducer and the planner
+ * to disagree about a rule neither of them stores.
  */
+
+/** The board a cast of this program and mode lands on, from the caster's view. */
+export function targetBoardOf(s: DuelState, caster: Side, prog: Program): Board {
+  return prog === "attack" ? s.boards[otherSide(caster)] : s.boards[caster];
+}
+
+export function targetSideOf(caster: Side, prog: Program): Side {
+  return prog === "attack" ? otherSide(caster) : caster;
+}
 
 export function emit(s: DuelState, kind: string, n?: number): void {
   s.fx.push({ id: s.fxNext++, kind, n });
@@ -73,7 +84,7 @@ export function tutorialLessonDone(s: DuelState): boolean {
 export function programUnlocked(s: DuelState, prog: Program): boolean {
   if (!s.cfg.tutorial) return true;
   if (prog === "scan") {
-    return s.tutFlags.scanned || s.cells.some((c) => c.trap && c.trap.by === "opp");
+    return s.tutFlags.scanned || s.boards.player.cells.some((c) => c.trap);
   }
   if (prog === "defend") return s.tutFlags.scanned;
   return s.tutFlags.purged;
@@ -105,15 +116,22 @@ export function finishDuel(
   if (reason) s.endReason = reason;
   s.notice = null;
   if (winner === "player") {
-    // Strain is an efficiency bill: rotations past par, sprung traps,
-    // and dragging the link to the cap. At or under par, clean, zero.
+    /*
+     * Strain is the bill for every round the machine was winning and every
+     * rotation you did not need. A perfect dive still bills exactly zero -
+     * every term is avoidable in principle, which is what keeps this an
+     * efficiency bill rather than attrition you cannot play out of.
+     */
     const over = Math.max(0, s.econ.player.rotations - s.par);
     let chip = PAR_STRAIN_PER * over;
     // First Fault forgives the strain of one sprung trap, never the tempo.
     chip += 4 * Math.max(0, s.econ.player.trapsFired - (kitHas(s, "firstFault") ? 1 : 0));
+    // Every twist it landed on your grid cost you ~3 RAM to undo.
+    chip += REDIRECT_STRAIN_PER * s.econ.player.redirectsTaken;
+    // Rounds it spent close enough to its own goal to be about to win.
+    chip += PRESSURE_STRAIN_PER * s.pressureRounds;
     if (kind === "cap") chip += 10;
-    if (kind === "gridlock") chip += GRIDLOCK_CHIP;
-    s.strainChip = Math.min(40, chip);
+    s.strainChip = Math.min(45, chip);
   } else {
     s.strainChip = 0;
   }
@@ -121,102 +139,141 @@ export function finishDuel(
 }
 
 /**
- * Re-run both floods after a board change, acting side first (its claims
- * and win take priority). Cascades pay RAM; a halt trap on the acting side
- * forfeits their turn (returns true).
+ * Re-settle ONE board after a change to it. `owner` is whose grid it is —
+ * cascades pay them, traps fire on them, and lighting the goal wins for them.
+ * `acting` is whose turn it is, which only matters for deciding whether a
+ * halt trap forfeits the current turn or the next one.
+ *
+ * Note the case worth knowing about: a REDIRECT settles the ENEMY's board, so
+ * a badly chosen twist can complete their route and hand them the dive.
+ * Returns true when the acting side must forfeit their turn right now.
  */
-export function settleFloods(s: DuelState, acting: Side): boolean {
-  let actingTrapped = false;
-  for (const side of [acting, otherSide(acting)] as Side[]) {
-    if (s.phase !== "playing") break;
-    const f = runFlood(s, side);
-    // Side-tagged: an untagged "cascade" rendered the machine eating half
-    // the board as a green win banner on the player's screen.
-    const mine = side === "player";
-    if (f.claimed.length >= 3) {
-      emit(s, mine ? "cascade" : "cascadeOpp", f.claimed.length);
-    } else if (f.claimed.length > 0) {
-      emit(s, mine ? "claim" : "claimOpp", f.claimed.length);
-    }
+export function settleBoard(s: DuelState, owner: Side, acting: Side): boolean {
+  if (s.phase !== "playing") return false;
+  const b = s.boards[owner];
+  const f = settlePower(b);
+  const mine = owner === "player";
 
-    // Cascades bank RAM for the next turn: the chain you set up buys the
-    // tempo to keep pushing, without compounding inside one turn.
-    let bonus = cascadeRam(f.claimed.length);
-    if (bonus > 0) {
-      s.econ[side].drainNext -= bonus;
-      emit(s, side === "player" ? "cascadeRam" : "cascadeRamOpp", bonus);
-    }
+  // Side-tagged: an untagged "cascade" rendered the machine lighting half
+  // its board as a green win banner on the player's screen.
+  if (f.built.length >= 3) {
+    emit(s, mine ? "cascade" : "cascadeOpp", f.built.length);
+  } else if (f.built.length > 0) {
+    emit(s, mine ? "claim" : "claimOpp", f.built.length);
+  }
 
-    for (const trap of f.trapsFired) {
-      const econ = s.econ[side];
-      const enemyEcon = s.econ[otherSide(side)];
-      econ.trapsFired++;
-      if (trap.kind === "halt") {
-        econ.drainNext += trap.drain;
-        if (side === acting) {
-          actingTrapped = true;
-        } else {
-          econ.loseNextTurn = true;
-        }
-        emit(s, "trapFire", 1);
-        say(
-          s,
-          side === "player"
-            ? "HALT TRAP. Your signal hit an armed node. The cascade lands, then your turn is forfeit."
-            : "Your halt trap fired. The intrusion stalls a full cycle.",
-        );
-      } else {
-        econ.drainNext += trap.drain;
-        enemyEcon.drainNext -= trap.drain;
-        emit(s, "siphonFire", trap.drain);
-        say(
-          s,
-          side === "player"
-            ? `SIPHON TRAP. It bleeds ${trap.drain} RAM out of your next turn.`
-            : `Your siphon fired. ${trap.drain} RAM drains out of its next turn, into yours.`,
-        );
-      }
-      if (otherSide(side) === "player" && kitHas(s, "echoTap")) {
-        s.econ.player.drainNext -= 2;
+  // Cascades bank RAM for the next turn: the chain you set up buys the
+  // tempo to keep pushing, without compounding inside one turn. Only first
+  // lights count, so cutting and re-lighting your own chain pays nothing.
+  const bonus = cascadeRam(f.built.length);
+  if (bonus > 0) {
+    s.econ[owner].drainNext -= bonus;
+    emit(s, mine ? "cascadeRam" : "cascadeRamOpp", bonus);
+  }
+
+  /*
+   * Surge: what a big light does that a small one cannot. A cascade is a
+   * power surge, so it blows the clamps on the board it happened on, and a
+   * big enough one arcs across and cooks one of their armed traps. This is
+   * the fast-win route the design is supposed to reward - engineered, not
+   * ground out - and it is the counter to a lock-heavy opponent.
+   */
+  const surge = surgeTierOf(f.built.length);
+  if (surge === "surge" || surge === "break") {
+    let broke = 0;
+    for (const c of b.cells) {
+      if (c.lockedThroughRound >= s.round && c.lockedBy !== null && c.lockedBy !== owner) {
+        c.lockedThroughRound = 0;
+        c.lockedBy = null;
+        broke++;
       }
     }
-    if (f.reachedCore) {
-      // The tutorial is unwinnable by definition: the moment the player's
-      // flood actually touches the core, every port slams shut at once.
-      if (s.cfg.tutorial && side === "player") {
-        finishDuel(
-          s,
-          "opp",
-          "core",
-          "Your flood touched the core, and every port on the machine slammed shut at once.",
-        );
-      } else {
-        finishDuel(
-          s,
-          side,
-          "core",
-          side === "player"
-            ? "Your flood touched the core first. The intrusion collapses."
-            : "Its flood reached the core before yours did.",
-        );
-      }
+    if (broke > 0) {
+      emit(s, mine ? "surgeBreak" : "surgeBreakOpp", broke);
+      if (mine) say(s, `SURGE. The overload shears ${broke} clamp${broke === 1 ? "" : "s"} off your grid.`);
     }
   }
-  s.power = computeDuelPower(s);
+  if (surge === "break") {
+    // The overload burns out one of the mines they left on your grid before
+    // you ever walk into it. Their cast, wasted.
+    const armed = b.cells.find((c) => c.trap);
+    if (armed) {
+      armed.trap = null;
+      emit(s, mine ? "surgeArc" : "surgeArcOpp", 1);
+      if (mine) say(s, "The overload cooks one of its armed nodes dead before you reach it.");
+    }
+  }
+
+  let actingTrapped = false;
+  for (const trap of f.trapsFired) {
+    const econ = s.econ[owner];
+    const enemyEcon = s.econ[otherSide(owner)];
+    econ.trapsFired++;
+    if (trap.kind === "halt") {
+      econ.drainNext += trap.drain;
+      if (owner === acting) {
+        actingTrapped = true;
+      } else {
+        econ.loseNextTurn = true;
+      }
+      emit(s, "trapFire", 1);
+      say(
+        s,
+        mine
+          ? "HALT TRAP. Your signal hit an armed node. The cascade lands, then your turn is forfeit."
+          : "Your halt trap fired. The intrusion stalls a full cycle.",
+      );
+    } else {
+      econ.drainNext += trap.drain;
+      enemyEcon.drainNext -= trap.drain;
+      emit(s, "siphonFire", trap.drain);
+      say(
+        s,
+        mine
+          ? `SIPHON TRAP. It bleeds ${trap.drain} RAM out of your next turn.`
+          : `Your siphon fired. ${trap.drain} RAM drains out of its next turn, into yours.`,
+      );
+    }
+    if (!mine && kitHas(s, "echoTap")) {
+      s.econ.player.drainNext -= 2;
+    }
+  }
+
+  if (f.reachedGoal) {
+    // The tutorial is unwinnable by definition: the moment the player's
+    // signal actually reaches the goal, the machine stops pretending.
+    if (s.cfg.tutorial && owner === "player") {
+      finishDuel(
+        s,
+        "opp",
+        "seal",
+        "Your signal reached the goal, and every port on the machine slammed shut at once.",
+      );
+    } else {
+      finishDuel(
+        s,
+        owner,
+        "goal",
+        mine
+          ? "Your signal reached the goal first. The intrusion collapses."
+          : "It lit its goal before you lit yours.",
+      );
+    }
+  }
   return actingTrapped;
 }
 
-/** Rotate a node one quarter turn for `side`; returns false when denied. */
+/** Rotate a node on your own board one quarter turn; false when denied. */
 export function applyRotate(s: DuelState, side: Side, idx: number): boolean {
   const econ = s.econ[side];
   if (econ.ram < 1) return false;
-  const c = s.cells[idx];
+  const c = s.boards[side].cells[idx];
   c.rot = (c.rot + 1) % 4;
   c.spin += 1;
   econ.ram -= 1;
   econ.rotations += 1;
   emit(s, "rotate");
-  const trapped = settleFloods(s, side);
+  const trapped = settleBoard(s, side, side);
   if (trapped && s.phase === "playing") {
     if (side === "player") forceEndPlayerTurn(s);
     else endOppTurn(s);
@@ -236,7 +293,7 @@ export function applyPlace(s: DuelState, side: Side, idx: number, pouchIdx: numb
   if (econ.ram < PLACE_COST || econ.placedThisTurn) return false;
   const mask = s.patchPouch[pouchIdx];
   if (mask === undefined) return false;
-  const c = s.cells[idx];
+  const c = s.boards[side].cells[idx];
   c.kind = "node";
   c.base = mask;
   c.rot = 0;
@@ -248,7 +305,7 @@ export function applyPlace(s: DuelState, side: Side, idx: number, pouchIdx: numb
   s.patchPouch = s.patchPouch.filter((_, i) => i !== pouchIdx);
   emit(s, "place");
   say(s, "PATCH PIECE. The slag melts into a live junction, arms exactly as held.");
-  const trapped = settleFloods(s, side);
+  const trapped = settleBoard(s, side, side);
   if (trapped && s.phase === "playing") {
     if (side === "player") forceEndPlayerTurn(s);
     else endOppTurn(s);
@@ -259,49 +316,56 @@ export function applyPlace(s: DuelState, side: Side, idx: number, pouchIdx: numb
 /* ------------------------------------------------------------------ */
 /* Target legality                                                     */
 /* ------------------------------------------------------------------ */
+/*
+ * Every predicate below reads the board the cast actually lands on, so an
+ * index always means "cell on the target board". ATTACK indexes the enemy's
+ * grid, DEFEND the caster's own.
+ */
 
+/** Traps land on ground the victim has not lit yet: you mine ahead of them. */
 export function armTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
-  const c = s.cells[idx];
-  if (!c || c.kind !== "node" || c.owner !== "none") return false;
+  const c = s.boards[otherSide(caster)].cells[idx];
+  if (!c || c.kind !== "node" || c.built) return false;
   if (c.trap) return false;
   // A ward the victim raised refuses new traps.
-  if (c.wardThroughRound >= s.round && c.wardBy === otherSide(caster)) return false;
+  if (c.wardThroughRound >= s.round && c.wardBy !== caster) return false;
   return true;
 }
 
 export function redirectTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
-  const c = s.cells[idx];
+  const c = s.boards[otherSide(caster)].cells[idx];
   if (!c || c.kind !== "node") return false;
   if (c.fused) return false; // welded patch pieces never twist, for anyone
-  if (c.owner === caster) return false; // own nodes rotate for 1 RAM instead
-  if (c.lockedThroughRound >= s.round && c.lockedBy === otherSide(caster)) return false;
-  // An enemy ward refuses redirects the same way it refuses traps.
-  if (c.wardThroughRound >= s.round && c.wardBy === otherSide(caster)) return false;
+  // A node its owner locked is armored against exactly this.
+  if (c.lockedThroughRound >= s.round && c.lockedBy !== caster) return false;
+  // A ward refuses redirects the same way it refuses traps.
+  if (c.wardThroughRound >= s.round && c.wardBy !== caster) return false;
   return true;
 }
 
 export function purgeTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
-  const c = s.cells[idx];
+  const c = s.boards[caster].cells[idx];
   if (!c || c.kind !== "node" || !c.trap) return false;
-  if (c.trap.by !== otherSide(caster)) return false;
   // The player defuses only what Scan exposed; the machine sees everything.
   if (caster === "player" && !c.trap.revealed) return false;
   return true;
 }
 
+/**
+ * Lock armors one of your own junctions against their REDIRECT for a couple
+ * of rounds. Named nodes, where WARD is area: that is the whole distinction
+ * between the two defend modes.
+ */
 export function lockTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
-  const c = s.cells[idx];
+  const c = s.boards[caster].cells[idx];
   if (!c || c.kind !== "node") return false;
-  if (c.owner === otherSide(caster)) return false;
   if (c.lockedThroughRound >= s.round) return false;
   return true;
 }
 
 export function wardTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
-  const c = s.cells[idx];
-  if (!c || c.kind !== "node") return false;
-  if (c.owner === otherSide(caster)) return false;
-  return true;
+  const c = s.boards[caster].cells[idx];
+  return !!c && c.kind === "node";
 }
 
 export function attackTargetLegal(s: DuelState, caster: Side, mode: OppMode, idx: number): boolean {
@@ -318,13 +382,10 @@ export function defendTargetLegal(s: DuelState, caster: Side, mode: DefendMode, 
 /* Program resolution                                                  */
 /* ------------------------------------------------------------------ */
 
-function entryKindOf(side: Side): "entryP" | "entryO" {
-  return side === "player" ? "entryP" : "entryO";
-}
-
 /**
  * Resolve one program cast. `mode` is ignored for scan. Targets must be
- * validated by the caller (reducer or planner) before this runs.
+ * validated by the caller (reducer or planner) before this runs, and are
+ * always indexes into the board `targetBoardOf` names.
  */
 export function applyCast(
   s: DuelState,
@@ -348,22 +409,24 @@ export function applyCast(
     }
   }
   const enemy = otherSide(side);
+  const own = s.boards[side];
+  const foe = s.boards[enemy];
 
   if (prog === "scan") {
+    // Their traps are on YOUR board, so scan sweeps your own grid outward
+    // from the ground you have built.
     const range = SCAN_RANGE[tierOf(s, side, "scan")];
-    const owned = s.cells.filter(
-      (c) => (c.kind === "node" && c.owner === side) || c.kind === entryKindOf(side),
-    );
+    const anchors = own.cells.filter((c) => c.kind === "entry" || (c.kind === "node" && c.built));
     let found = 0;
-    for (const c of s.cells) {
-      if (!c.trap || c.trap.by !== enemy || c.trap.revealed) continue;
-      if (owned.some((o) => Math.abs(o.x - c.x) + Math.abs(o.y - c.y) <= range)) {
+    for (const c of own.cells) {
+      if (!c.trap || c.trap.revealed) continue;
+      if (anchors.some((o) => Math.abs(o.x - c.x) + Math.abs(o.y - c.y) <= range)) {
         c.trap.revealed = true;
         found++;
       }
     }
     if (side === "player" && kitHas(s, "tapLine")) {
-      const plan = routePlan(s, "opp");
+      const plan = routePlan(foe);
       if (plan) {
         // Visible through the next full round, not just the cast round.
         s.routeTrace = { round: s.round + 1, cells: plan.path.map((p) => p.idx) };
@@ -384,12 +447,13 @@ export function applyCast(
 
   if (prog === "attack") {
     if (mode === "redirect") {
+      s.econ[enemy].redirectsTaken += targets.length;
       for (const idx of targets) {
-        const c = s.cells[idx];
+        const c = foe.cells[idx];
         c.rot = (c.rot + 1) % 4;
         c.spin += 1;
         // Jam Anchor rider: the twist holds through the reply and into
-        // the caster's own next turn.
+        // the caster's own next turn, so they cannot simply turn it back.
         if (side === "player" && kitHas(s, "jamAnchor")) {
           c.lockedThroughRound = Math.max(c.lockedThroughRound, s.round + 1);
           c.lockedBy = "player";
@@ -403,7 +467,8 @@ export function applyCast(
           ? "REDIRECT. Their line twists off true."
           : "It twisted one of your junctions off true. Power is down past the break.",
       );
-      settleFloods(s, side);
+      // Settling THEIR board: a badly chosen twist can complete their route.
+      settleBoard(s, enemy, side);
     } else {
       const kind: TrapKind = mode === "armSiphon" ? "siphon" : "halt";
       let drain = 0;
@@ -418,7 +483,7 @@ export function applyCast(
         drain = 3;
       }
       for (const idx of targets) {
-        s.cells[idx].trap = { by: side, revealed: side === "player", kind, drain };
+        foe.cells[idx].trap = { by: side, revealed: side === "player", kind, drain };
       }
       if (side === "player") s.lastPlayerHitRound = s.round;
       emit(s, "trapSet");
@@ -434,12 +499,12 @@ export function applyCast(
     return;
   }
 
-  // DEFEND.
+  // DEFEND: always your own board.
   if (mode === "purge") {
     let n = 0;
     for (const idx of targets) {
-      if (s.cells[idx].trap) {
-        s.cells[idx].trap = null;
+      if (own.cells[idx].trap) {
+        own.cells[idx].trap = null;
         n++;
       }
     }
@@ -457,26 +522,23 @@ export function applyCast(
   } else if (mode === "lock") {
     const through = side === "player" ? s.round + LOCK_ROUNDS - 1 : s.round + LOCK_ROUNDS;
     for (const idx of targets) {
-      const c = s.cells[idx];
+      const c = own.cells[idx];
       c.lockedThroughRound = Math.max(c.lockedThroughRound, through);
       c.lockedBy = side;
-    }
-    if (side === "player" && targets.some((i) => s.cells[i].owner === "none")) {
-      s.lastPlayerHitRound = s.round;
     }
     emit(s, "lock");
     say(
       s,
       side === "player"
-        ? "LOCK. That junction is frozen solid."
-        : "It clamped a junction solid. You cannot turn that one for now.",
+        ? "LOCK. Those junctions are bolted down. Nothing of theirs twists them."
+        : "It bolted down a junction of its own. Your redirect will not move that one.",
     );
   } else if (mode === "ward") {
     const radius = WARD_RADIUS[tierOf(s, side, "defend")];
     const through = s.round + WARD_ROUNDS;
-    const center = s.cells[targets[0]];
-    for (const c of s.cells) {
-      if (c.kind !== "node" || c.owner === enemy) continue;
+    const center = own.cells[targets[0]];
+    for (const c of own.cells) {
+      if (c.kind !== "node") continue;
       if (Math.abs(c.x - center.x) + Math.abs(c.y - center.y) > radius) continue;
       c.wardThroughRound = Math.max(c.wardThroughRound, through);
       c.wardBy = side;
@@ -485,11 +547,10 @@ export function applyCast(
     say(
       s,
       side === "player"
-        ? "WARD up. Nothing gets planted in that patch."
-        : "It warded a whole approach. Your traps will not land there.",
+        ? "WARD up. Nothing of theirs lands in that patch."
+        : "It warded a whole approach of its own. Your traps will not land there.",
     );
   }
-
 }
 
 /* ------------------------------------------------------------------ */
@@ -529,6 +590,9 @@ export function endOppTurn(s: DuelState): void {
   if (s.phase !== "playing") return;
   const econ = s.econ.opp;
   econ.carry = Math.min(econ.carryCap, Math.max(0, econ.ram));
+  // Was it about to win as this round closed? Counted once per round, and
+  // billed at the end even on a win.
+  if (!s.cfg.tutorial && routeCost(s.boards.opp) <= PRESSURE_RANGE) s.pressureRounds++;
   s.round++;
   if (s.routeTrace && s.routeTrace.round < s.round) s.routeTrace = null;
   // The tutorial ends on the machine's terms: one victory-lap round after
@@ -540,53 +604,25 @@ export function endOppTurn(s: DuelState): void {
       finishDuel(
         s,
         "opp",
-        "core",
+        "seal",
         "The machine stopped pretending and sealed itself. The door was never really open.",
       );
       return;
     }
   }
   if (s.round > ROUND_CAP) {
-    const pd = routeCost(s, "player");
-    const od = routeCost(s, "opp");
+    const pd = routeCost(s.boards.player);
+    const od = routeCost(s.boards.opp);
     const playerCloser = pd <= od;
     finishDuel(
       s,
       playerCloser ? "player" : "opp",
       "cap",
       playerCloser
-        ? "The link timed out with your route closer to the core than its. It counts, barely."
-        : "The link timed out with its route closer to the core than yours.",
+        ? "The link timed out with your route shorter than its. It counts, barely."
+        : "The link timed out with its route shorter than yours.",
     );
     return;
-  }
-  // A walled-off player is already beaten, so the dive is called here rather
-  // than marched to the cap. Two guards keep that from firing on a route
-  // that still exists: unspent patch cells can open a corridor through slag,
-  // and the verdict has to repeat on the next round before it counts.
-  if (!playerHasRoute(s)) {
-    s.severedStreak++;
-    if (s.severedStreak >= 2) {
-      if (isFinite(routeCost(s, "opp"))) {
-        finishDuel(
-          s,
-          "opp",
-          "severed",
-          "SEVERED. Its territory walls your port off from the core. No rotation and no patch piece opens a route, so the link is already lost.",
-        );
-      } else {
-        finishDuel(
-          s,
-          "player",
-          "gridlock",
-          "Total gridlock. Neither signal can reach the core. The link collapses in your favor, and the dead link bites on the way out.",
-        );
-      }
-      return;
-    }
-    say(s, "ROUTE LOST. No path from your port to the core. Open one this turn or the link is called.");
-  } else {
-    s.severedStreak = 0;
   }
   s.turn = "player";
   const acts = beginTurnEconomy(s, "player");
@@ -603,67 +639,14 @@ export function endPlayerTurn(s: DuelState): void {
   startOppTurn(s);
 }
 
-/**
- * Depth of the patch-piece rescue search. Two placements cover every real
- * case (a piece opens reach for the next one); past that the branching cost
- * outweighs the odds, and the two-round streak guard catches the remainder.
+/*
+ * `playerHasRoute` and the patch-piece rescue search are gone with the
+ * SEVERED verdict. Being walled off was only ever possible because enemy
+ * territory was impassable; on a board nobody else occupies, a route to the
+ * goal always exists unless slag cuts the grid in half, which board
+ * generation already rejects. That also retires the defect where a planner
+ * blindspot reported Infinity and ended a still-winnable dive in a loss.
  */
-const RESCUE_DEPTH = 2;
-
-/**
- * The distinct masks worth trialing from a pouch. Placed pieces are WELDED
- * (fused, orientation final), so every distinct oriented mask is its own
- * case; only a held cross dominates everything (all four arms regardless).
- */
-function rescueMasks(pouch: number[]): number[] {
-  if (pouch.some((m) => armCount(m) >= 4)) return [PIECE_X];
-  return [...new Set(pouch)];
-}
-
-/** Drop one held piece with exactly this mask. */
-function withoutOne(pouch: number[], mask: number): number[] {
-  const idx = pouch.indexOf(mask);
-  return pouch.filter((_, i) => i !== idx);
-}
-
-/**
- * Can the player still reach the core, counting patch pieces they are
- * holding but have not spent? `routePlan` already prices every rotation, so
- * the only thing it cannot see is slag turning into a junction. Placed
- * pieces are welded, so the trial enumerates the exact held masks at their
- * fixed orientations. Crafting is impossible mid-dive by design, so the
- * held pieces are the whole truth. Called only when the plain route has
- * failed, off the hot path.
- */
-export function playerHasRoute(s: DuelState): boolean {
-  if (isFinite(routeCost(s, "player"))) return true;
-  return rescueWithPieces(s, s.patchPouch, Math.min(s.patchPouch.length, RESCUE_DEPTH));
-}
-
-function rescueWithPieces(s: DuelState, pouch: number[], cellsLeft: number): boolean {
-  if (cellsLeft <= 0 || pouch.length === 0) return false;
-  const masks = rescueMasks(pouch);
-  for (let i = 0; i < s.cells.length; i++) {
-    if (!canPlace(s, "player", i)) continue;
-    const c = s.cells[i];
-    const prev = { kind: c.kind, base: c.base, rot: c.rot, fused: c.fused };
-    for (const mask of masks) {
-      c.kind = "node";
-      c.base = mask;
-      c.rot = 0;
-      c.fused = true;
-      const ok =
-        isFinite(routeCost(s, "player")) ||
-        rescueWithPieces(s, withoutOne(pouch, mask), cellsLeft - 1);
-      c.kind = prev.kind;
-      c.base = prev.base;
-      c.rot = prev.rot;
-      c.fused = prev.fused;
-      if (ok) return true;
-    }
-  }
-  return false;
-}
 
 /** A trap consumed the player's turn mid-action: nothing carries over. */
 export function forceEndPlayerTurn(s: DuelState): void {

@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "../../../game/audio";
 import { FINAL_DAY } from "../../../game/content/arc";
-import { AUGMENT_BY_ID, GRIDLOCK_CHIP } from "../../../game/content/kit";
+import {
+  AUGMENT_BY_ID,
+  PRESSURE_STRAIN_PER,
+  REDIRECT_STRAIN_PER,
+} from "../../../game/content/kit";
 import { PATCH_POUCH_MAX, shapeClassOf } from "../../../game/patch-cells";
 import type { RunAction } from "../../../game/run-reducer";
 import type { RunState } from "../../../game/save";
@@ -280,11 +284,28 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
     ]);
   if (r.trapsFired > 0)
     chipRows.push([`${r.trapsFired} trap${r.trapsFired === 1 ? "" : "s"} sprung`, `-${r.trapsFired * 4}`]);
+  // The two split-board terms. Optional on the type so a save written before
+  // the rebill still renders, just without these rows.
+  const redirects = r.redirectsTaken ?? 0;
+  const pressure = r.pressureRounds ?? 0;
+  if (redirects > 0)
+    chipRows.push([
+      `${redirects} junction${redirects === 1 ? "" : "s"} twisted out from under you`,
+      `-${redirects * REDIRECT_STRAIN_PER}`,
+    ]);
+  if (pressure > 0)
+    chipRows.push([
+      `${pressure} round${pressure === 1 ? "" : "s"} with it inside striking range`,
+      `-${pressure * PRESSURE_STRAIN_PER}`,
+    ]);
   if (r.capWin) chipRows.push(["hit the turn cap", "-10"]);
-  if (r.gridlockWin) chipRows.push(["link collapsed in gridlock", `-${GRIDLOCK_CHIP}`]);
   const rawChip =
-    r.overRotations * 2 + r.trapsFired * 4 + (r.capWin ? 10 : 0) + (r.gridlockWin ? GRIDLOCK_CHIP : 0);
-  const cappedBill = rawChip > 40;
+    r.overRotations * 2 +
+    r.trapsFired * 4 +
+    redirects * REDIRECT_STRAIN_PER +
+    pressure * PRESSURE_STRAIN_PER +
+    (r.capWin ? 10 : 0);
+  const cappedBill = rawChip > 45;
 
   const payRows: Array<[string, string]> = [];
   if (r.capWin || r.salvage > 0 || r.cleanRunBonus > 0) {
@@ -482,7 +503,7 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
             <Receipt
               rows={
                 cappedBill
-                  ? [...chipRows, ["strain bill capped", "-40 max", "inv"] as [string, string, "inv"]]
+                  ? [...chipRows, ["strain bill capped", "-45 max", "inv"] as [string, string, "inv"]]
                   : chipRows
               }
               startDelay={620}

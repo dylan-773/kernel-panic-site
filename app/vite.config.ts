@@ -26,6 +26,11 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: [{ find: /^@higgsfield-ai\/icons(\/.*)?$/, replacement: QUANTA_ICONS_SHIM }],
     },
+    // Lets `vite preview` answer requests proxied through the tailnet Funnel
+    // hostname instead of 403ing on an unrecognized Host header.
+    preview: {
+      allowedHosts: ["dylans-macbook-pro.tail63ed15.ts.net"],
+    },
     // The server bundle runs as a Cloudflare Worker — there is no node_modules
     // at runtime. Vite's default SSR build leaves npm deps as bare external
     // imports (h3, react, @tanstack/*, seroval, …), which resolve on a Node

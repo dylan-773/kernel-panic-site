@@ -1,125 +1,114 @@
 import { BASE_REACH } from "./content/kit";
-import { DuelCell, DuelPower, DuelState, Side, TrapKind, otherSide } from "./duel-types";
+import { Board, DuelCell, DuelState, Side, TrapKind } from "./duel-types";
 import { DX, DY, cellIndex, oppositeDir, rotateArms } from "./types";
 
 /**
- * Flood-claim propagation and the rotation-cost route metric. The flood is
- * a mutating operation: every neutral node a side's signal reaches becomes
- * that side's territory. Traps stop the flood at the node they occupy.
+ * Live-power propagation and the rotation-cost route metric, both scoped to a
+ * single board.
+ *
+ * There is no territory here and nothing to claim. A board belongs to exactly
+ * one side, so the only question a cell answers is "is my signal reaching it
+ * right now". `computePower` is the pure read; `settlePower` is the same walk
+ * with the two side effects that need to happen exactly once per change:
+ * marking cells BUILT the first time they light, and springing traps.
+ *
+ * This is the function the whole design leans on. Under the old flood-claim
+ * model it was decoration that drove an arm animation.
  */
 
 export function effectiveDuelArms(c: DuelCell): number {
   return rotateArms(c.base, c.rot);
 }
 
-function entryOf(side: Side): "entryP" | "entryO" {
-  return side === "player" ? "entryP" : "entryO";
+/** Slag is the only thing signal cannot enter. */
+function passable(c: DuelCell): boolean {
+  return c.kind !== "block";
 }
 
-/** May this side's signal enter the cell at all (ignoring arms)? */
-function passable(c: DuelCell, side: Side): boolean {
-  if (c.kind === "block") return false;
-  if (c.kind === "core") return true;
-  if (c.kind === "entryP") return side === "player";
-  if (c.kind === "entryO") return side === "opp";
-  return c.owner === "none" || c.owner === side;
+/** Do these two adjacent cells have arms facing each other right now? */
+function joined(from: DuelCell, to: DuelCell, d: number): boolean {
+  if ((effectiveDuelArms(from) & (1 << d)) === 0) return false;
+  return (effectiveDuelArms(to) & (1 << oppositeDir(d))) !== 0;
 }
 
-export interface FloodResult {
-  reached: boolean[];
-  /** Indexes claimed by this flood, in claim order. */
-  claimed: number[];
-  /** Traps sprung on the flooding side this settle, in claim order. */
-  trapsFired: Array<{ idx: number; kind: TrapKind; drain: number }>;
-  reachedCore: boolean;
+function neighbourIdx(b: Board, c: DuelCell, d: number): number {
+  const nx = c.x + DX[d];
+  const ny = c.y + DY[d];
+  if (nx < 0 || ny < 0 || nx >= b.w || ny >= b.h) return -1;
+  return cellIndex(b.w, nx, ny);
 }
 
 /**
- * Run one side's flood, claiming neutral nodes it touches. A trapped
- * neutral node is claimed and consumes the trap. Traps are tempo hits
- * (a lost turn or a RAM drain), never walls: the cascade keeps
- * expanding past a sprung trap.
+ * Which cells are currently carrying signal from the entry. Pure: safe to
+ * call from planners and from the renderer.
  */
-export function runFlood(s: DuelState, side: Side): FloodResult {
-  const start = side === "player" ? s.entryP : s.entryO;
-  const enemy = otherSide(side);
-  const reached = new Array<boolean>(s.cells.length).fill(false);
-  const claimed: number[] = [];
-  const trapsFired: Array<{ idx: number; kind: TrapKind; drain: number }> = [];
-  let reachedCore = false;
-
-  reached[start] = true;
-  const queue = [start];
+export function computePower(b: Board): boolean[] {
+  const out = new Array<boolean>(b.cells.length).fill(false);
+  out[b.entry] = true;
+  const queue = [b.entry];
   while (queue.length > 0) {
     const i = queue.shift() as number;
-    const c = s.cells[i];
-    const arms = effectiveDuelArms(c);
+    const c = b.cells[i];
     for (let d = 0; d < 4; d++) {
-      if ((arms & (1 << d)) === 0) continue;
-      const nx = c.x + DX[d];
-      const ny = c.y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-      const ni = cellIndex(s.w, nx, ny);
-      if (reached[ni]) continue;
-      const nc = s.cells[ni];
-      if (!passable(nc, side)) continue;
-      if ((effectiveDuelArms(nc) & (1 << oppositeDir(d))) === 0) continue;
-      reached[ni] = true;
-      if (nc.kind === "core") {
-        reachedCore = true;
-        continue;
-      }
-      if (nc.kind === "node" && nc.owner === "none") {
-        // Claim it.
-        nc.owner = side;
-        nc.claimSeq = ++s.claimCounter;
-        nc.claimWave = claimed.length;
-        claimed.push(ni);
-        if (nc.trap && nc.trap.by === enemy) {
-          const trap = nc.trap;
-          nc.trap = null;
-          trapsFired.push({ idx: ni, kind: trap.kind, drain: trap.drain });
-        }
-      }
-      queue.push(ni);
+      const ni = neighbourIdx(b, c, d);
+      if (ni < 0 || out[ni]) continue;
+      const nc = b.cells[ni];
+      if (!passable(nc) || !joined(c, nc, d)) continue;
+      out[ni] = true;
+      // The goal is a sink: signal arrives and stops. Letting it conduct
+      // would light the whole goal column off one contact.
+      if (nc.kind !== "goal") queue.push(ni);
     }
   }
-  return { reached, claimed, trapsFired, reachedCore };
+  return out;
 }
 
-export function computeDuelPower(s: DuelState): DuelPower {
-  // Non-mutating power readout for rendering: which cells are currently lit.
-  // (Claims only change inside settle; here ownership is already fixed, so a
-  // plain reachability pass per side is safe.)
-  const read = (side: Side): boolean[] => {
-    const start = side === "player" ? s.entryP : s.entryO;
-    const out = new Array<boolean>(s.cells.length).fill(false);
-    out[start] = true;
-    const queue = [start];
-    while (queue.length > 0) {
-      const i = queue.shift() as number;
-      const c = s.cells[i];
-      const arms = effectiveDuelArms(c);
-      for (let d = 0; d < 4; d++) {
-        if ((arms & (1 << d)) === 0) continue;
-        const nx = c.x + DX[d];
-        const ny = c.y + DY[d];
-        if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-        const ni = cellIndex(s.w, nx, ny);
-        if (out[ni]) continue;
-        const nc = s.cells[ni];
-        if (nc.kind === "block") continue;
-        if (nc.kind === "entryP" && side !== "player") continue;
-        if (nc.kind === "entryO" && side !== "opp") continue;
-        if (nc.kind === "node" && nc.owner !== side) continue; // only own territory lights
-        if ((effectiveDuelArms(nc) & (1 << oppositeDir(d))) === 0) continue;
-        out[ni] = true;
-        if (nc.kind !== "core") queue.push(ni);
-      }
+export interface SettleResult {
+  power: boolean[];
+  /** Nodes lit for the first time this settle, in light order. Cascade pays
+   *  on these only: re-lighting after a cut is a repair, not an achievement. */
+  built: number[];
+  /** Traps sprung on this board's owner this settle. */
+  trapsFired: Array<{ idx: number; kind: TrapKind; drain: number }>;
+  reachedGoal: boolean;
+}
+
+/**
+ * Recompute power and apply the two once-per-change effects. A trap fires the
+ * first time signal reaches its node and is consumed; it never blocks, so the
+ * cascade keeps running past it exactly as it always did.
+ */
+export function settlePower(b: Board): SettleResult {
+  const power = computePower(b);
+  const built: number[] = [];
+  const trapsFired: Array<{ idx: number; kind: TrapKind; drain: number }> = [];
+  let reachedGoal = false;
+
+  for (let i = 0; i < b.cells.length; i++) {
+    if (!power[i]) continue;
+    const c = b.cells[i];
+    if (c.kind === "goal") {
+      reachedGoal = true;
+      continue;
     }
-    return out;
-  };
-  return { player: read("player"), opp: read("opp") };
+    if (c.kind !== "node" || c.built) continue;
+    c.built = true;
+    c.litWave = built.length;
+    built.push(i);
+    if (c.trap) {
+      const trap = c.trap;
+      c.trap = null;
+      trapsFired.push({ idx: i, kind: trap.kind, drain: trap.drain });
+    }
+  }
+
+  b.power = power;
+  return { power, built, trapsFired, reachedGoal };
+}
+
+/** Is this side's signal currently reaching its goal column? */
+export function goalLive(b: Board): boolean {
+  return b.goal.some((i) => b.power[i]);
 }
 
 /** Min quarter-turns so the cell's arms cover `needed` (Infinity if never). */
@@ -134,6 +123,21 @@ export function rotCostFor(c: DuelCell, needed: number): number {
   return Infinity;
 }
 
+/**
+ * What it costs the board's owner to undo one enemy twist of this cell.
+ * Unidirectional rotation makes this 3 on an elbow or T, 1 on a straight and
+ * 0 on a cross — the exchange rate that makes reaching across worth the RAM.
+ * The cut scorer weights targets by it.
+ */
+export function repairCostOf(c: DuelCell): number {
+  if (c.fused) return 0;
+  const arms = effectiveDuelArms(c);
+  for (let k = 1; k < 4; k++) {
+    if (rotateArms(c.base, (c.rot + k) % 4) === arms) return k;
+  }
+  return 3;
+}
+
 export interface RouteStep {
   idx: number;
   /** Rotation the plan wants this node at (absolute rot value 0..3). */
@@ -144,7 +148,7 @@ export interface RouteStep {
 
 export interface RoutePlan {
   cost: number;
-  /** Every node on the route, port side first, aligned nodes included. */
+  /** Every node on the route, entry side first, aligned nodes included. */
   path: RouteStep[];
   /** Only the nodes still needing rotation. */
   steps: RouteStep[];
@@ -152,26 +156,20 @@ export interface RoutePlan {
    * The reroute search ran out of attempts and this plan still crosses
    * itself at one junction: the cost is a lower bound and executing the
    * queue verbatim will not conduct. A route DOES exist, which is the part
-   * callers testing for "walled off" must not get wrong.
+   * callers must not get wrong.
    */
   approx?: boolean;
 }
 
 /**
- * Cheapest-rotation route from a side's port to the core: Dijkstra over
- * (cell, entry-direction) states where a node's cost is the quarter-turns
- * needed to give it both the entry arm and the chosen exit arm. Enemy
- * territory is impassable. This is the board generator's fairness metric,
- * the opponent's planner, and the turn-cap tiebreak.
+ * Cheapest-rotation route from a board's entry to any of its goal cells:
+ * Dijkstra over (cell, entry-direction) states where a node's cost is the
+ * quarter-turns needed to give it both the entry arm and the chosen exit arm.
+ * This is the board generator's fairness metric, both planners, and the
+ * round-cap tiebreak.
  */
-export function routePlan(
-  s: DuelState,
-  side: Side,
-  avoid?: Set<number>,
-  depth = 0,
-): RoutePlan | null {
-  const n = s.cells.length;
-  const start = side === "player" ? s.entryP : s.entryO;
+export function routePlan(b: Board, avoid?: Set<number>, depth = 0): RoutePlan | null {
+  const n = b.cells.length;
   const dist = new Array<number>(n * 4).fill(Infinity);
   const prev = new Array<number>(n * 4).fill(-1);
   const buckets: number[][] = [[]];
@@ -180,17 +178,15 @@ export function routePlan(
     buckets[d].push(state);
   };
 
-  const startCell = s.cells[start];
+  const startCell = b.cells[b.entry];
   const startArms = effectiveDuelArms(startCell);
   for (let d = 0; d < 4; d++) {
     if ((startArms & (1 << d)) === 0) continue;
-    const nx = startCell.x + DX[d];
-    const ny = startCell.y + DY[d];
-    if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-    const ni = cellIndex(s.w, nx, ny);
-    const nc = s.cells[ni];
-    if (!passable(nc, side) || (avoid && avoid.has(ni))) continue;
-    if (nc.kind === "core") return { cost: 0, path: [], steps: [] };
+    const ni = neighbourIdx(b, startCell, d);
+    if (ni < 0) continue;
+    const nc = b.cells[ni];
+    if (!passable(nc) || (avoid && avoid.has(ni))) continue;
+    if (nc.kind === "goal") return { cost: 0, path: [], steps: [] };
     if (nc.kind !== "node") continue;
     const st = ni * 4 + d;
     if (dist[st] > 0) {
@@ -198,11 +194,12 @@ export function routePlan(
       push(st, 0);
     }
   }
-  void n;
 
-  // Best completed route: cost and the final (cell,dirIn) state.
+  // Best completed route: cost, the final (cell,dirIn) state, and which goal
+  // cell it lands on. Multiple goals means the terminal is not a constant.
   let bestGoal = Infinity;
   let bestGoalState = -1;
+  let bestGoalCell = -1;
 
   for (let d = 0; d < buckets.length; d++) {
     if (d >= bestGoal) break;
@@ -213,26 +210,25 @@ export function routePlan(
       if (dist[st] < d) continue;
       const i = st >> 2;
       const dIn = st & 3;
-      const c = s.cells[i];
+      const c = b.cells[i];
       for (let dOut = 0; dOut < 4; dOut++) {
         if (dOut === oppositeDir(dIn)) continue;
-        const nx = c.x + DX[dOut];
-        const ny = c.y + DY[dOut];
-        if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-        const ni = cellIndex(s.w, nx, ny);
-        const nc = s.cells[ni];
-        if (!passable(nc, side) || (avoid && avoid.has(ni))) continue;
+        const ni = neighbourIdx(b, c, dOut);
+        if (ni < 0) continue;
+        const nc = b.cells[ni];
+        if (!passable(nc) || (avoid && avoid.has(ni))) continue;
         const needed = (1 << oppositeDir(dIn)) | (1 << dOut);
         let k = rotCostFor(c, needed);
         if (!isFinite(k)) continue;
-        // Re-rotating an already-claimed chain node rewires the chain that
-        // feeds it — legal, but bias routes toward fresh neutral junctions.
-        if (k > 0 && c.owner === side) k += 1;
+        // Re-rotating a built node rewires the chain that feeds it and drops
+        // everything downstream dark — legal, but bias toward fresh junctions.
+        if (k > 0 && c.built) k += 1;
         const nd = d + k;
-        if (nc.kind === "core") {
+        if (nc.kind === "goal") {
           if (nd < bestGoal) {
             bestGoal = nd;
             bestGoalState = st;
+            bestGoalCell = ni;
           }
           continue;
         }
@@ -265,9 +261,9 @@ export function routePlan(
     const st = chain[ci];
     const i = st >> 2;
     const dIn = st & 3;
-    const c = s.cells[i];
-    const nextIdx = ci + 1 < chain.length ? chain[ci + 1] >> 2 : s.coreIdx;
-    const dOut = dirBetween(c, s.cells[nextIdx]);
+    const c = b.cells[i];
+    const nextIdx = ci + 1 < chain.length ? chain[ci + 1] >> 2 : bestGoalCell;
+    const dOut = dirBetween(c, b.cells[nextIdx]);
     const needed = (1 << oppositeDir(dIn)) | (1 << dOut);
     const k = rotCostFor(c, needed);
     if (!isFinite(k)) return null;
@@ -288,10 +284,9 @@ export function routePlan(
     if (depth < 4) {
       const nextAvoid = new Set(avoid ?? []);
       nextAvoid.add(conflict);
-      return routePlan(s, side, nextAvoid, depth + 1);
+      return routePlan(b, nextAvoid, depth + 1);
     }
-    // Out of reroutes. Reporting null here reads as "no route exists", which
-    // is how a still-winnable dive used to end in an instant severed loss.
+    // Out of reroutes. Reporting null here reads as "no route exists".
     return { cost: total, path, steps: path.filter((p) => p.turns > 0), approx: true };
   }
   return { cost: total, path, steps: path.filter((p) => p.turns > 0) };
@@ -304,67 +299,67 @@ function dirBetween(a: DuelCell, b: DuelCell): number {
   return 0;
 }
 
-export function routeCost(s: DuelState, side: Side, avoid?: Set<number>): number {
-  const plan = routePlan(s, side, avoid);
+export function routeCost(b: Board, avoid?: Set<number>): number {
+  const plan = routePlan(b, avoid);
   return plan ? plan.cost : Infinity;
 }
 
-/** Neutral nodes orthogonally adjacent to a side's territory (its port included). */
-export function isFrontier(s: DuelState, side: Side, idx: number): boolean {
-  const c = s.cells[idx];
-  if (c.kind !== "node" || c.owner !== "none") return false;
+/** Unbuilt nodes orthogonally adjacent to built ground (the entry included). */
+export function isFrontier(b: Board, idx: number): boolean {
+  const c = b.cells[idx];
+  if (c.kind !== "node" || c.built) return false;
   for (let d = 0; d < 4; d++) {
-    const nx = c.x + DX[d];
-    const ny = c.y + DY[d];
-    if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-    const nc = s.cells[cellIndex(s.w, nx, ny)];
-    if (nc.kind === entryOf(side)) return true;
-    if (nc.kind === "node" && nc.owner === side) return true;
+    const ni = neighbourIdx(b, c, d);
+    if (ni < 0) continue;
+    const nc = b.cells[ni];
+    if (nc.kind === "entry") return true;
+    if (nc.kind === "node" && nc.built) return true;
   }
   return false;
 }
 
-/** How many steps out from its territory a side may rotate open junctions. */
+/** How many steps out from built ground a side may rotate fresh junctions. */
 export function reachOf(s: DuelState, side: Side): number {
   if (side === "player" && s.kit.augments.includes("longArms")) return BASE_REACH + 2;
   return BASE_REACH;
 }
 
 /**
- * Is this neutral node within `reach` steps of the side's territory,
- * walking only through open junctions? Depth 1 is the classic frontier;
- * the default reach of 2 lets a diver line up chains before flooding them.
+ * Is this fresh node within `reach` steps of built ground, walking only
+ * through unbuilt junctions? Depth 1 is the classic frontier; the default
+ * reach of 2 lets a diver line up a chain before lighting it.
+ *
+ * Walking from BUILT rather than from LIVE is deliberate: an enemy cut takes
+ * your power but must never take back your frontier, or a single redirect
+ * deep in the chain would strand everything you had set up ahead of it.
  */
-export function inReach(s: DuelState, side: Side, idx: number, reach: number): boolean {
-  const c0 = s.cells[idx];
-  if (c0.kind !== "node" || c0.owner !== "none") return false;
-  return withinReachWalk(s, side, idx, reach);
+export function inReach(b: Board, idx: number, reach: number): boolean {
+  const c0 = b.cells[idx];
+  if (c0.kind !== "node" || c0.built) return false;
+  return withinReachWalk(b, idx, reach);
 }
 
 /** May this side fill this slag block with a patch cell (same reach walk)? */
-export function canPlace(s: DuelState, side: Side, idx: number): boolean {
-  const c0 = s.cells[idx];
+export function canPlace(b: Board, idx: number, reach: number): boolean {
+  const c0 = b.cells[idx];
   if (!c0 || c0.kind !== "block") return false;
-  return withinReachWalk(s, side, idx, reachOf(s, side));
+  return withinReachWalk(b, idx, reach);
 }
 
-function withinReachWalk(s: DuelState, side: Side, idx: number, reach: number): boolean {
+function withinReachWalk(b: Board, idx: number, reach: number): boolean {
   const seen = new Set<number>([idx]);
   let frontier = [idx];
   for (let step = 1; step <= reach; step++) {
     const next: number[] = [];
     for (const i of frontier) {
-      const c = s.cells[i];
+      const c = b.cells[i];
       for (let d = 0; d < 4; d++) {
-        const nx = c.x + DX[d];
-        const ny = c.y + DY[d];
-        if (nx < 0 || ny < 0 || nx >= s.w || ny >= s.h) continue;
-        const ni = cellIndex(s.w, nx, ny);
-        if (seen.has(ni)) continue;
-        const nc = s.cells[ni];
-        if (nc.kind === entryOf(side)) return true;
-        if (nc.kind === "node" && nc.owner === side) return true;
-        if (nc.kind === "node" && nc.owner === "none" && step < reach) {
+        const ni = neighbourIdx(b, c, d);
+        if (ni < 0 || seen.has(ni)) continue;
+        const nc = b.cells[ni];
+        if (nc.kind === "entry") return true;
+        if (nc.kind === "node" && nc.built) return true;
+        if (nc.kind === "node" && !nc.built && step < reach) {
           seen.add(ni);
           next.push(ni);
         }
@@ -376,14 +371,17 @@ function withinReachWalk(s: DuelState, side: Side, idx: number, reach: number): 
   return false;
 }
 
-/** May this side rotate the node right now (reach rule + rotation locks)? */
+/**
+ * May this side rotate the node on its own board right now? Built ground is
+ * always yours to rewire; fresh ground has to be in reach. An enemy LOCK is
+ * the only thing that can stop you.
+ */
 export function canRotate(s: DuelState, side: Side, idx: number): boolean {
-  const c = s.cells[idx];
+  const b = s.boards[side];
+  const c = b.cells[idx];
   if (!c || c.kind !== "node") return false;
   if (c.fused) return false;
-  const enemy = otherSide(side);
-  if (c.lockedThroughRound >= s.round && c.lockedBy === enemy) return false;
-  if (c.owner === side) return true;
-  if (c.owner !== "none") return false;
-  return inReach(s, side, idx, reachOf(s, side));
+  if (c.lockedThroughRound >= s.round && c.lockedBy !== null && c.lockedBy !== side) return false;
+  if (c.built) return true;
+  return inReach(b, idx, reachOf(s, side));
 }

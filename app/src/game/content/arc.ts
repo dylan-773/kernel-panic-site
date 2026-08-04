@@ -5,21 +5,37 @@ import { AttackMode, DefendMode, OppMode, Tier } from "./kit";
 /**
  * The fixed escalation curve for the flood-claim duel. Every run walks the
  * same ten days, ending in the finale; per-day numbers live here so balance
- * is one table, not code. minCost is the target route cost in rotation RAM;
- * headStart is how many nodes deep the intrusion already sits at dive start.
+ * is one table, not code.
+ *
+ * `pdTarget` is the route cost in rotation RAM the generator aims each board
+ * at, and `sim.ts` ASSERTS the measured mean lands within PD_TOLERANCE of it.
+ * It used to be called `minCost` and was pure fiction: under the old shared
+ * board the generator missed it by 7-11 on every single day, so the whole
+ * difficulty table was tuning a number nothing actually read. The assertion is
+ * what keeps that from happening again.
+ *
+ * `headStart` is how many junctions the intrusion arrives pre-aligned along.
  */
+
+/** How far the measured mean route cost may sit from `pdTarget`. */
+export const PD_TOLERANCE = 2.0;
 
 export interface DayConfig {
   grid: [number, number];
   oppRam: number;
   greed: number;
   abilityFreq: number;
-  minCost: number;
+  /** Route cost the generator aims both boards at. Verified by sim.ts. */
+  pdTarget: number;
   /** Floor on the player's opening route cost (see DuelConfig.minPd). */
   minPd?: number;
   headStart: number;
   /** Flat term of the par margin for this day (tapers late; see kit.ts). */
   parFlat: number;
+  /** Cut-scoring depth, 0-3. See DuelConfig.horizon. */
+  horizon: number;
+  /** Per-turn chance the cut lands on the best target. See DuelConfig.focus. */
+  focus: number;
   /** Slag density at board generation. */
   slag: number;
   /** Chance a cleared job drops a random patch piece. */
@@ -29,15 +45,15 @@ export interface DayConfig {
 }
 
 export const DAY_CONFIGS: Record<number, DayConfig> = {
-  1: { grid: [9, 7], oppRam: 6, greed: 0.7, abilityFreq: 0.2, minCost: 16, headStart: 0, parFlat: 6, slag: 0.18, patchDrop: 0.35, jobTiers: [1, 1, 1] },
-  2: { grid: [9, 7], oppRam: 6, greed: 0.76, abilityFreq: 0.32, minCost: 16, headStart: 0, parFlat: 5, slag: 0.18, patchDrop: 0.35, jobTiers: [1, 1, 2] },
-  3: { grid: [9, 9], oppRam: 6, greed: 0.88, abilityFreq: 0.45, minCost: 18, headStart: 1, parFlat: 5, slag: 0.19, patchDrop: 0.24, jobTiers: [1, 2, 2] },
-  4: { grid: [9, 9], oppRam: 6, greed: 0.91, abilityFreq: 0.45, minCost: 18, headStart: 2, parFlat: 4, slag: 0.2, patchDrop: 0.22, jobTiers: [2, 2, 3] },
-  5: { grid: [11, 9], oppRam: 7, greed: 0.94, abilityFreq: 0.55, minCost: 20, minPd: 9, headStart: 2, parFlat: 4, slag: 0.21, patchDrop: 0.18, jobTiers: [2, 3, 3] },
-  6: { grid: [11, 9], oppRam: 7, greed: 0.98, abilityFreq: 0.6, minCost: 20, minPd: 10, headStart: 2, parFlat: 3, slag: 0.22, patchDrop: 0.16, jobTiers: [3, 3, 3] },
-  7: { grid: [11, 11], oppRam: 7, greed: 0.99, abilityFreq: 0.65, minCost: 21, minPd: 10, headStart: 3, parFlat: 2, slag: 0.23, patchDrop: 0.13, jobTiers: [3, 3, 4] },
-  8: { grid: [13, 11], oppRam: 8, greed: 0.98, abilityFreq: 0.7, minCost: 22, minPd: 10, headStart: 3, parFlat: 2, slag: 0.24, patchDrop: 0.12, jobTiers: [4, 4, 4] },
-  9: { grid: [13, 11], oppRam: 10, greed: 0.97, abilityFreq: 0.75, minCost: 24, minPd: 12, headStart: 4, parFlat: 1, slag: 0.25, patchDrop: 0.11, jobTiers: [4, 4, 5] },
+  1: { grid: [9, 7], oppRam: 6, greed: 0.7, abilityFreq: 0.2, pdTarget: 16, headStart: 0, parFlat: 6, horizon: 0, focus: 0.5, slag: 0.18, patchDrop: 0.35, jobTiers: [1, 1, 1] },
+  2: { grid: [9, 7], oppRam: 6, greed: 0.8, abilityFreq: 0.4, pdTarget: 16, headStart: 0, parFlat: 5, horizon: 1, focus: 0.65, slag: 0.18, patchDrop: 0.35, jobTiers: [1, 1, 2] },
+  3: { grid: [9, 9], oppRam: 7, greed: 0.88, abilityFreq: 0.45, pdTarget: 18, headStart: 1, parFlat: 5, horizon: 1, focus: 0.7, slag: 0.19, patchDrop: 0.24, jobTiers: [1, 2, 2] },
+  4: { grid: [9, 9], oppRam: 7, greed: 0.93, abilityFreq: 0.6, pdTarget: 18, headStart: 2, parFlat: 4, horizon: 2, focus: 0.8, slag: 0.2, patchDrop: 0.22, jobTiers: [2, 2, 3] },
+  5: { grid: [11, 9], oppRam: 8, greed: 0.94, abilityFreq: 0.55, pdTarget: 20, minPd: 9, headStart: 2, parFlat: 4, horizon: 2, focus: 0.8, slag: 0.21, patchDrop: 0.18, jobTiers: [2, 3, 3] },
+  6: { grid: [11, 9], oppRam: 8, greed: 0.98, abilityFreq: 0.78, pdTarget: 20, minPd: 10, headStart: 3, parFlat: 3, horizon: 2, focus: 0.9, slag: 0.22, patchDrop: 0.16, jobTiers: [3, 3, 3] },
+  7: { grid: [11, 11], oppRam: 9, greed: 0.99, abilityFreq: 0.65, pdTarget: 21, minPd: 10, headStart: 3, parFlat: 2, horizon: 2, focus: 0.9, slag: 0.23, patchDrop: 0.13, jobTiers: [3, 3, 4] },
+  8: { grid: [13, 11], oppRam: 10, greed: 0.98, abilityFreq: 0.7, pdTarget: 22, minPd: 10, headStart: 3, parFlat: 2, horizon: 3, focus: 0.9, slag: 0.24, patchDrop: 0.12, jobTiers: [4, 4, 4] },
+  9: { grid: [13, 11], oppRam: 11, greed: 0.97, abilityFreq: 0.75, pdTarget: 24, minPd: 12, headStart: 4, parFlat: 1, horizon: 3, focus: 0.95, slag: 0.25, patchDrop: 0.11, jobTiers: [4, 4, 5] },
 };
 
 export const FINAL_DAY = 10;
@@ -97,7 +113,7 @@ export function dayDuelConfig(
     oppRam: d.oppRam,
     greed: d.greed,
     abilityFreq: d.abilityFreq,
-    minCost: d.minCost,
+    pdTarget: d.pdTarget,
     minPd: d.minPd,
     headStart: d.headStart,
     oppAttackModes: kit.attackModes,
@@ -105,6 +121,8 @@ export function dayDuelConfig(
     oppTier: kit.oppTier,
     dominant,
     parFlat: d.parFlat,
+    horizon: d.horizon,
+    focus: d.focus,
     slag: d.slag,
   };
 }
@@ -116,20 +134,29 @@ export function dayDuelConfig(
  */
 export function finaleConfig(): DuelConfig {
   return {
-    w: 17,
-    h: 13,
+    // 15x11, not 17x13. With the goal on the far edge a 15-wide board already
+    // carries a 29-cost route, and 17x13 was the game's worst legibility
+    // moment (42px per cell on the shortest supported desk) for no depth the
+    // width was actually buying.
+    w: 15,
+    h: 11,
     oppRam: 11,
     greed: 1,
     abilityFreq: 0.9,
-    minCost: 34,
+    pdTarget: 29,
     minPd: 18,
     headStart: 1,
     oppAttackModes: [...ATTACK_ALL],
     oppDefendModes: [...DEFEND_ALL],
     oppTier: 3,
     dominant: "redirect",
-    // Tighter than day 9 on purpose: the finale pays for every wasted turn.
-    parFlat: 0,
+    // Tight on purpose: the finale pays for every wasted turn. Not zero -
+    // at zero a 29-cost route put 100% of finale wins over par.
+    parFlat: 2,
+    // Full depth. It reads your grid as well as its own and will stop racing
+    // to cut you the moment your clock is shorter than its.
+    horizon: 3,
+    focus: 1,
     slag: 0.27,
     // It was already inside. The machine opens the duel, so no kit, however
     // stacked, ever closes the back room before it has moved.
@@ -150,12 +177,16 @@ export function tutorialConfig(): DuelConfig {
     oppRam: 12,
     greed: 1,
     abilityFreq: 0,
-    minCost: 14,
+    pdTarget: 14,
     headStart: 0,
     oppAttackModes: ["armHalt"],
     oppDefendModes: [],
     oppTier: 1,
     dominant: "armHalt",
+    // The tutorial machine never reaches across with intent; it plants one
+    // scripted trap so the scan-purge lesson has a subject.
+    horizon: 0,
+    focus: 0.5,
     tutorial: true,
   };
 }

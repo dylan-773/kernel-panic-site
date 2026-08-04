@@ -35,7 +35,15 @@ export const SIPHON_STEAL: Record<Tier, number> = { 1: 2, 2: 3, 3: 4 };
  * the player's starting route cost. Rotations past par chip strain on a
  * win; program twists and patch cells never count against it.
  */
-export const PAR_RATE = 1.25;
+/*
+ * Rebased for split boards. Route cost roughly doubled when the goal moved to
+ * the far edge, and at 1.25x nobody could ever go over: measured par was 26
+ * against 17 actual rotations, so `over` was 0.0% on every day of the arc and
+ * strain billed nothing at all. A dive costs about one rotation per point of
+ * route, so par is now the route plus a working margin, not the route plus a
+ * quarter of itself.
+ */
+export const PAR_RATE = 1.0;
 export const PAR_FLAT = 2;
 /** Strain lost per rotation past par. */
 export const PAR_STRAIN_PER = 2;
@@ -44,13 +52,39 @@ export const PAR_STRAIN_PER = 2;
 export const BASE_REACH = 2;
 
 /**
- * Cascade payoff: +1 RAM per 4 nodes claimed in one settle, capped, and
- * BANKED into the next turn. Paying it out immediately compounds into a
- * degenerate snowball (the whole route finishes in a turn); banked, it is
- * pure tempo you feel on the very next cycle.
+ * Cascade payoff, banked into the next turn. Paying it out immediately
+ * compounds into a snowball; banked, it is pure tempo on the very next cycle.
+ *
+ * The curve is steep on purpose. A two-node light is not an achievement and
+ * pays nothing; a ten-node light means you deliberately held a long chain
+ * behind one unturned junction for two or three turns and then flipped it,
+ * which is the combo the fast win is supposed to be made of. Only FIRST
+ * lights count (see settleBoard), so re-lighting a repaired chain pays zero.
  */
-export function cascadeRam(claimed: number): number {
-  return Math.min(2, Math.floor(claimed / 4));
+export function cascadeRam(lit: number): number {
+  if (lit < 3) return 0;
+  if (lit < 6) return 1;
+  if (lit < 10) return 2;
+  if (lit < 15) return 3;
+  return 4;
+}
+
+/**
+ * Surge tiers: what a big cascade does that a small one cannot.
+ *   SPARK  (3+)  RAM only.
+ *   SURGE  (6+)  the surge blows the clamps: every enemy LOCK on this board
+ *                shatters, so a lock-heavy opponent has a counter that is not
+ *                just "wait two rounds".
+ *   BREAK  (10+) SURGE, and the overflow arcs across: one armed trap on the
+ *                ENEMY board is triggered dead, wasting their cast.
+ */
+export type SurgeTier = "none" | "spark" | "surge" | "break";
+
+export function surgeTierOf(lit: number): SurgeTier {
+  if (lit >= 10) return "break";
+  if (lit >= 6) return "surge";
+  if (lit >= 3) return "spark";
+  return "none";
 }
 
 export const PROGRAM_LABEL: Record<Program, string> = {
@@ -114,8 +148,19 @@ export function scanDesc(tier: Tier): string {
 
 export type AugmentId = string;
 
-/** Flat strain chip on a gridlock win: the dead link bites on the way out. */
-export const GRIDLOCK_CHIP = 6;
+/*
+ * Strain, rebilled for split boards. The old formula billed only rotations
+ * past par and sprung traps, which in a two-round duel meant a whole 28-dive
+ * run cost 4-8 strain total. These two terms are the ones that make winning
+ * ugly cost something, and both stay avoidable in principle: play clean and
+ * the bill is still exactly zero.
+ */
+/** Strain per enemy REDIRECT that landed on your board (3 RAM each to undo). */
+export const REDIRECT_STRAIN_PER = 1;
+/** Strain per round the machine spent inside PRESSURE_RANGE of its goal. */
+export const PRESSURE_STRAIN_PER = 2;
+/** How close the machine has to be for a round to count as pressure. */
+export const PRESSURE_RANGE = 4;
 
 /**
  * Draft gate, declarative so the UI, the MANUAL, and the sims can all

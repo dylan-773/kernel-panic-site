@@ -10,6 +10,7 @@
 import { DAY_CONFIGS, dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
 import { OppMode } from "../content/kit";
 import { endPlayerTurn } from "../duel-actions";
+import { routeCost } from "../duel-power";
 import { createDuel, mixSeed } from "../duel-setup";
 import { BASE_KIT, DuelEndKind, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
@@ -19,6 +20,33 @@ import { cellsAtDay, kitAtDay, ramAtDay } from "./kitted-profile";
 const PROXY_GREED = 0.95;
 const SEEDS = 200;
 const MODES: OppMode[] = ["redirect", "armHalt", "armSiphon", "purge", "lock", "ward"];
+
+/*
+ * AI wall-clock proxy. The cadence is not flat: a rotation lands in 170ms, a
+ * telegraphed cast holds 520ms, and any beat that actually did something (a
+ * trap firing, a junction twisted, a clamp landing) holds a further 500-1200ms
+ * so it can be read. This is the blended per-beat figure. Off by a bit either
+ * way; it exists to catch a duel that becomes unwatchable, not to bill.
+ */
+const BEAT_MS = 255;
+
+function pctl(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))));
+  return sorted[i];
+}
+
+/**
+ * Opening route costs, read before a single turn is played. `pd` is what the
+ * whole difficulty curve is actually made of: `par` is derived from it, and
+ * pd/ramPerTurn is the approach length in turns. Printing it directly rather
+ * than inverting par is the only way to see the generator missing `minCost`.
+ */
+function openingCosts(s: DuelState): { pd: number; od: number } {
+  const pd = routeCost(s.boards.player);
+  const od = routeCost(s.boards.opp);
+  return { pd: isFinite(pd) ? pd : 0, od: isFinite(od) ? od : 0 };
+}
 
 function playPlayerTurn(s: DuelState): void {
   botPlayTurn(s, "player", PROXY_GREED);
@@ -32,11 +60,16 @@ export function playDuel(s: DuelState): {
   chip: number;
   rotations: number;
   par: number;
+  beats: number;
 } {
   let guard = 0;
+  let beats = 0;
   while (s.phase === "playing" && guard++ < 4000) {
     if (s.turn === "player") playPlayerTurn(s);
-    else oppStep(s);
+    else {
+      oppStep(s);
+      beats++;
+    }
   }
   if (s.phase === "playing") throw new Error("duel did not terminate");
   return {
@@ -46,6 +79,7 @@ export function playDuel(s: DuelState): {
     chip: s.strainChip,
     rotations: s.econ.player.rotations,
     par: s.par,
+    beats,
   };
 }
 
@@ -64,11 +98,22 @@ function runDay(label: string, mk: (seed: number) => DuelState): number {
   let parTotal = 0;
   let rotTotal = 0;
   let overWins = 0;
+  let pdTotal = 0;
+  let odTotal = 0;
+  let ramTotal = 0;
+  let beatsTotal = 0;
+  const allRounds: number[] = [];
   for (let i = 0; i < SEEDS; i++) {
     const s = mk(mixSeed(1337, i));
     const par = s.par;
+    const { pd, od } = openingCosts(s);
+    pdTotal += pd;
+    odTotal += od;
+    ramTotal += s.econ.player.ramPerTurn;
     const r = playDuel(s);
     roundsTotal += r.rounds;
+    beatsTotal += r.beats;
+    allRounds.push(r.rounds);
     minRounds = Math.min(minRounds, r.rounds);
     maxRounds = Math.max(maxRounds, r.rounds);
     if (r.won) {
@@ -88,6 +133,13 @@ function runDay(label: string, mk: (seed: number) => DuelState): number {
   console.log(
     `${label.padEnd(10)} win ${pct(wins, SEEDS).padStart(6)}  cap ${pct(caps, SEEDS).padStart(5)}  rounds ${(roundsTotal / SEEDS).toFixed(1)} (${minRounds}-${maxRounds})  chip/win ${avgChip}  par ${avgPar} rot ${avgRot} over ${overPct}`,
   );
+  allRounds.sort((a, b) => a - b);
+  const pd = pdTotal / SEEDS;
+  const ram = ramTotal / SEEDS;
+  const shortPct = allRounds.filter((r) => r <= 2).length / SEEDS;
+  console.log(
+    `           pd ${pd.toFixed(1)} od ${(odTotal / SEEDS).toFixed(1)} ram ${ram.toFixed(0)}  approach ${(pd / ram).toFixed(1)}t  rounds p10 ${pctl(allRounds, 0.1)} med ${pctl(allRounds, 0.5)} p90 ${pctl(allRounds, 0.9)}  <=2r ${(100 * shortPct).toFixed(0)}%  ai ${((beatsTotal / SEEDS) * BEAT_MS * 0.001).toFixed(1)}s`,
+  );
   return (100 * wins) / SEEDS;
 }
 
@@ -104,16 +156,19 @@ interface KittedResult {
   scans: number;
   attacks: number;
   defends: number;
+  beats: number;
 }
 
 function playKittedDuel(s: DuelState): KittedResult {
   let guard = 0;
+  let beats = 0;
   while (s.phase === "playing" && guard++ < 4000) {
     if (s.turn === "player") {
       kittedPlayTurn(s);
       if (s.phase === "playing" && s.turn === "player") endPlayerTurn(s);
     } else {
       oppStep(s);
+      beats++;
     }
   }
   if (s.phase === "playing") throw new Error("kitted duel did not terminate");
@@ -126,20 +181,20 @@ function playKittedDuel(s: DuelState): KittedResult {
     scans: s.econ.player.scansCast,
     attacks: s.econ.player.attacksCast,
     defends: s.econ.player.defendsCast,
+    beats,
   };
 }
 
-const endTally = { wonCore: 0, wonCap: 0, wonGridlock: 0, lostCore: 0, lostSevered: 0, lostCap: 0 };
+const endTally = { wonGoal: 0, wonCap: 0, lostGoal: 0, lostSeal: 0, lostCap: 0 };
 
 function tallyEnd(r: KittedResult): void {
   if (r.won) {
     if (r.winKind === "cap") endTally.wonCap++;
-    else if (r.winKind === "gridlock") endTally.wonGridlock++;
-    else endTally.wonCore++;
+    else endTally.wonGoal++;
   } else {
     if (r.winKind === "cap") endTally.lostCap++;
-    else if (r.winKind === "severed") endTally.lostSevered++;
-    else endTally.lostCore++;
+    else if (r.winKind === "seal") endTally.lostSeal++;
+    else endTally.lostGoal++;
   }
 }
 
@@ -158,11 +213,19 @@ function runDayKitted(
   let attacks = 0;
   let defends = 0;
   const closeRounds: number[] = [];
+  let pdTotal = 0;
+  let ramTotal = 0;
+  let beatsTotal = 0;
+  const allRounds: number[] = [];
   for (let i = 0; i < SEEDS; i++) {
     const s = mk(mixSeed(1337, i));
+    pdTotal += openingCosts(s).pd;
+    ramTotal += s.econ.player.ramPerTurn;
     const r = playKittedDuel(s);
     tallyEnd(r);
     roundsTotal += r.rounds;
+    beatsTotal += r.beats;
+    allRounds.push(r.rounds);
     scans += r.scans;
     attacks += r.attacks;
     defends += r.defends;
@@ -180,6 +243,13 @@ function runDayKitted(
   const cellsPerWin = wins > 0 ? (cellsUsed / wins).toFixed(2) : "-";
   console.log(
     `${label.padEnd(10)} win ${pct(wins, SEEDS).padStart(6)}  d ${(delta >= 0 ? "+" : "") + delta.toFixed(1)}  cap ${pct(caps, SEEDS).padStart(5)}  rounds ${(roundsTotal / SEEDS).toFixed(1)}  chip/win ${avgChip}  casts s${(scans / SEEDS).toFixed(1)}/a${(attacks / SEEDS).toFixed(1)}/d${(defends / SEEDS).toFixed(1)}  cells/win ${cellsPerWin}`,
+  );
+  allRounds.sort((a, b) => a - b);
+  const pd = pdTotal / SEEDS;
+  const ram = ramTotal / SEEDS;
+  const shortPct = allRounds.filter((r) => r <= 2).length / SEEDS;
+  console.log(
+    `           pd ${pd.toFixed(1)} ram ${ram.toFixed(0)}  approach ${(pd / ram).toFixed(1)}t  rounds p10 ${pctl(allRounds, 0.1)} med ${pctl(allRounds, 0.5)} p90 ${pctl(allRounds, 0.9)}  <=2r ${(100 * shortPct).toFixed(0)}%  ai ${((beatsTotal / SEEDS) * BEAT_MS * 0.001).toFixed(1)}s`,
   );
   return { win, closeRounds };
 }
@@ -240,6 +310,6 @@ if (import.meta.main) {
     `finale close player-turns: t1 ${hist[0]}  t2 ${hist[1]}  t3 ${hist[2]}  t4 ${hist[3]}  t5+ ${hist[4]}   (t1 must be 0)`,
   );
   console.log(
-    `kitted ends: won core ${endTally.wonCore} cap ${endTally.wonCap} gridlock ${endTally.wonGridlock} . lost core ${endTally.lostCore} severed ${endTally.lostSevered} cap ${endTally.lostCap}`,
+    `kitted ends: won goal ${endTally.wonGoal} cap ${endTally.wonCap} . lost goal ${endTally.lostGoal} seal ${endTally.lostSeal} cap ${endTally.lostCap}`,
   );
 }

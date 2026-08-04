@@ -12,15 +12,19 @@ import {
   say,
   tierOf,
 } from "./duel-actions";
-import { canPlace, canRotate } from "./duel-power";
+import { canPlace, canRotate, reachOf } from "./duel-power";
 import { PLACE_COST } from "./patch-cells";
-import { DuelState } from "./duel-types";
+import { Board, DuelState, Side } from "./duel-types";
 import { oppStep } from "./opponent";
 
 /**
- * Pure reducer for the flood-claim duel: clone, mutate through the shared
+ * Pure reducer for the split-board duel: clone, mutate through the shared
  * helpers, queue fx in-state, drain explicitly. Fully turn-based; the only
  * recurring dispatch is oppStep on a short UI interval.
+ *
+ * No action carries a board tag. Which grid a verb touches is a property of
+ * the verb (see `targetBoardOf` in duel-actions), so the reducer and the
+ * opponent planner cannot disagree about it.
  */
 
 export type DuelAction =
@@ -29,12 +33,22 @@ export type DuelAction =
   | { type: "cast"; prog: Program; targets: number[] }
   | { type: "endTurn" }
   | { type: "oppStep" }
+  | { type: "view"; side: Side }
   | { type: "fxDrain"; upTo: number };
+
+function cloneBoard(b: Board): Board {
+  return {
+    ...b,
+    cells: b.cells.map((c) => ({ ...c, trap: c.trap ? { ...c.trap } : null })),
+    goal: [...b.goal],
+    power: [...b.power],
+  };
+}
 
 function cloneState(s: DuelState): DuelState {
   return {
     ...s,
-    cells: s.cells.map((c) => ({ ...c, trap: c.trap ? { ...c.trap } : null })),
+    boards: { player: cloneBoard(s.boards.player), opp: cloneBoard(s.boards.opp) },
     econ: {
       player: { ...s.econ.player, used: { ...s.econ.player.used } },
       opp: { ...s.econ.opp, used: { ...s.econ.opp.used } },
@@ -69,17 +83,17 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       const s = cloneState(state);
       if (s.econ.player.ram < 1) return deny(s, "No RAM left. End the turn.");
       if (!canRotate(s, "player", action.idx)) {
-        const c = s.cells[action.idx];
+        const c = s.boards.player.cells[action.idx];
         if (c && c.kind === "node" && c.fused) {
           return deny(s, "That junction is welded. A placed piece never turns.");
         }
         if (c && c.lockedThroughRound >= s.round && c.lockedBy === "opp") {
-          return deny(s, "That junction is clamped frozen.");
+          return deny(s, "That junction is clamped frozen. Wait it out or route around.");
         }
-        if (c && c.kind === "node" && c.owner === "opp") {
-          return deny(s, "Enemy territory. ATTACK: REDIRECT can reach it.");
+        if (c && c.kind === "goal") {
+          return deny(s, "That is the goal. Light it, do not turn it.");
         }
-        return deny(s, "Out of reach. Work outward from your territory.");
+        return deny(s, "Out of reach. Work outward from the line you have built.");
       }
       applyRotate(s, "player", action.idx);
       return s;
@@ -93,8 +107,8 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       if (s.econ.player.ram < PLACE_COST) return deny(s, "Placing a piece takes 2 RAM.");
       // Stale-click guard: the action names the piece it thinks it spends.
       if (s.patchPouch[action.pouchIdx] !== action.mask) return deny(s);
-      if (!canPlace(s, "player", action.idx)) {
-        return deny(s, "Patch pieces only fill slag within reach of your territory.");
+      if (!canPlace(s.boards.player, action.idx, reachOf(s, "player"))) {
+        return deny(s, "Patch pieces only fill slag within reach of the line you have built.");
       }
       applyPlace(s, "player", action.idx, action.pouchIdx);
       return s;
@@ -140,6 +154,11 @@ export function duelReducer(state: DuelState, action: DuelAction): DuelState {
       const s = cloneState(state);
       oppStep(s);
       return s;
+    }
+
+    case "view": {
+      if (state.view === action.side) return state;
+      return { ...state, view: action.side };
     }
   }
 }
