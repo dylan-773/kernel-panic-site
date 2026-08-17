@@ -7,12 +7,12 @@
  * lower bound on real player strength, since humans also get the kit.
  */
 
-import { DAY_CONFIGS, dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
+import { DAY_CONFIGS, PD_TOLERANCE, dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
 import { OppMode } from "../content/kit";
 import { endPlayerTurn } from "../duel-actions";
-import { routeCost } from "../duel-power";
+import { computePower, routeCost, routePlan } from "../duel-power";
 import { createDuel, mixSeed } from "../duel-setup";
-import { BASE_KIT, DuelEndKind, DuelState } from "../duel-types";
+import { BASE_KIT, Board, DuelEndKind, DuelState, Side } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
 import { kittedPlayTurn } from "./kitted-bot";
 import { cellsAtDay, kitAtDay, ramAtDay } from "./kitted-profile";
@@ -46,6 +46,65 @@ function openingCosts(s: DuelState): { pd: number; od: number } {
   const pd = routeCost(s.boards.player);
   const od = routeCost(s.boards.opp);
   return { pd: isFinite(pd) ? pd : 0, od: isFinite(od) ? od : 0 };
+}
+
+/**
+ * Days whose measured mean `pd` drifted off `pdTarget`. `arc.ts` has always
+ * claimed this file asserts the band; it never did, and under the old shared
+ * board the generator missed by 7-11 on every single day while the whole
+ * difficulty table tuned a number nothing read. Collected here and fatal at
+ * the end, so one miss does not hide the rest.
+ */
+const pdMisses: string[] = [];
+
+function checkPd(label: string, pd: number, target: number): string {
+  const off = pd - target;
+  if (Math.abs(off) > PD_TOLERANCE) {
+    pdMisses.push(`${label.trim()}: pd ${pd.toFixed(1)} vs target ${target} (off by ${off.toFixed(1)})`);
+  }
+  return `${pd.toFixed(1)}/${target}`;
+}
+
+/**
+ * A route plan has to be executable, not just a number. Snap every node on the
+ * plan to the rotation it asked for and the goal must light, for exactly the
+ * RAM the plan quoted. Nothing has ever checked this, and `plan.cost` is
+ * treated as truth by par, the round-cap tiebreak, the machine's whole turn
+ * queue and board generation's fairness loop. Plans flagged `approx` are
+ * exempt by contract: they promise a route exists, not that the queue conducts.
+ */
+function checkPlanHonesty(seeds: number): { checked: number; bad: string[] } {
+  const bad: string[] = [];
+  let checked = 0;
+  for (let day = 1; day <= 9; day++) {
+    const tiers = DAY_CONFIGS[day].jobTiers;
+    for (let seed = 0; seed < seeds; seed++) {
+      const s = createDuel(
+        dayDuelConfig(day, MODES[seed % MODES.length], tiers[seed % 3], seed),
+        seed,
+        BASE_KIT,
+        5 + Math.floor((day - 1) / 2),
+      );
+      for (const side of ["player", "opp"] as Side[]) {
+        const b = s.boards[side];
+        const plan = routePlan(b);
+        if (!plan || plan.approx) continue;
+        checked++;
+        const quoted = plan.steps.reduce((n, st) => n + st.turns, 0);
+        if (quoted !== plan.cost) {
+          bad.push(`day ${day} seed ${seed} ${side}: steps sum to ${quoted} but cost says ${plan.cost}`);
+          continue;
+        }
+        const probe: Board = { ...b, cells: b.cells.map((c) => ({ ...c })) };
+        for (const st of plan.path) probe.cells[st.idx].rot = st.targetRot;
+        const power = computePower(probe);
+        if (!probe.goal.some((i) => power[i])) {
+          bad.push(`day ${day} seed ${seed} ${side}: executed a cost-${plan.cost} plan, goal stayed dark`);
+        }
+      }
+    }
+  }
+  return { checked, bad };
 }
 
 function playPlayerTurn(s: DuelState): void {
@@ -87,7 +146,7 @@ function pct(n: number, d: number): string {
   return `${((100 * n) / d).toFixed(1)}%`;
 }
 
-function runDay(label: string, mk: (seed: number) => DuelState): number {
+function runDay(label: string, pdTarget: number, mk: (seed: number) => DuelState): number {
   let wins = 0;
   let caps = 0;
   let roundsTotal = 0;
@@ -138,7 +197,7 @@ function runDay(label: string, mk: (seed: number) => DuelState): number {
   const ram = ramTotal / SEEDS;
   const shortPct = allRounds.filter((r) => r <= 2).length / SEEDS;
   console.log(
-    `           pd ${pd.toFixed(1)} od ${(odTotal / SEEDS).toFixed(1)} ram ${ram.toFixed(0)}  approach ${(pd / ram).toFixed(1)}t  rounds p10 ${pctl(allRounds, 0.1)} med ${pctl(allRounds, 0.5)} p90 ${pctl(allRounds, 0.9)}  <=2r ${(100 * shortPct).toFixed(0)}%  ai ${((beatsTotal / SEEDS) * BEAT_MS * 0.001).toFixed(1)}s`,
+    `           pd ${checkPd(label, pd, pdTarget)} od ${(odTotal / SEEDS).toFixed(1)} ram ${ram.toFixed(0)}  approach ${(pd / ram).toFixed(1)}t  rounds p10 ${pctl(allRounds, 0.1)} med ${pctl(allRounds, 0.5)} p90 ${pctl(allRounds, 0.9)}  <=2r ${(100 * shortPct).toFixed(0)}%  ai ${((beatsTotal / SEEDS) * BEAT_MS * 0.001).toFixed(1)}s`,
   );
   return (100 * wins) / SEEDS;
 }
@@ -256,6 +315,16 @@ function runDayKitted(
 
 if (import.meta.main) {
   {
+    const honesty = checkPlanHonesty(20);
+    if (honesty.bad.length > 0) {
+      console.log(`\nROUTE PLAN IS LYING (${honesty.bad.length} of ${honesty.checked} plans):`);
+      for (const line of honesty.bad.slice(0, 12)) console.log(`  ${line}`);
+      process.exit(1);
+    }
+    console.log(`plan honesty: ${honesty.checked} exact plans executed, all light the goal at cost`);
+  }
+
+  {
     let playerWins = 0;
     for (let i = 0; i < SEEDS; i++) {
       const s = createDuel(tutorialConfig(), mixSeed(999, i), BASE_KIT, 5);
@@ -269,7 +338,7 @@ if (import.meta.main) {
   for (let day = 1; day <= 9; day++) {
     const ram = 5 + Math.floor((day - 1) / 2);
     const tiers = DAY_CONFIGS[day].jobTiers;
-    baseWins[day] = runDay(`day ${day} r${ram}`, (seed) =>
+    baseWins[day] = runDay(`day ${day} r${ram}`, DAY_CONFIGS[day].pdTarget, (seed) =>
       createDuel(
         dayDuelConfig(day, MODES[seed % MODES.length], tiers[seed % 3], seed),
         seed,
@@ -279,7 +348,9 @@ if (import.meta.main) {
     );
   }
 
-  const baseFinale = runDay("finale r9", (seed) => createDuel(finaleConfig(), seed, BASE_KIT, 9));
+  const baseFinale = runDay("finale r9", finaleConfig().pdTarget, (seed) =>
+    createDuel(finaleConfig(), seed, BASE_KIT, 9),
+  );
 
   // Kitted pass: same seeds and configs as the rows above, so every delta
   // is a paired comparison on identical boards. The kit-less block stays
@@ -312,4 +383,11 @@ if (import.meta.main) {
   console.log(
     `kitted ends: won goal ${endTally.wonGoal} cap ${endTally.wonCap} . lost goal ${endTally.lostGoal} seal ${endTally.lostSeal} cap ${endTally.lostCap}`,
   );
+
+  if (pdMisses.length > 0) {
+    console.log(`\nPD TARGET MISSED (tolerance ${PD_TOLERANCE}):`);
+    for (const line of pdMisses) console.log(`  ${line}`);
+    process.exit(1);
+  }
+  console.log(`pd targets: every day within ${PD_TOLERANCE} of its pdTarget`);
 }

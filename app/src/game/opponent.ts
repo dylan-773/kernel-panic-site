@@ -23,7 +23,8 @@ import {
   routeCost,
   routePlan,
 } from "./duel-power";
-import { Board, DuelState, Side, otherSide } from "./duel-types";
+import { execCommand } from "./duel-commands";
+import { Board, DuelState, Side, isJunction, otherSide } from "./duel-types";
 
 /**
  * The scripted opponent, v4: it plans with the same rotation-cost Dijkstra
@@ -339,7 +340,7 @@ export function prepareCastFor(
        */
       const plan = routePlan(own);
       const worth = new Set<number>([
-        ...own.cells.map((_, i) => i).filter((i) => own.power[i] && own.cells[i].kind === "node"),
+        ...own.cells.map((_, i) => i).filter((i) => own.power[i] && isJunction(own.cells[i])),
         ...(plan?.path ?? []).map((p) => p.idx),
       ]);
       const radius = WARD_RADIUS[tierOf(s, side, "defend")];
@@ -379,11 +380,20 @@ function prepareCast(s: DuelState): CastAim | null {
   return prepareCastFor(s, "opp", pc.prog, pc.mode);
 }
 
-/** Land a telegraphed cast. Conditions cannot change between the beats. */
+/**
+ * Land a telegraphed cast. Goes through the shared command gate rather than
+ * re-deriving its own affordability check, which is where the machine used to
+ * test `ram < 1` with a literal in place of `programCost`. Logging is off: the
+ * machine never undoes, so it has no use for a turn log or a snapshot.
+ */
 function executeCast(s: DuelState, aim: CastAim): void {
-  const econ = s.econ.opp;
-  if (econ.used[aim.prog] || econ.ram < 1) return;
-  applyCast(s, "opp", aim.prog, aim.mode, aim.targets);
+  const r = execCommand(
+    s,
+    "opp",
+    { kind: "cast", prog: aim.prog, mode: aim.mode, targets: aim.targets },
+    { arm: false },
+  );
+  if (!r.ok) return;
   if (aim.mode === s.cfg.dominant) s.oppDominantUsed = true;
 }
 
@@ -467,7 +477,7 @@ function queueRotateStep(
 ): boolean {
   const idx = pickFromQueue(s, side, queue, greed, replan);
   if (idx === -1) return false;
-  return applyRotate(s, side, idx);
+  return execCommand(s, side, { kind: "rotate", idx }, { arm: false }).ok;
 }
 
 interface ReplanMem {

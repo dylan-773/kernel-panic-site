@@ -34,7 +34,7 @@ import { TapTip, useLongPress } from "./tap-tip";
 import { canPlace, canRotate, goalLive, reachOf, routeCost } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
-import { DuelConfig, DuelKit, DuelState, ROUND_CAP, Side } from "../../game/duel-types";
+import { DuelConfig, DuelKit, DuelState, ROUND_CAP, Side, isJunction } from "../../game/duel-types";
 import { PLACE_COST } from "../../game/patch-cells";
 import { customerById } from "./screens";
 import { deviceMacroFor } from "../os/roster-art";
@@ -201,7 +201,7 @@ function coachLine(s: DuelState): string | null {
   return tutorialLine({
     turn: s.turn,
     round: s.round,
-    ownedNodes: s.boards.player.cells.filter((c) => c.kind === "node" && c.built).length,
+    ownedNodes: s.boards.player.cells.filter((c) => isJunction(c) && c.built).length,
     scanned: s.tutFlags.scanned,
     purged: s.tutFlags.purged,
     attacked: s.tutFlags.attacked,
@@ -356,6 +356,8 @@ export function DuelScreen(props: DuelScreenProps) {
    */
   const [slide, setSlide] = useState<{ key: number; dir: "l" | "r" }>({ key: 0, dir: "l" });
   const prevViewRef = useRef<Side>("player");
+  /** Whose turn the last render saw, so the hand-back only fires on the edge. */
+  const prevTurnRef = useRef<Side>("player");
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [virus, setVirus] = useState<VirusMsg | null>(null);
   const [sweep, setSweep] = useState(0);
@@ -670,9 +672,19 @@ export function DuelScreen(props: DuelScreenProps) {
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Held keys must not shred the staged turn one entry per repeat.
+      if (e.repeat) return;
       if (e.code === "Escape") {
         setTargeting(null);
         setPlacing(null);
+      } else if (
+        (e.code === "KeyZ" || e.code === "Backspace") &&
+        playerTurn &&
+        !targeting &&
+        placing === null
+      ) {
+        e.preventDefault();
+        dispatch({ type: "undo" });
       } else if (e.code === "KeyE" && playerTurn && !targeting && placing === null) {
         pendingRef.current = { type: "endTurn" };
         dispatch({ type: "endTurn" });
@@ -753,6 +765,24 @@ export function DuelScreen(props: DuelScreenProps) {
     if (!aimBoard || aimBoard === state.view) return;
     dispatch({ type: "view", side: aimBoard });
   }, [aimBoard, state.turn, state.phase, state.view]);
+
+  /**
+   * The machine is done: come home. Its turn leaves the camera on whatever
+   * grid it last worked, so a turn that ended on its own board used to hand
+   * you yours while you were looking at the wrong one. Fires only on the
+   * opp -> player edge, never on a manual TAB during your own turn, and holds
+   * one beat so its last move is seen landing before the pan.
+   */
+  useEffect(() => {
+    const was = prevTurnRef.current;
+    prevTurnRef.current = state.turn;
+    if (was !== "opp" || state.turn !== "player" || state.phase !== "playing") return;
+    const t = setTimeout(() => dispatch({ type: "view", side: "player" }), OPP_BEAT_MS);
+    return () => clearTimeout(t);
+  }, [state.turn, state.phase]);
+
+  /** The turn's take-back, if it is still there to spend. */
+  const undoLabel = playerTurn && !state.undoSpent && state.undo ? state.undo.label : null;
 
   /** The machine is about to act on the grid you are not looking at. */
   const offBoardAlert: Side | null = aimBoard && aimBoard !== view ? aimBoard : null;
@@ -931,6 +961,7 @@ export function DuelScreen(props: DuelScreenProps) {
     if (state.phase !== "playing") return "LINK CLOSED.";
     if (state.turn === "opp") return "The intrusion is moving. Watch the line.";
     if (econ.ram < 1) return "No RAM left. E ends the turn.";
+    if (undoLabel) return `Your move. Z takes back the ${undoLabel.toLowerCase()}, once this turn.`;
     return "Your move. Twist a junction in reach, run a program, or end the turn.";
   })();
 
@@ -1120,6 +1151,27 @@ export function DuelScreen(props: DuelScreenProps) {
             </div>
           </div>
 
+          {/* One take-back a turn. Touch-move is the texture of the game, so
+              this is here to fix a misread, not to let anyone shop around. */}
+          <button
+            type="button"
+            className="kp-btn2 dv-undo"
+            disabled={undoLabel === null}
+            title={
+              undoLabel === null
+                ? state.undoSpent
+                  ? "You have already taken one back this turn"
+                  : "Nothing to take back"
+                : "Puts your junction back. A trap you sprang stays sprung."
+            }
+            onClick={() => {
+              if (soundOn) playUiPress();
+              dispatch({ type: "undo" });
+            }}
+          >
+            {undoLabel === null ? "UNDO (Z)" : `UNDO ${undoLabel} (Z)`}
+          </button>
+
           <button
             type="button"
             className={`kp-btn2 dv-end ${playerTurn && !arming && econ.ram === 0 ? "kp-btn2-signal" : ""}`.trim()}
@@ -1162,6 +1214,23 @@ export function DuelScreen(props: DuelScreenProps) {
             machineTag={MACHINE_TAG}
           />
           </div>
+          {/* The two grids run opposite ways and share one screen position, so
+              the way across is an edge you walk off: your goal is right, so
+              its grid is further right still. Lives outside `.dv-slidein`,
+              which is remounted on every view change. */}
+          <button
+            type="button"
+            className={`dv-viewarrow dv-viewarrow-${view === "player" ? "r" : "l"} ${
+              offBoardAlert ? "dv-viewarrow-alert" : ""
+            }`.trim()}
+            aria-label={view === "player" ? "Show the intrusion's grid" : "Show your grid"}
+            onClick={() => {
+              if (soundOn) playUiPress();
+              dispatch({ type: "view", side: view === "player" ? "opp" : "player" });
+            }}
+          >
+            <span aria-hidden="true">{view === "player" ? ">" : "<"}</span>
+          </button>
           {sweep > 0 && <div key={`sw-${sweep}`} className="dv-sweep" aria-hidden="true" />}
           {virus && (
             <div key={virus.key} className="dv-virus" aria-live="polite">

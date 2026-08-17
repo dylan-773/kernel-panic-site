@@ -46,6 +46,20 @@ export const PIECE_X = 0b1111;
 /** One board has exactly one entry (its owner's) and a goal column. */
 export type CellKind = "node" | "entry" | "goal" | "block";
 
+/**
+ * A rotatable connector: something the player twists, the signal builds on,
+ * traps arm to and programs target. `entry` and `goal` are fixed terminals and
+ * `block` is slag, so none of them qualify.
+ *
+ * Every rule that means "a connector" goes through here rather than testing
+ * `kind === "node"` directly. There is exactly one connector kind today; the
+ * predicate exists so that adding a second does not mean finding twenty-odd
+ * open-coded comparisons and silently missing three of them.
+ */
+export function isJunction(c: DuelCell): boolean {
+  return c.kind === "node";
+}
+
 export type TrapKind = "halt" | "siphon";
 
 export interface DuelCell {
@@ -96,6 +110,42 @@ export interface Board {
   goal: number[];
   /** Currently carrying signal from `entry`. Recomputed after every change. */
   power: boolean[];
+}
+
+/**
+ * One staged move. Commands are RECORDS rather than closures because undo
+ * replays them: pulling an entry out of the turn means re-running the rest
+ * from the turn's starting snapshot, which only works if a move is data.
+ *
+ * A rotation or a placement can be pulled back out; a cast cannot. Casts are
+ * commands anyway so the log is one homogeneous list and the replay does not
+ * have to special-case what it is re-running. The gate that validates and
+ * applies them lives in `duel-commands`.
+ */
+export type DuelCommand =
+  | { kind: "rotate"; idx: number }
+  | { kind: "place"; idx: number; pouchIdx: number; mask: number }
+  | { kind: "cast"; prog: Program; mode: OppMode | null; targets: number[] };
+
+/**
+ * Everything needed to put one move back, and the short list of things that
+ * move did which an undo may NOT put back.
+ */
+export interface UndoPoint {
+  /** The state before the move. Restored wholesale. */
+  before: DuelState;
+  /** What the button says, e.g. "UNDO TWIST 0x1A". */
+  label: string;
+  /**
+   * Traps this move sprang. Undo restores the board from `before`, which would
+   * otherwise re-arm them and hand the player a free minesweeper: twist into a
+   * hidden node, watch it fire, take it back, now you know. So these are
+   * re-applied after the restore. You get your junction back, not your mine.
+   *
+   * A HALT is not in this list in practice: it forfeits the turn outright, so
+   * there is no turn left to undo in. The rule takes care of itself.
+   */
+  sprung: Array<{ idx: number; kind: TrapKind; drain: number }>;
 }
 
 /** The player's resolved kit for one dive. */
@@ -299,6 +349,19 @@ export interface DuelState {
   oppDominantUsed: boolean;
   /** Round when the player last hit the opponent (arm/redirect/lock). */
   lastPlayerHitRound: number;
+  /**
+   * The turn's one take-back, armed by the most recent twist or patch.
+   *
+   * Deliberately one per turn: touch-move is the texture of the game, so this
+   * is a fix for a misread, never a tool for exploring the board. And it puts
+   * your alignment back, never a trap you sprang - you already stepped on it.
+   *
+   * IMMUTABLE. `cloneState` shares the reference, because undo clones FROM it
+   * and nothing ever writes through it.
+   */
+  undo: UndoPoint | null;
+  /** Spent for this turn. Re-armed at the start of the next one. */
+  undoSpent: boolean;
   /**
    * Tutorial script state: which programs the player has demonstrated.
    * Programs stay offline until the script flags them; the machine holds

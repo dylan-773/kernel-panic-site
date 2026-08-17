@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { effectiveDuelArms } from "../../game/duel-power";
-import { Board, DuelCell, Side } from "../../game/duel-types";
+import { Board, DuelCell, Side, isJunction } from "../../game/duel-types";
 import { DX, DY, oppositeDir, rotateArms } from "../../game/types";
 
 /**
@@ -177,7 +177,7 @@ function CellG({
   const trapVisible = !!cell.trap && (!mine || cell.trap.revealed || ended);
 
   const cls = ["dv-cell", `dv-k-${cell.kind}`, mine ? "dv-b-p" : "dv-b-o"];
-  if (cell.kind === "node") {
+  if (isJunction(cell)) {
     // BUILT is the ownership channel now: ground you have lit reads as yours
     // whether or not it is currently carrying.
     if (cell.built) cls.push(mine ? "dv-own-p" : "dv-own-o");
@@ -187,7 +187,7 @@ function CellG({
   if (lit) cls.push(mine ? "dv-lit-p" : "dv-lit-o");
   // Built but dark: the enemy cut this. The one state the old model could
   // not express, and the one the player most needs to see.
-  if (cell.kind === "node" && cell.built && !lit) cls.push("dv-cut");
+  if (isJunction(cell) && cell.built && !lit) cls.push("dv-cut");
   if (legal) cls.push("dv-legal");
   if (picked) cls.push("dv-picked");
   if (aimed) cls.push("dv-aimed");
@@ -236,7 +236,7 @@ function CellG({
         </>
       )}
 
-      {cell.kind === "node" && (
+      {isJunction(cell) && (
         <>
           <rect className="dv-legalring" x={-HALF + 5} y={-HALF + 5} width={CS - 10} height={CS - 10} />
           <g className="dv-jit" style={{ animationDelay: `${(idx % 7) * 0.11}s` }}>

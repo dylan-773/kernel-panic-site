@@ -4122,6 +4122,14 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 
 /* ---- BUS.LOG: the left rail's realtime tap ---- */
 
+/* One take-back a turn, right above END TURN so the pair reads as
+   "fix that" then "done". Quiet when spent: it is a safety net, not a verb. */
+.dv-undo {
+  flex: none;
+  opacity: 1;
+}
+.dv-undo:disabled { opacity: 0.35; cursor: default; }
+
 .dv-logbox {
   flex: 1;
   min-height: 0;
@@ -4222,6 +4230,49 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
 @keyframes dv-pan-r {
   from { transform: translate3d(-48%, 0, 0); opacity: 0.15; }
   to { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+
+/* ---- the way across ----
+   Your goal is the right edge, so the machine's grid lies further right
+   still; its goal is the left edge, so yours lies further left. The arrow
+   is a direction, not a tab, and it sits at the frame edge because that is
+   where the board runs out. `.dv-boardwrap` clips, so it is inset rather
+   than hung outside. */
+.dv-viewarrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(30px, 4.6cqi, 46px);
+  height: clamp(78px, 14cqi, 132px);
+  padding: 0;
+  /* Opaque enough to sit ON the board rather than in it: the schematic runs
+     right up to the frame and a translucent chip reads as another trace. */
+  background: color-mix(in srgb, var(--px-void) 92%, transparent);
+  border: 2px solid var(--dv-sch-dim);
+  color: var(--dv-sch);
+  font-family: var(--kp-display);
+  font-size: clamp(30px, 5cqi, 46px);
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms linear, border-color 120ms linear, background 120ms linear;
+}
+.dv-viewarrow-r { right: 2px; border-right-width: 0; }
+.dv-viewarrow-l { left: 2px; border-left-width: 0; }
+.dv-viewarrow:hover {
+  background: var(--dv-sch);
+  border-color: var(--dv-sch);
+  color: var(--px-void);
+}
+/* Something is about to happen on the grid this arrow points at. Shape as
+   well as colour, same contract as the tab pip. */
+.dv-viewarrow-alert {
+  color: var(--r-hazard, var(--dv-o));
+  border-color: var(--r-hazard, var(--dv-o));
+  animation: dv-blink 0.5s steps(2) infinite;
 }
 
 /* dithered haze pooling at the frame edges, clean center (a real
@@ -4920,7 +4971,8 @@ html[data-scheme] .dv-pulse-bad {
   .dv-key-arming, .dv-piece-armed, .dv-turnread > em, .dv-threat-max,
   .dv-virus, .dv-sweep, .dv-pulse, .dv-aimed .dv-legalring,
   .dv-slidein-l, .dv-slidein-r,
-  .dv-lit-p .dv-coreb, .dv-lit-o .dv-coreb, .dv-viewtab-dot, .dv-par-pop {
+  .dv-lit-p .dv-coreb, .dv-lit-o .dv-coreb, .dv-viewtab-dot, .dv-viewarrow-alert,
+  .dv-par-pop {
     animation: none;
   }
 }

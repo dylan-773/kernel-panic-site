@@ -378,6 +378,8 @@ export function createDuel(
     },
     oppDominantUsed: false,
     lastPlayerHitRound: 0,
+    undo: null,
+    undoSpent: false,
     tutFlags: { scanned: false, purged: false, attacked: false },
     tutorialLessonRound: 0,
   };

@@ -22,7 +22,7 @@ import {
 } from "../content/story";
 import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
-import { BASE_KIT, DuelState } from "../duel-types";
+import { BASE_KIT, DuelState, isJunction } from "../duel-types";
 import { goalLive } from "../duel-power";
 import { botPlayTurn, oppStep } from "../opponent";
 import {
@@ -89,7 +89,7 @@ function playDuelToEnd(duel: DuelState): {
   for (const side of ["player", "opp"] as const) {
     const b = duel.boards[side];
     must(
-      b.power.every((live, i) => !live || b.cells[i].kind !== "node" || b.cells[i].built),
+      b.power.every((live, i) => !live || !isJunction(b.cells[i]) || b.cells[i].built),
       `${side}: every live node is built`,
     );
   }

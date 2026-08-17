@@ -1,5 +1,5 @@
 import { BASE_REACH } from "./content/kit";
-import { Board, DuelCell, DuelState, Side, TrapKind } from "./duel-types";
+import { Board, DuelCell, DuelState, Side, TrapKind, isJunction } from "./duel-types";
 import { DX, DY, cellIndex, oppositeDir, rotateArms } from "./types";
 
 /**
@@ -45,9 +45,13 @@ function neighbourIdx(b: Board, c: DuelCell, d: number): number {
 export function computePower(b: Board): boolean[] {
   const out = new Array<boolean>(b.cells.length).fill(false);
   out[b.entry] = true;
+  // Head pointer, not shift(): shift() is O(n) on a JS array, which made this
+  // flood O(cells^2), and it runs on every rotation and inside the cut
+  // scorer's per-candidate loop.
   const queue = [b.entry];
-  while (queue.length > 0) {
-    const i = queue.shift() as number;
+  let head = 0;
+  while (head < queue.length) {
+    const i = queue[head++];
     const c = b.cells[i];
     for (let d = 0; d < 4; d++) {
       const ni = neighbourIdx(b, c, d);
@@ -77,6 +81,11 @@ export interface SettleResult {
  * Recompute power and apply the two once-per-change effects. A trap fires the
  * first time signal reaches its node and is consumed; it never blocks, so the
  * cascade keeps running past it exactly as it always did.
+ *
+ * This runs after EVERY rotation, which is the whole texture of the game: you
+ * twist one junction and the board answers immediately. The turn's one undo
+ * puts your alignment back, and deliberately does not put a sprung trap back —
+ * see `takeUndo` in duel-commands.
  */
 export function settlePower(b: Board): SettleResult {
   const power = computePower(b);
@@ -91,7 +100,7 @@ export function settlePower(b: Board): SettleResult {
       reachedGoal = true;
       continue;
     }
-    if (c.kind !== "node" || c.built) continue;
+    if (!isJunction(c) || c.built) continue;
     c.built = true;
     c.litWave = built.length;
     built.push(i);
@@ -187,7 +196,7 @@ export function routePlan(b: Board, avoid?: Set<number>, depth = 0): RoutePlan |
     const nc = b.cells[ni];
     if (!passable(nc) || (avoid && avoid.has(ni))) continue;
     if (nc.kind === "goal") return { cost: 0, path: [], steps: [] };
-    if (nc.kind !== "node") continue;
+    if (!isJunction(nc)) continue;
     const st = ni * 4 + d;
     if (dist[st] > 0) {
       dist[st] = 0;
@@ -232,7 +241,7 @@ export function routePlan(b: Board, avoid?: Set<number>, depth = 0): RoutePlan |
           }
           continue;
         }
-        if (nc.kind !== "node") continue;
+        if (!isJunction(nc)) continue;
         const nst = ni * 4 + dOut;
         if (nd < dist[nst]) {
           dist[nst] = nd;
@@ -307,13 +316,13 @@ export function routeCost(b: Board, avoid?: Set<number>): number {
 /** Unbuilt nodes orthogonally adjacent to built ground (the entry included). */
 export function isFrontier(b: Board, idx: number): boolean {
   const c = b.cells[idx];
-  if (c.kind !== "node" || c.built) return false;
+  if (!isJunction(c) || c.built) return false;
   for (let d = 0; d < 4; d++) {
     const ni = neighbourIdx(b, c, d);
     if (ni < 0) continue;
     const nc = b.cells[ni];
     if (nc.kind === "entry") return true;
-    if (nc.kind === "node" && nc.built) return true;
+    if (isJunction(nc) && nc.built) return true;
   }
   return false;
 }
@@ -335,7 +344,7 @@ export function reachOf(s: DuelState, side: Side): number {
  */
 export function inReach(b: Board, idx: number, reach: number): boolean {
   const c0 = b.cells[idx];
-  if (c0.kind !== "node" || c0.built) return false;
+  if (!isJunction(c0) || c0.built) return false;
   return withinReachWalk(b, idx, reach);
 }
 
@@ -358,8 +367,8 @@ function withinReachWalk(b: Board, idx: number, reach: number): boolean {
         if (ni < 0 || seen.has(ni)) continue;
         const nc = b.cells[ni];
         if (nc.kind === "entry") return true;
-        if (nc.kind === "node" && nc.built) return true;
-        if (nc.kind === "node" && !nc.built && step < reach) {
+        if (isJunction(nc) && nc.built) return true;
+        if (isJunction(nc) && !nc.built && step < reach) {
           seen.add(ni);
           next.push(ni);
         }
@@ -379,7 +388,7 @@ function withinReachWalk(b: Board, idx: number, reach: number): boolean {
 export function canRotate(s: DuelState, side: Side, idx: number): boolean {
   const b = s.boards[side];
   const c = b.cells[idx];
-  if (!c || c.kind !== "node") return false;
+  if (!c || !isJunction(c)) return false;
   if (c.fused) return false;
   if (c.lockedThroughRound >= s.round && c.lockedBy !== null && c.lockedBy !== side) return false;
   if (c.built) return true;

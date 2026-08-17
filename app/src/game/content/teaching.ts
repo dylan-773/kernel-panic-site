@@ -299,7 +299,7 @@ export const TEACHING: TeachingMoment[] = [
     title: "CASCADE",
     copyOrder: "copy-cascade-bank",
     lines: [
-      "Four or more nodes claimed off one rotation banks bonus RAM for your very next turn.",
+      "Three or more nodes lit off one rotation banks bonus RAM for your very next turn.",
       "That is what just happened. Line a chain up first, then trip it, instead of one node at a time.",
     ],
   },

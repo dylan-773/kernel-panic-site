@@ -17,7 +17,16 @@ import {
   surgeTierOf,
 } from "./content/kit";
 import { routeCost, routePlan, settlePower } from "./duel-power";
-import { Board, DuelEndKind, DuelState, ROUND_CAP, Side, TrapKind, otherSide } from "./duel-types";
+import {
+  Board,
+  DuelEndKind,
+  DuelState,
+  ROUND_CAP,
+  Side,
+  TrapKind,
+  isJunction,
+  otherSide,
+} from "./duel-types";
 import { PLACE_COST } from "./patch-cells";
 import { nextU32 } from "./rng";
 
@@ -143,6 +152,10 @@ export function finishDuel(
  * cascades pay them, traps fire on them, and lighting the goal wins for them.
  * `acting` is whose turn it is, which only matters for deciding whether a
  * halt trap forfeits the current turn or the next one.
+ *
+ * Touch-move: this runs the instant a junction turns, so every twist has to be
+ * thought out before you make it. The turn's single undo softens a misread,
+ * never a mine.
  *
  * Note the case worth knowing about: a REDIRECT settles the ENEMY's board, so
  * a badly chosen twist can complete their route and hand them the dive.
@@ -325,7 +338,7 @@ export function applyPlace(s: DuelState, side: Side, idx: number, pouchIdx: numb
 /** Traps land on ground the victim has not lit yet: you mine ahead of them. */
 export function armTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.boards[otherSide(caster)].cells[idx];
-  if (!c || c.kind !== "node" || c.built) return false;
+  if (!c || !isJunction(c) || c.built) return false;
   if (c.trap) return false;
   // A ward the victim raised refuses new traps.
   if (c.wardThroughRound >= s.round && c.wardBy !== caster) return false;
@@ -334,7 +347,7 @@ export function armTargetLegal(s: DuelState, caster: Side, idx: number): boolean
 
 export function redirectTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.boards[otherSide(caster)].cells[idx];
-  if (!c || c.kind !== "node") return false;
+  if (!c || !isJunction(c)) return false;
   if (c.fused) return false; // welded patch pieces never twist, for anyone
   // A node its owner locked is armored against exactly this.
   if (c.lockedThroughRound >= s.round && c.lockedBy !== caster) return false;
@@ -345,7 +358,7 @@ export function redirectTargetLegal(s: DuelState, caster: Side, idx: number): bo
 
 export function purgeTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.boards[caster].cells[idx];
-  if (!c || c.kind !== "node" || !c.trap) return false;
+  if (!c || !isJunction(c) || !c.trap) return false;
   // The player defuses only what Scan exposed; the machine sees everything.
   if (caster === "player" && !c.trap.revealed) return false;
   return true;
@@ -358,14 +371,14 @@ export function purgeTargetLegal(s: DuelState, caster: Side, idx: number): boole
  */
 export function lockTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.boards[caster].cells[idx];
-  if (!c || c.kind !== "node") return false;
+  if (!c || !isJunction(c)) return false;
   if (c.lockedThroughRound >= s.round) return false;
   return true;
 }
 
 export function wardTargetLegal(s: DuelState, caster: Side, idx: number): boolean {
   const c = s.boards[caster].cells[idx];
-  return !!c && c.kind === "node";
+  return !!c && isJunction(c);
 }
 
 export function attackTargetLegal(s: DuelState, caster: Side, mode: OppMode, idx: number): boolean {
@@ -416,7 +429,7 @@ export function applyCast(
     // Their traps are on YOUR board, so scan sweeps your own grid outward
     // from the ground you have built.
     const range = SCAN_RANGE[tierOf(s, side, "scan")];
-    const anchors = own.cells.filter((c) => c.kind === "entry" || (c.kind === "node" && c.built));
+    const anchors = own.cells.filter((c) => c.kind === "entry" || (isJunction(c) && c.built));
     let found = 0;
     for (const c of own.cells) {
       if (!c.trap || c.trap.revealed) continue;
@@ -538,7 +551,7 @@ export function applyCast(
     const through = s.round + WARD_ROUNDS;
     const center = own.cells[targets[0]];
     for (const c of own.cells) {
-      if (c.kind !== "node") continue;
+      if (!isJunction(c)) continue;
       if (Math.abs(c.x - center.x) + Math.abs(c.y - center.y) > radius) continue;
       c.wardThroughRound = Math.max(c.wardThroughRound, through);
       c.wardBy = side;
@@ -561,6 +574,19 @@ function beginTurnEconomy(s: DuelState, side: Side): boolean {
   const econ = s.econ[side];
   econ.used = { scan: false, attack: false, defend: false };
   econ.placedThisTurn = false;
+  // One undo per turn, and a fresh one every turn.
+  if (side === "player") {
+    s.undo = null;
+    s.undoSpent = false;
+  }
+  /**
+   * Settle the drain FIRST, whether or not this turn happens. A siphon that
+   * also cost the turn used to bill twice: the burned turn skipped the reset,
+   * so the same drain came off the next turn as well. A skipped turn already
+   * costs everything it had; it should not also owe.
+   */
+  const ram = econ.ramPerTurn + econ.carry - econ.drainNext;
+  econ.drainNext = 0;
   if (econ.loseNextTurn) {
     econ.loseNextTurn = false;
     econ.ram = 0;
@@ -569,8 +595,6 @@ function beginTurnEconomy(s: DuelState, side: Side): boolean {
     say(s, side === "player" ? "Your turn burns away in the trap's wake." : "The intrusion stalls a full cycle.");
     return false;
   }
-  const ram = econ.ramPerTurn + econ.carry - econ.drainNext;
-  econ.drainNext = 0;
   econ.ram = Math.max(0, ram);
   econ.carry = 0;
   return true;
