@@ -1,7 +1,8 @@
 import { PAR_FLAT, PAR_RATE } from "./content/kit";
 import { startOppTurn } from "./duel-actions";
-import { canPlace, routeCost, routePlan, runFlood, computeDuelPower } from "./duel-power";
+import { canPlace, routeCost, routePlan, settlePower } from "./duel-power";
 import {
+  Board,
   DuelCell,
   DuelConfig,
   DuelKit,
@@ -10,18 +11,50 @@ import {
   PIECE_L,
   PIECE_T,
   PIECE_X,
+  Side,
   SideEcon,
 } from "./duel-types";
 import { Rng, seedRng } from "./rng";
 import { cellIndex } from "./types";
 
 /**
- * Most nodes either flood can be handed for free before anyone moves. The
- * opening-dive teaching ladder is bounded by this same number, so it stays
- * exported rather than inline: when the two drifted apart, a quarter of
- * opening dives silently skipped the lesson that teaches rotation.
+ * Nodes a board may light for free before anyone moves. The opening-dive
+ * teaching ladder is bounded by this same number, so it stays exported rather
+ * than inline: when the two drifted apart, a quarter of opening dives silently
+ * skipped the lesson that teaches rotation.
  */
-export const MAX_OPENING_CLAIM = 3;
+export const MAX_OPENING_BUILT = 3;
+
+/** Reach used by the generator's shortcut probe, before any kit exists. */
+const GEN_REACH = 2;
+
+/**
+ * Route cost one head-start step removes, measured. Two-arm pipe dominates the
+ * draw, so an average misaligned junction on the route wants ~1.8 quarter
+ * turns. Used to size the machine's board so the head start does not also
+ * shorten its road.
+ */
+const HEAD_START_COST = 1.8;
+
+/**
+ * How much of that saving to hand back as extra board length. Not all of it:
+ * at full compensation the head start stops being an advantage at all and the
+ * late-day curve goes flat. At 0.6 the machine keeps a real but bounded edge -
+ * roughly three quarter-turns of road on day 9 rather than seven.
+ */
+const HEAD_START_COMPENSATION = 0.6;
+
+/**
+ * Opening-route floor and single-patch shortcut floor, both as fractions of
+ * `pdTarget`. They used to be absolute (`minPd`, and `minPd - 6`) and were set
+ * when a route cost ~14. With the goal on the far edge a route costs ~24, so a
+ * fixed "may not collapse below 6" floor stopped rejecting anything at all and
+ * one patch cross could take 24 down to 8. Patch cells got MORE powerful when
+ * the board got longer, not less: they buy a fixed number of columns, and the
+ * columns got more valuable.
+ */
+const PD_FLOOR_RATE = 0.8;
+const SHORTCUT_FLOOR_RATE = 0.65;
 
 /** Deterministic seed mixer for per-duel seeds. */
 export function mixSeed(...parts: number[]): number {
@@ -42,6 +75,9 @@ export function mixSeed(...parts: number[]): number {
  * orientation choice, random boards stay subcritical (no runaway free
  * chains), and route costs land in the arc table's band. Tees and crosses
  * are rare gifts.
+ *
+ * The elbow share also sets the cross-board exchange rate, since an elbow
+ * costs 3 RAM to un-twist and a straight only 1.
  */
 function drawMask(rng: Rng): number {
   const v = rng.next();
@@ -51,9 +87,26 @@ function drawMask(rng: Rng): number {
   return PIECE_X;
 }
 
+/**
+ * Opening RAM when a caller hands over a budget the economy cannot use.
+ * Mirrors BASE_RAM in run-reducer, which imports this module.
+ */
+const BASE_RAM_FALLBACK = 5;
+
+/*
+ * Deliberately not `isFinite`, which coerces: `isFinite(null)` is true, and a
+ * string budget survives to string-concatenate in the per-turn arithmetic
+ * ("5" + carry) for a silently wrong number. Only a real number is usable.
+ */
+function usableRam(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 function initialEcon(ramPerTurn: number, carryCap: number): SideEcon {
   return {
-    ramPerTurn,
+    // Both sides, so a malformed config cannot hand the machine unlimited RAM
+    // the same way a malformed save could hand it to the player.
+    ramPerTurn: usableRam(ramPerTurn) ? ramPerTurn : BASE_RAM_FALLBACK,
     ram: 0,
     carry: 0,
     carryCap,
@@ -64,23 +117,43 @@ function initialEcon(ramPerTurn: number, carryCap: number): SideEcon {
     scansCast: 0,
     defendsCast: 0,
     trapsFired: 0,
+    redirectsTaken: 0,
     rotations: 0,
     placedThisTurn: false,
   };
 }
 
-function buildCells(cfg: DuelConfig, rng: Rng): {
-  cells: DuelCell[];
-  entryP: number;
-  entryO: number;
-  coreIdx: number;
-} {
+/**
+ * Which way a board runs. The player's signal travels left to right; the
+ * intrusion's travels right to left, so with the two grids on the same
+ * viewport they read as one board with the fight meeting in the middle
+ * rather than as two copies of the same puzzle.
+ *
+ * Nothing in the engine cares: `routePlan` starts at `b.entry` and terminates
+ * on any `b.goal` cell, and power, reach and frontier are all computed from
+ * arms and adjacency. Only the entry's own arm mask has to know, since there
+ * is no board past the edge it sits on.
+ */
+export type Facing = "east" | "west";
+
+/**
+ * One side's grid: entry on one edge, a three-cell goal column on the other.
+ * Three goal cells rather than one so a single enemy redirect can never
+ * hard-block the approach — there is always another lane to reroute into,
+ * which is what keeps a cut a tempo cost instead of a wall.
+ */
+function buildBoard(cfg: DuelConfig, rng: Rng, facing: Facing): Board {
   const { w, h } = cfg;
   const midY = Math.floor(h / 2);
-  const entryP = cellIndex(w, 0, midY);
-  const entryO = cellIndex(w, w - 1, midY);
-  const coreIdx = cellIndex(w, Math.floor(w / 2), midY);
-  const near = (i: number, j: number): number => {
+  const entryX = facing === "east" ? 0 : w - 1;
+  const goalX = facing === "east" ? w - 1 : 0;
+  const entry = cellIndex(w, entryX, midY);
+  const goal: number[] = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    const y = midY + dy;
+    if (y >= 0 && y < h) goal.push(cellIndex(w, goalX, y));
+  }
+  const dist = (i: number, j: number): number => {
     const ax = i % w;
     const ay = Math.floor(i / w);
     const bx = j % w;
@@ -93,8 +166,10 @@ function buildCells(cfg: DuelConfig, rng: Rng): {
     for (let x = 0; x < w; x++) {
       const i = cellIndex(w, x, y);
       const protectedCell =
-        i === entryP || i === entryO || i === coreIdx ||
-        near(i, entryP) < 2 || near(i, entryO) < 2 || near(i, coreIdx) < 2;
+        i === entry ||
+        goal.includes(i) ||
+        dist(i, entry) < 2 ||
+        goal.some((g) => dist(i, g) < 2);
       const slag = !protectedCell && rng.next() < (cfg.slag ?? (cfg.tutorial ? 0.12 : 0.18));
       cells.push({
         x,
@@ -104,9 +179,8 @@ function buildCells(cfg: DuelConfig, rng: Rng): {
         rot: slag ? 0 : rng.int(4),
         fused: false,
         spin: 0,
-        owner: "none",
-        claimSeq: 0,
-        claimWave: 0,
+        built: false,
+        litWave: 0,
         trap: null,
         lockedThroughRound: 0,
         lockedBy: null,
@@ -115,27 +189,106 @@ function buildCells(cfg: DuelConfig, rng: Rng): {
       });
     }
   }
-  cells[entryP].kind = "entryP";
-  cells[entryP].base = 0b0111; // N+E+S
-  cells[entryP].rot = 0;
-  cells[entryP].owner = "player";
-  cells[entryO].kind = "entryO";
-  cells[entryO].base = 0b1101; // N+S+W
-  cells[entryO].rot = 0;
-  cells[entryO].owner = "opp";
-  cells[coreIdx].kind = "core";
-  cells[coreIdx].base = 0b1111;
-  cells[coreIdx].rot = 0;
-  cells[coreIdx].owner = "none";
+  cells[entry].kind = "entry";
+  // No arm pointing off the board: N+E+S running east, N+S+W running west.
+  cells[entry].base = facing === "east" ? 0b0111 : 0b1101;
+  cells[entry].rot = 0;
+  for (const g of goal) {
+    cells[g].kind = "goal";
+    cells[g].base = 0b1111;
+    cells[g].rot = 0;
+  }
   for (const c of cells) c.spin = c.rot;
-  return { cells, entryP, entryO, coreIdx };
+  return { w, h, cells, entry, goal, power: [] };
+}
+
+interface BoardPick {
+  board: Board;
+  cost: number;
 }
 
 /**
- * Generate the duel: reject boards until both sides' rotation-cost routes
- * are finite, close in cost, near the day's target, and neither side's
- * opening flood grabs more than a toehold. The intrusion's head start is
- * applied afterwards: its first nodes arrive pre-claimed and pre-aligned.
+ * Rejection-sample one board toward `target` route cost. Rejects any board
+ * whose opening power already reaches the goal or lights more than a toehold,
+ * and (when `shortcutFloor` is set) any board where a single patch cross
+ * placed from opening reach collapses the route.
+ */
+function generateBoard(
+  cfg: DuelConfig,
+  rng: Rng,
+  facing: Facing,
+  target: number,
+  floor: number,
+  shortcutFloor: number | null,
+  attempts = 160,
+): BoardPick | null {
+  let best: BoardPick | null = null;
+  let bestScore = Infinity;
+  let loose: BoardPick | null = null;
+  let looseScore = Infinity;
+  let anyFair: BoardPick | null = null;
+  let anyFairScore = Infinity;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const board = buildBoard(cfg, rng, facing);
+    const opening = settlePower(board);
+    if (opening.reachedGoal) continue;
+    if (opening.built.length > MAX_OPENING_BUILT) continue;
+
+    const cost = routeCost(board);
+    if (!isFinite(cost)) continue;
+    const score = Math.abs(cost - target);
+
+    // The floor must survive the pouch too: a single piece bridging a slag
+    // wall from opening reach used to collapse pd 19 to 5, the exact
+    // trivialization this check exists to end.
+    let shortcutOk = true;
+    if (shortcutFloor !== null) {
+      let shortcut = cost;
+      for (let i = 0; i < board.cells.length && shortcut > shortcutFloor; i++) {
+        if (!canPlace(board, i, GEN_REACH)) continue;
+        const c = board.cells[i];
+        const prev = { kind: c.kind, base: c.base, rot: c.rot, fused: c.fused };
+        c.kind = "node";
+        c.base = PIECE_X;
+        c.rot = 0;
+        c.fused = true;
+        const after = routeCost(board);
+        c.kind = prev.kind;
+        c.base = prev.base;
+        c.rot = prev.rot;
+        c.fused = prev.fused;
+        if (after < shortcut) shortcut = after;
+      }
+      shortcutOk = shortcut > shortcutFloor;
+    }
+
+    if (score < anyFairScore) {
+      anyFairScore = score;
+      anyFair = { board, cost };
+    }
+    if (shortcutOk && cost > floor - 2 && score < looseScore) {
+      looseScore = score;
+      loose = { board, cost };
+    }
+    if (!shortcutOk || cost <= floor) continue;
+    if (score < bestScore) {
+      bestScore = score;
+      best = { board, cost };
+      if (score <= 1) break;
+    }
+  }
+  return best ?? loose ?? anyFair;
+}
+
+/**
+ * Generate the duel: two independent boards, each rejection-sampled toward a
+ * route cost, then matched against each other. The machine's board targets the
+ * player's ACTUAL cost rather than the config's, so `|pd - od| <= 2` falls out
+ * by construction instead of being sampled for.
+ *
+ * Nothing here has to guard against one side walling the other off any more.
+ * The boards do not touch.
  */
 export function createDuel(
   cfg: DuelConfig,
@@ -146,214 +299,114 @@ export function createDuel(
 ): DuelState {
   const rng = new Rng(seed ^ 0x2545f491);
   const carryCap = 2;
-  let best: DuelState | null = null;
-  let bestScore = Infinity;
-  let loose: DuelState | null = null;
-  let looseScore = Infinity;
-  let lastResort: DuelState | null = null;
-  let lastResortScore = Infinity;
-  // Any fairness-passing board at all: the graceful floor when a rare seed
-  // cannot meet minPd. Ships maybe 2% of dives on floored days; the finale
-  // close-round histogram is the check that this stays rare.
-  let anyFair: DuelState | null = null;
-  let anyFairScore = Infinity;
+  /*
+   * Never let a non-finite budget into the economy. NaN does not clamp -
+   * Math.max(0, NaN) is NaN - and it poisons every guard downstream, since
+   * `ram < cost` is false for NaN, so nothing is ever denied and RAM reads
+   * NaN while spending is unlimited. Fail closed at the boundary instead.
+   */
+  if (!usableRam(playerRamPerTurn)) playerRamPerTurn = BASE_RAM_FALLBACK;
 
-  for (let attempt = 0; attempt < 160; attempt++) {
-    const { cells, entryP, entryO, coreIdx } = buildCells(cfg, rng);
-    const s: DuelState = {
-      cfg,
-      seed,
-      w: cfg.w,
-      h: cfg.h,
-      cells,
-      entryP,
-      entryO,
-      coreIdx,
-      power: { player: [], opp: [] },
-      phase: "playing",
-      winKind: null,
-      endReason: null,
-      round: 1,
-      turn: "player",
-      econ: { player: initialEcon(playerRamPerTurn, carryCap), opp: initialEcon(cfg.oppRam, 2) },
-      kit: { ...kit, augments: [...kit.augments] },
-      oppNextIntent: null,
-      routeTrace: null,
-      oppStartCost: 0,
-      par: 0,
-      patchPouch: [...kit.patchPouch],
-      severedStreak: 0,
-      strainChip: 0,
-      rngState: seedRng(seed ^ 0x5f3759df),
-      claimCounter: 0,
-      fx: [],
-      fxNext: 1,
-      notice: null,
-      oppTurn: { started: false, pendingCast: null, queue: [], replans: 3, lastReplanCost: Infinity, ramAtStart: 0, aim: null },
-      oppDominantUsed: false,
-      lastPlayerHitRound: 0,
-      tutFlags: { scanned: false, purged: false, attacked: false },
-      tutorialLessonRound: 0,
-    };
+  // Nobody may be able to win on their opening turn. minPd raises the floor
+  // where boosts and patch shortcuts widen the opening burst.
+  const pFloor = cfg.tutorial
+    ? playerRamPerTurn * 2 + 3
+    : Math.max(playerRamPerTurn, cfg.minPd ?? Math.round(cfg.pdTarget * PD_FLOOR_RATE));
+  const shortcutFloor = cfg.tutorial ? null : cfg.pdTarget * SHORTCUT_FLOOR_RATE;
 
-    // Opening floods: whatever happens to align claims a toehold.
-    const fp = runFlood(s, "player");
-    const fo = runFlood(s, "opp");
-    if (fp.reachedCore || fo.reachedCore) continue;
-    if (fp.claimed.length > MAX_OPENING_CLAIM || fo.claimed.length > MAX_OPENING_CLAIM) continue;
-
-    const pd = routeCost(s, "player");
-    const od = routeCost(s, "opp");
-    if (!isFinite(pd) || !isFinite(od)) continue;
-    if (Math.abs(pd - od) > 2) continue;
-
-    const shorter = Math.min(pd, od);
-    const score = Math.abs(shorter - cfg.minCost);
-    // The floor must survive the pouch too: a single piece bridging a slag
-    // wall from opening reach used to collapse pd 19 to 5, the exact
-    // trivialization this pass exists to end. Trial a cross at every
-    // initially reachable slag cell and floor the best shortcut as well.
-    let shortcutOk = true;
-    if (!cfg.tutorial && cfg.minPd !== undefined) {
-      let shortcut = pd;
-      for (let i = 0; i < s.cells.length && shortcut > cfg.minPd - 6; i++) {
-        if (!canPlace(s, "player", i)) continue;
-        const c = s.cells[i];
-        const prev = { kind: c.kind, base: c.base, rot: c.rot, fused: c.fused };
-        c.kind = "node";
-        c.base = PIECE_X;
-        c.rot = 0;
-        c.fused = true;
-        const after = routeCost(s, "player");
-        c.kind = prev.kind;
-        c.base = prev.base;
-        c.rot = prev.rot;
-        c.fused = prev.fused;
-        if (after < shortcut) shortcut = after;
-      }
-      shortcutOk = shortcut > cfg.minPd - 6;
-    }
-    // Tutorial boards want the longest player route the little grid can
-    // deal, purely for pacing: the seal-on-contact rule handles winnability,
-    // these tiers just keep the lesson from ending in one lucky turn.
-    // A configured minPd is close to a guarantee: loose gives it 2 slack,
-    // and only a seed that cannot manage even that ships an unfloored
-    // board (anyFair), rather than crashing board generation outright.
-    const looseOk = cfg.tutorial
-      ? pd > playerRamPerTurn * 2 + 1
-      : shortcutOk && pd > Math.max(playerRamPerTurn, (cfg.minPd ?? 0) - 2);
-    if (looseOk && score < looseScore) {
-      looseScore = score;
-      loose = s;
-    } else if (!looseOk && cfg.tutorial && pd > playerRamPerTurn + 3 && score < lastResortScore) {
-      lastResortScore = score;
-      lastResort = s;
-    }
-    if (!cfg.tutorial && score < anyFairScore) {
-      anyFairScore = score;
-      anyFair = s;
-    }
-
-    if (cfg.tutorial) {
-      // The machine could finish inside two unthrottled turns, but never
-      // its first; the player's route takes several turns to close.
-      if (od <= cfg.oppRam || od > cfg.oppRam * 2 || pd <= playerRamPerTurn * 2 + 3) continue;
-    } else {
-      // Nobody may be able to win on their opening turn. minPd raises the
-      // floor where boosts and patch shortcuts widen the opening burst.
-      const pdFloor = Math.max(playerRamPerTurn, cfg.minPd ?? 0);
-      if (pd <= pdFloor || od <= cfg.oppRam || !shortcutOk) continue;
-    }
-
-    if (score < bestScore) {
-      bestScore = score;
-      best = s;
-      if (score <= 1) break;
-    }
+  const pPick = generateBoard(cfg, rng, "east", cfg.pdTarget, pFloor, shortcutFloor);
+  if (!pPick) {
+    if (retry < 5) return createDuel(cfg, (seed + 0x9e37) >>> 0, kit, playerRamPerTurn, retry + 1);
+    throw new Error("duel generator could not produce a fair player board");
+  }
+  /*
+   * The machine's board is targeted at the player's actual cost PLUS what the
+   * head start is about to shave off it, so after the pre-alignment its route
+   * lands next to the player's instead of permanently under it. Head start is
+   * meant to be a tempo gift - it arrives already moving - not a shorter road.
+   * Without this compensation day 9 shipped od 17 against pd 24 and the race
+   * was decided by geometry before either side acted.
+   */
+  // Runs the other way: its entry is on the right edge and its goal on the
+  // left, so switching the viewport reads as panning across one board.
+  const oPick = generateBoard(
+    cfg,
+    rng,
+    "west",
+    pPick.cost + Math.round(cfg.headStart * HEAD_START_COST * HEAD_START_COMPENSATION),
+    cfg.oppRam,
+    null,
+  );
+  if (!oPick) {
+    if (retry < 5) return createDuel(cfg, (seed + 0x9e37) >>> 0, kit, playerRamPerTurn, retry + 1);
+    throw new Error("duel generator could not produce a fair opponent board");
   }
 
-  let s = best ?? loose ?? lastResort;
-  if (!s) {
-    // A floored config gets a much deeper retry budget: its floor is the
-    // whole point, and an unfloored board is the last thing we ship.
-    const maxRetry = cfg.minPd !== undefined ? 12 : 5;
-    if (retry >= maxRetry) {
-      if (anyFair) {
-        s = anyFair;
-      } else if (cfg.minPd !== undefined) {
-        // The floor is unmeetable on this seed line: fall back to the
-        // pre-floor generator rather than dying. Rare by construction.
-        return createDuel({ ...cfg, minPd: undefined }, seed, kit, playerRamPerTurn, 0);
-      } else {
-        throw new Error("duel generator could not produce a fair board");
-      }
-    } else {
-      return createDuel(cfg, (seed + 0x9e37) >>> 0, kit, playerRamPerTurn, retry + 1);
-    }
-  }
+  const boards: Record<Side, Board> = { player: pPick.board, opp: oPick.board };
 
-  // Head start: the intrusion is already inside, pre-aligned along its
-  // route. Enemy territory is impassable to the player and the fairness
-  // checks ran BEFORE these claims, so every step re-verifies the player
-  // still has a route; a claim that walls them off gets peeled back, and
-  // if the settling flood walls them off, the whole head start is undone.
-  if (cfg.headStart > 0) {
-    const applied: Array<{ idx: number; rot: number; spin: number }> = [];
-    for (let k = 0; k < cfg.headStart; k++) {
-      const plan = routePlan(s, "opp");
-      if (!plan) break;
-      const next = plan.path.find((p) => s.cells[p.idx].owner === "none");
-      if (!next) break;
-      const c = s.cells[next.idx];
-      // Never hand the machine the core-adjacent cell as a freebie.
-      const core = s.cells[s.coreIdx];
-      if (Math.abs(c.x - core.x) + Math.abs(c.y - core.y) <= 1) break;
-      const prev = { idx: next.idx, rot: c.rot, spin: c.spin };
-      const turns = (next.targetRot - c.rot + 4) % 4;
-      c.rot = next.targetRot;
-      c.spin += turns;
-      c.owner = "opp";
-      c.claimSeq = ++s.claimCounter;
-      c.claimWave = 0;
-      if (!isFinite(routeCost(s, "player"))) {
-        c.rot = prev.rot;
-        c.spin = prev.spin;
-        c.owner = "none";
-        c.claimSeq = 0;
-        break;
-      }
-      applied.push(prev);
-    }
-    const flood = runFlood(s, "opp");
-    if (!isFinite(routeCost(s, "player"))) {
-      // The opening cascade sealed the player's corridor: revert to the
-      // validated pre-head-start board (claims AND alignments).
-      for (const i of flood.claimed) {
-        s.cells[i].owner = "none";
-        s.cells[i].claimSeq = 0;
-      }
-      for (const u of [...applied].reverse()) {
-        const c = s.cells[u.idx];
-        c.rot = u.rot;
-        c.spin = u.spin;
-        c.owner = "none";
-        c.claimSeq = 0;
-      }
-    }
-  }
+  const s: DuelState = {
+    cfg,
+    seed,
+    boards,
+    view: "player",
+    phase: "playing",
+    winKind: null,
+    endReason: null,
+    round: 1,
+    turn: "player",
+    econ: { player: initialEcon(playerRamPerTurn, carryCap), opp: initialEcon(cfg.oppRam, 2) },
+    kit: { ...kit, augments: [...kit.augments] },
+    oppNextIntent: null,
+    routeTrace: null,
+    oppStartCost: 0,
+    par: 0,
+    pressureRounds: 0,
+    patchPouch: [...kit.patchPouch],
+    strainChip: 0,
+    rngState: seedRng(seed ^ 0x5f3759df),
+    fx: [],
+    fxNext: 1,
+    notice: null,
+    oppTurn: {
+      started: false,
+      pendingCast: null,
+      queue: [],
+      replans: 3,
+      lastReplanCost: Infinity,
+      ramAtStart: 0,
+      aim: null,
+    },
+    oppDominantUsed: false,
+    lastPlayerHitRound: 0,
+    undo: null,
+    undoSpent: false,
+    tutFlags: { scanned: false, purged: false, attacked: false },
+    tutorialLessonRound: 0,
+  };
 
+  // Head start: the intrusion is already inside, pre-aligned along its own
+  // route. No claiming and no revert guard needed — its board is its own, so
+  // this can never wall the player off. It only has to stop short of a
+  // board the machine could close on its opening turn.
+  const ob = s.boards.opp;
+  for (let k = 0; k < cfg.headStart; k++) {
+    const plan = routePlan(ob);
+    if (!plan || plan.cost <= cfg.oppRam + 1) break;
+    const next = plan.steps[0];
+    if (!next) break;
+    const c = ob.cells[next.idx];
+    c.spin += (next.targetRot - c.rot + 4) % 4;
+    c.rot = next.targetRot;
+  }
+  settlePower(ob);
+
+  s.oppStartCost = Math.max(1, isFinite(routeCost(ob)) ? routeCost(ob) : cfg.pdTarget);
   {
-    const rc = routeCost(s, "opp");
-    s.oppStartCost = Math.max(1, isFinite(rc) ? rc : cfg.minCost);
-  }
-  {
-    // Par is set once, from the starting board the player actually faces
-    // (head start applied): the honest route cost plus a working margin.
-    const pd = routeCost(s, "player");
-    const base = isFinite(pd) ? pd : cfg.minCost;
+    // Par is set once, from the starting board the player actually faces.
+    const pd = routeCost(s.boards.player);
+    const base = isFinite(pd) ? pd : cfg.pdTarget;
     s.par = Math.ceil(base * PAR_RATE) + (cfg.parFlat ?? PAR_FLAT);
   }
-  s.power = computeDuelPower(s);
   s.econ.player.ram = playerRamPerTurn + (kit.augments.includes("hotBoot") ? 1 : 0);
 
   // The finale machine was already inside: it takes the opening turn, so

@@ -10,7 +10,7 @@
  */
 
 import { applyCast, applyPlace, programCost } from "../duel-actions";
-import { canPlace, routeCost } from "../duel-power";
+import { canPlace, reachOf, routeCost } from "../duel-power";
 import { DuelState } from "../duel-types";
 import { botPlayTurn, prepareCastFor } from "../opponent";
 import { PLACE_COST, armCount } from "../patch-cells";
@@ -44,16 +44,17 @@ function bestPlacement(
     picks.push({ pouchIdx, mask });
   });
   let best: { idx: number; pouchIdx: number; mask: number; cost: number } | null = null;
-  for (let i = 0; i < s.cells.length; i++) {
-    if (!canPlace(s, "player", i)) continue;
-    const c = s.cells[i];
+  const b = s.boards.player;
+  for (let i = 0; i < b.cells.length; i++) {
+    if (!canPlace(b, i, reachOf(s, "player"))) continue;
+    const c = b.cells[i];
     const prev = { kind: c.kind, base: c.base, rot: c.rot, fused: c.fused };
     for (const pick of picks) {
       c.kind = "node";
       c.base = pick.mask;
       c.rot = 0;
       c.fused = true;
-      const cost = routeCost(s, "player");
+      const cost = routeCost(b);
       c.kind = prev.kind;
       c.base = prev.base;
       c.rot = prev.rot;
@@ -74,9 +75,9 @@ function bestPlacement(
 function tryPlace(s: DuelState): void {
   const econ = s.econ.player;
   if (s.patchPouch.length < 1 || econ.placedThisTurn || econ.ram < PLACE_COST) return;
-  const cur = routeCost(s, "player");
+  const cur = routeCost(s.boards.player);
   if (!isFinite(cur)) {
-    // Severed on the board as it stands: any reconnecting piece is worth it.
+    // Slag cuts the grid as it stands: any reconnecting piece is worth it.
     const best = bestPlacement(s);
     if (best) applyPlace(s, "player", best.idx, best.pouchIdx);
     return;
@@ -100,20 +101,38 @@ function tryScan(s: DuelState): void {
   applyCast(s, "player", "scan", null, []);
 }
 
+/** Can the machine reach across and twist our grid? */
+function oppRedirects(s: DuelState): boolean {
+  return s.cfg.oppAttackModes.includes("redirect");
+}
+
 function tryDefend(s: DuelState): void {
   const econ = s.econ.player;
   const mode = s.kit.defendMode;
   if (econ.used.defend || econ.ram < programCost(s, "player", "defend")) return;
+  /*
+   * On split boards LOCK and WARD both exist to stop their REDIRECT landing on
+   * a chain you have already paid for, so the trigger is "they can twist me and
+   * I have something worth twisting", not "they are near their goal". The old
+   * gates fired on ~0.3 casts a dive, which is why both modes read as dead.
+   */
+  const worthDefending = s.boards.player.cells.filter((c) => c.built).length >= 4;
   if (mode === "lock") {
-    const oppCost = routeCost(s, "opp");
-    if (!(isFinite(oppCost) && oppCost <= 4)) return;
+    if (!oppRedirects(s) || !worthDefending || econ.ram < 3) return;
   }
   if (mode === "ward") {
-    if (!oppTraps(s) || s.round % 2 !== 1) return;
+    if (!(oppRedirects(s) || oppTraps(s)) || !worthDefending || econ.ram < 3) return;
   }
   const aim = prepareCastFor(s, "player", "defend", mode);
   if (!aim) return;
   applyCast(s, "player", "defend", mode, aim.targets);
+}
+
+/** Turns this side still needs at its current RAM rate. The race clock. */
+function turnsToGoal(s: DuelState, side: "player" | "opp"): number {
+  const c = routeCost(s.boards[side]);
+  if (!isFinite(c)) return 99;
+  return c / Math.max(1, s.econ[side].ramPerTurn);
 }
 
 function tryAttack(s: DuelState): void {
@@ -121,13 +140,23 @@ function tryAttack(s: DuelState): void {
   const mode = s.kit.attackMode;
   const cost = programCost(s, "player", "attack");
   if (econ.used.attack || econ.ram < cost) return;
-  const own = routeCost(s, "player");
-  // Keep rotation RAM: no cast that strands us mid-route.
-  if (econ.ram - cost < 2 && (!isFinite(own) || own > 2)) return;
+  const own = routeCost(s.boards.player);
+  /*
+   * Reaching across costs a turn of road you are not building. On split
+   * boards that opportunity cost is real, and the old gate (raw route cost,
+   * keep 2 RAM) had the bot casting 4.1 times a dive on day 1 and losing 24
+   * points to a bot that never cast at all. Keep enough RAM to actually
+   * advance, and only spend when the race clock says they are ahead.
+   */
+  if (econ.ram - cost < 3 && (!isFinite(own) || own > 3)) return;
   if (mode === "redirect") {
-    const opp = routeCost(s, "opp");
-    const racing = isFinite(opp) && opp <= (isFinite(own) ? own : 99) + 2;
-    if (!racing && s.round < 3) return;
+    // A twist only bites once they have a live chain to break; before that it
+    // lands on dark ground and costs them nothing. Day 1 was casting twice a
+    // dive into empty board and losing 21 points to a bot that never cast.
+    if (s.round < 2) return;
+    if (s.boards.opp.cells.filter((c) => c.built).length < 5) return;
+    // Only worth it when they are genuinely closing faster than you are.
+    if (turnsToGoal(s, "opp") > turnsToGoal(s, "player") - 0.4) return;
   } else if (s.round < 2) {
     return; // traps land from round 2, once routes have committed
   }

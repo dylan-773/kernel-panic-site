@@ -170,6 +170,9 @@ export interface RunState {
     /** Chip inputs, kept so the result row can show what actually billed. */
     overRotations: number;
     trapsFired: number;
+    /** Enemy REDIRECTs taken, and rounds under pressure. Absent on old saves. */
+    redirectsTaken?: number;
+    pressureRounds?: number;
     jobIndex: number;
     /** Augment draft offered for this win; empty when the pool ran dry. */
     draft: AugmentId[];
@@ -261,6 +264,19 @@ function parseRun(raw: string): RunState | null {
   }
   if (typeof p.darkBuys !== "number" || !isFinite(p.darkBuys)) p.darkBuys = 0;
   if (!isPatchMask(p.lastDarkBuy)) p.lastDarkBuy = null;
+  /*
+   * RAM per turn is the one run field the duel layer does arithmetic with
+   * before anything validates it: createDuel feeds it straight into the
+   * opening turn. A save that lost the field resumed with `undefined`, which
+   * made every turn's budget NaN - and because `NaN < cost` is false, every
+   * spend guard passed instead of denying. The readout showed NaN while RAM
+   * was effectively infinite. Repair it here like the rest of the ladder.
+   * Bounds mirror BASE_RAM/MAX_RAM in run-reducer (which imports this module,
+   * so they cannot be imported back without a cycle).
+   */
+  if (typeof p.ramPerTurn !== "number" || !isFinite(p.ramPerTurn)) p.ramPerTurn = 5;
+  p.ramPerTurn = Math.max(5, Math.min(9, Math.floor(p.ramPerTurn)));
+  if (typeof p.credits !== "number" || !isFinite(p.credits)) p.credits = 0;
   // Pre-bay saves start at base capacity; anything odd clamps into range.
   if (typeof p.boostSlots !== "number" || !isFinite(p.boostSlots)) p.boostSlots = 3;
   p.boostSlots = Math.max(3, Math.min(5, Math.floor(p.boostSlots)));

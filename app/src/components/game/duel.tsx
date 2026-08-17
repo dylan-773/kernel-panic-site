@@ -31,10 +31,10 @@ import {
 } from "../../game/duel-actions";
 import { Teach } from "./teach";
 import { TapTip, useLongPress } from "./tap-tip";
-import { canPlace, canRotate, routeCost } from "../../game/duel-power";
+import { canPlace, canRotate, goalLive, reachOf, routeCost } from "../../game/duel-power";
 import { duelReducer } from "../../game/duel-reducer";
 import { createDuel } from "../../game/duel-setup";
-import { DuelConfig, DuelKit, DuelState, ROUND_CAP } from "../../game/duel-types";
+import { DuelConfig, DuelKit, DuelState, ROUND_CAP, Side, isJunction } from "../../game/duel-types";
 import { PLACE_COST } from "../../game/patch-cells";
 import { customerById } from "./screens";
 import { deviceMacroFor } from "../os/roster-art";
@@ -54,6 +54,49 @@ import { PatchGlyph } from "./patch-glyph";
 
 /** The machine's port tag: a diagnostic classification, not a name
  * (lore ledger ruling 11 cleared the SIG-0 rename). */
+/** Full telegraph beat: the machine is showing you something. */
+const OPP_BEAT_MS = 520;
+/** Executing an already-telegraphed rotation. Twists are the cheap beat. */
+const OPP_ROTATE_MS = 170;
+
+/**
+ * Extra time to hold after a beat that actually did something, keyed on the
+ * fx it emitted. A rotation is legible at a glance; a trap going off, a
+ * junction being twisted out from under you, or a clamp landing is a state
+ * change you have to read and then decide about, and at a flat cadence those
+ * got the same 170ms as a twist. Held here rather than by slowing everything
+ * down, so an ordinary turn still moves.
+ */
+const FX_HOLD_MS: Record<string, number> = {
+  // Something fired at you. The longest holds in the game.
+  trapFire: 1100,
+  siphonFire: 1100,
+  turnLost: 1200,
+  // Something landed on a board.
+  redirect: 800,
+  trapSet: 750,
+  purge: 700,
+  lock: 700,
+  ward: 700,
+  // Payoffs worth watching.
+  surgeBreak: 900,
+  surgeBreakOpp: 900,
+  surgeArc: 900,
+  surgeArcOpp: 900,
+  cascade: 600,
+  cascadeOpp: 600,
+  place: 500,
+};
+
+function holdFor(fx: ReadonlyArray<{ kind: string }>): number {
+  let hold = 0;
+  for (const e of fx) {
+    const h = FX_HOLD_MS[e.kind] ?? (e.kind.startsWith("oppCast:") ? 900 : 0);
+    if (h > hold) hold = h;
+  }
+  return hold;
+}
+
 const MACHINE_TAG = "INTRUSION";
 
 /** Per-device connect flavor for the BUS.LOG boot (gate-cleared set). */
@@ -116,9 +159,11 @@ export interface DuelFinish {
   gridlockWin: boolean;
   /** The pouch as the dive left it (spent pieces already gone). */
   pouchLeft: number[];
-  /** The two inputs behind the chip, so the result row can itemize it. */
+  /** The inputs behind the chip, so the result row can itemize it. */
   overRotations: number;
   trapsFired: number;
+  redirectsTaken: number;
+  pressureRounds: number;
   /** Ledger-only tallies for this dive. Nothing in the rules reads these. */
   scans: number;
   attackCasts: number;
@@ -156,11 +201,11 @@ function coachLine(s: DuelState): string | null {
   return tutorialLine({
     turn: s.turn,
     round: s.round,
-    ownedNodes: s.cells.filter((c) => c.kind === "node" && c.owner === "player").length,
+    ownedNodes: s.boards.player.cells.filter((c) => isJunction(c) && c.built).length,
     scanned: s.tutFlags.scanned,
     purged: s.tutFlags.purged,
     attacked: s.tutFlags.attacked,
-    trapShown: s.cells.some((c) => c.trap && c.trap.by === "opp" && c.trap.revealed),
+    trapShown: s.boards.player.cells.some((c) => c.trap && c.trap.revealed),
   });
 }
 
@@ -302,6 +347,17 @@ export function DuelScreen(props: DuelScreenProps) {
   const prevOverRef = useRef(0);
   const [infoProg, setInfoProg] = useState<Program | null>(null);
   const [shake, setShake] = useState<{ mag: number; key: number }>({ mag: 0, key: 0 });
+  /** Extra ms owed to the current beat because something happened on it. */
+  const holdRef = useRef(0);
+  /**
+   * Viewport slide. The two grids run opposite ways and share a screen
+   * position, so switching is a pan across one continuous board, not a cut:
+   * going to the machine's grid pans right, coming back pans left.
+   */
+  const [slide, setSlide] = useState<{ key: number; dir: "l" | "r" }>({ key: 0, dir: "l" });
+  const prevViewRef = useRef<Side>("player");
+  /** Whose turn the last render saw, so the hand-back only fires on the edge. */
+  const prevTurnRef = useRef<Side>("player");
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [virus, setVirus] = useState<VirusMsg | null>(null);
   const [sweep, setSweep] = useState(0);
@@ -413,27 +469,58 @@ export function DuelScreen(props: DuelScreenProps) {
   }, [infoProg]);
 
   const playerTurn = state.phase === "playing" && state.turn === "player";
+  /** The board on screen. Every index in `legal`, `aimed` and `onCell` is relative to it. */
+  const view: Side = state.view;
   /** A program is half placed: targets picked but not yet committed. */
   const arming = targeting !== null || placing !== null;
   const econ = state.econ.player;
 
-  // Opponent moves on a readable cadence, with a low presence drone.
+  // Low presence drone for the length of the machine's turn.
   useEffect(() => {
     if (state.phase !== "playing" || state.turn !== "opp") return;
     if (soundOn) startDrone();
-    const t = setInterval(() => dispatch({ type: "oppStep" }), 420);
-    return () => {
-      clearInterval(t);
-      stopDrone();
-    };
+    return stopDrone;
   }, [state.phase, state.turn, soundOn]);
 
-  // How many rotations each port still needs to reach the core. Recomputed
+  /*
+   * The machine's cadence, rescheduled after every beat rather than run on a
+   * flat interval. A telegraphed CAST keeps the full beat - that pause is the
+   * whole point of the telegraph - but a queued rotation does not need one,
+   * because the queue was already shown when the turn opened.
+   *
+   * At a flat 420ms every rotation cost two beats, which was fine at the two
+   * rounds dives used to run and is not at the seven the finale now reaches:
+   * measured 6.7s a round, so a seven-round finale sat at ~47s of watching.
+   */
+  useEffect(() => {
+    if (state.phase !== "playing" || state.turn !== "opp") return;
+    const aim = state.oppTurn.aim;
+    const base =
+      aim === null
+        ? state.oppTurn.started
+          ? OPP_ROTATE_MS
+          : OPP_BEAT_MS
+        : aim.kind === "cast"
+          ? OPP_BEAT_MS
+          : OPP_ROTATE_MS;
+    // The hold survives the fx drain: the drain is itself a state change, so
+    // reading state.fx alone would lose it on the very next render.
+    if (state.fx.length > 0) {
+      holdRef.current = Math.max(holdRef.current, holdFor(state.fx));
+    }
+    const t = setTimeout(() => {
+      holdRef.current = 0;
+      dispatch({ type: "oppStep" });
+    }, base + holdRef.current);
+    return () => clearTimeout(t);
+  }, [state]);
+
+  // How many rotations each side still needs on its OWN board. Recomputed
   // every beat, the machine's own steps included. The numbers drive the
   // heartbeat tiers and the warn inversions; NO SURFACE PRINTS THEM.
   const threat = useMemo(() => {
     if (state.phase !== "playing") return { player: Infinity, opp: Infinity };
-    return { player: routeCost(state, "player"), opp: routeCost(state, "opp") };
+    return { player: routeCost(state.boards.player), opp: routeCost(state.boards.opp) };
   }, [state]);
 
   const oppNear = isFinite(threat.opp) ? threat.opp : 99;
@@ -560,7 +647,9 @@ export function DuelScreen(props: DuelScreenProps) {
   // Virus banners burn out on their own.
   useEffect(() => {
     if (!virus) return;
-    const t = setTimeout(() => setVirus(null), 2400);
+    // Outlasts the cast beat plus its hold, so the banner naming what it is
+    // charging is still up when the cast actually lands.
+    const t = setTimeout(() => setVirus(null), 3200);
     return () => clearTimeout(t);
   }, [virus]);
 
@@ -583,12 +672,25 @@ export function DuelScreen(props: DuelScreenProps) {
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Held keys must not shred the staged turn one entry per repeat.
+      if (e.repeat) return;
       if (e.code === "Escape") {
         setTargeting(null);
         setPlacing(null);
+      } else if (
+        (e.code === "KeyZ" || e.code === "Backspace") &&
+        playerTurn &&
+        !targeting &&
+        placing === null
+      ) {
+        e.preventDefault();
+        dispatch({ type: "undo" });
       } else if (e.code === "KeyE" && playerTurn && !targeting && placing === null) {
         pendingRef.current = { type: "endTurn" };
         dispatch({ type: "endTurn" });
+      } else if (e.code === "Tab") {
+        e.preventDefault();
+        dispatch({ type: "view", side: view === "player" ? "opp" : "player" });
       } else if (e.code === "Digit1") {
         onProgram("scan");
       } else if (e.code === "Digit2") {
@@ -601,19 +703,17 @@ export function DuelScreen(props: DuelScreenProps) {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Legal cells for the current interaction.
+  // Legal cells for the current interaction, always relative to the board on
+  // screen. Nothing is actionable on a board you are not looking at, which is
+  // why picking a program moves the viewport with it.
   const legal = useMemo(() => {
     const out = new Set<number>();
     if (!playerTurn) return out;
-    if (placing !== null) {
-      if (econ.ram < PLACE_COST) return out;
-      for (let i = 0; i < state.cells.length; i++) {
-        if (canPlace(state, "player", i)) out.add(i);
-      }
-      return out;
-    }
+    const board = state.boards[view];
     if (targeting) {
-      for (let i = 0; i < state.cells.length; i++) {
+      const wantsFoe = targeting.prog === "attack";
+      if (wantsFoe !== (view === "opp")) return out;
+      for (let i = 0; i < board.cells.length; i++) {
         if (targeting.picked.includes(i)) continue;
         if (targeting.prog === "attack" && attackTargetLegal(state, "player", targeting.mode, i)) out.add(i);
         if (
@@ -624,31 +724,90 @@ export function DuelScreen(props: DuelScreenProps) {
       }
       return out;
     }
+    // Rotating and patching are things you only do to your own grid.
+    if (view !== "player") return out;
+    if (placing !== null) {
+      if (econ.ram < PLACE_COST) return out;
+      for (let i = 0; i < board.cells.length; i++) {
+        if (canPlace(board, i, reachOf(state, "player"))) out.add(i);
+      }
+      return out;
+    }
     if (econ.ram < 1) return out;
-    for (let i = 0; i < state.cells.length; i++) {
+    for (let i = 0; i < board.cells.length; i++) {
       if (canRotate(state, "player", i)) out.add(i);
     }
     return out;
-  }, [state, playerTurn, targeting, placing, econ.ram]);
+  }, [state, view, playerTurn, targeting, placing, econ.ram]);
+
+  /** Which board the machine's telegraphed move lands on. */
+  const aimBoard: Side | null = useMemo(() => {
+    const a = state.oppTurn.aim;
+    if (!a) return null;
+    if (a.kind === "rotate") return "opp";
+    return a.prog === "attack" ? "player" : "opp";
+  }, [state.oppTurn.aim]);
 
   const aimed = useMemo(() => {
     const a = state.oppTurn.aim;
-    if (!a || state.phase !== "playing") return new Set<number>();
+    if (!a || state.phase !== "playing" || aimBoard !== view) return new Set<number>();
     return new Set(a.kind === "rotate" ? [a.idx] : a.targets);
-  }, [state.oppTurn.aim, state.phase]);
+  }, [state.oppTurn.aim, state.phase, aimBoard, view]);
 
+  /**
+   * Follow the machine to whichever grid it is working on. Its whole turn is
+   * a telegraph, and a telegraph nobody is looking at is not a telegraph.
+   * Only during its turn: yanking the camera on the player's own turn would
+   * fight whatever they are lining up.
+   */
+  useEffect(() => {
+    if (state.phase !== "playing" || state.turn !== "opp") return;
+    if (!aimBoard || aimBoard === state.view) return;
+    dispatch({ type: "view", side: aimBoard });
+  }, [aimBoard, state.turn, state.phase, state.view]);
+
+  /**
+   * The machine is done: come home. Its turn leaves the camera on whatever
+   * grid it last worked, so a turn that ended on its own board used to hand
+   * you yours while you were looking at the wrong one. Fires only on the
+   * opp -> player edge, never on a manual TAB during your own turn, and holds
+   * one beat so its last move is seen landing before the pan.
+   */
+  useEffect(() => {
+    const was = prevTurnRef.current;
+    prevTurnRef.current = state.turn;
+    if (was !== "opp" || state.turn !== "player" || state.phase !== "playing") return;
+    const t = setTimeout(() => dispatch({ type: "view", side: "player" }), OPP_BEAT_MS);
+    return () => clearTimeout(t);
+  }, [state.turn, state.phase]);
+
+  /** The turn's take-back, if it is still there to spend. */
+  const undoLabel = playerTurn && !state.undoSpent && state.undo ? state.undo.label : null;
+
+  /** The machine is about to act on the grid you are not looking at. */
+  const offBoardAlert: Side | null = aimBoard && aimBoard !== view ? aimBoard : null;
+
+
+  useEffect(() => {
+    if (prevViewRef.current === view) return;
+    prevViewRef.current = view;
+    setSlide((s) => ({ key: s.key + 1, dir: view === "opp" ? "l" : "r" }));
+  }, [view]);
+
+  // TAP LINE traces the machine's route, so it only draws on its board.
   const traced = useMemo(
-    () => new Set(state.routeTrace?.cells ?? []),
-    [state.routeTrace],
+    () => (view === "opp" ? new Set(state.routeTrace?.cells ?? []) : new Set<number>()),
+    [state.routeTrace, view],
   );
 
+  // Their traps sit on YOUR board.
   const armedCount = useMemo(
-    () => state.cells.filter((c) => c.trap && c.trap.by === "opp").length,
-    [state.cells],
+    () => state.boards.player.cells.filter((c) => c.trap).length,
+    [state.boards.player],
   );
   const revealedCount = useMemo(
-    () => state.cells.filter((c) => c.trap && c.trap.by === "opp" && c.trap.revealed).length,
-    [state.cells],
+    () => state.boards.player.cells.filter((c) => c.trap && c.trap.revealed).length,
+    [state.boards.player],
   );
 
   const onCell = (idx: number) => {
@@ -677,6 +836,12 @@ export function DuelScreen(props: DuelScreenProps) {
       }
       return;
     }
+    // Rotation is a thing you do to your own grid. Clicking the machine's
+    // grid with nothing armed switches back rather than silently doing nothing.
+    if (view !== "player") {
+      dispatch({ type: "view", side: "player" });
+      return;
+    }
     pendingRef.current = { type: "rotate", idx };
     dispatch({ type: "rotate", idx });
   };
@@ -698,6 +863,7 @@ export function DuelScreen(props: DuelScreenProps) {
     }
     if (prog === "attack") {
       const mode = state.kit.attackMode;
+      dispatch({ type: "view", side: "opp" });
       setTargeting({
         prog: "attack",
         mode,
@@ -708,6 +874,7 @@ export function DuelScreen(props: DuelScreenProps) {
       return;
     }
     const mode = state.kit.defendMode;
+    dispatch({ type: "view", side: "player" });
     setTargeting({
       prog: "defend",
       mode,
@@ -731,12 +898,14 @@ export function DuelScreen(props: DuelScreenProps) {
       won: state.phase === "won",
       chip: state.strainChip,
       capWin: state.winKind === "cap",
-      gridlockWin: state.winKind === "gridlock",
+      gridlockWin: false,
       pouchLeft: state.patchPouch,
       // Mirrors finishDuel's own inputs (duel-actions.ts), so the result
       // screen redisplays the bill rather than re-deriving it.
       overRotations: Math.max(0, state.econ.player.rotations - state.par),
       trapsFired: state.econ.player.trapsFired,
+      redirectsTaken: state.econ.player.redirectsTaken,
+      pressureRounds: state.pressureRounds,
       scans: state.econ.player.scansCast,
       attackCasts: state.econ.player.attacksCast,
       defendCasts: state.econ.player.defendsCast,
@@ -777,9 +946,7 @@ export function DuelScreen(props: DuelScreenProps) {
   /* console line, in priority order */
   const consoleText = (() => {
     if (state.phase !== "playing" && reviewing) {
-      return state.winKind === "severed"
-        ? "FINAL BOARD. Your territory has no open corridor left to the core."
-        : "FINAL BOARD. Every trap on the grid is exposed.";
+      return "FINAL BOARD. Every trap on the grid is exposed.";
     }
     if (placing !== null) {
       return legal.size > 0
@@ -794,6 +961,7 @@ export function DuelScreen(props: DuelScreenProps) {
     if (state.phase !== "playing") return "LINK CLOSED.";
     if (state.turn === "opp") return "The intrusion is moving. Watch the line.";
     if (econ.ram < 1) return "No RAM left. E ends the turn.";
+    if (undoLabel) return `Your move. Z takes back the ${undoLabel.toLowerCase()}, once this turn.`;
     return "Your move. Twist a junction in reach, run a program, or end the turn.";
   })();
 
@@ -834,6 +1002,28 @@ export function DuelScreen(props: DuelScreenProps) {
       <div className="dv-crumb">
         <span className="dv-crumb-path">KP_OS//SIGNAL.BUS//DIVE//{crumbSlug}</span>
         <div className="dv-crumb-right">
+          <span className="dv-viewtabs" role="group" aria-label="Which grid to show">
+            {(["player", "opp"] as Side[]).map((sd) => (
+              <button
+                key={sd}
+                type="button"
+                className={`dv-viewtab${view === sd ? " dv-viewtab-on" : ""}${
+                  sd === "opp" ? " dv-viewtab-o" : ""
+                }`}
+                aria-pressed={view === sd}
+                onClick={() => {
+                  if (soundOn) playUiPress();
+                  dispatch({ type: "view", side: sd });
+                }}
+              >
+                {sd === "player" ? "YOUR GRID" : "ITS GRID"}
+                {offBoardAlert === sd && <i className="dv-viewtab-dot" aria-hidden="true" />}
+              </button>
+            ))}
+            <span className="dv-viewtab-key" aria-hidden="true">
+              TAB
+            </span>
+          </span>
           <span className="dv-round">
             <span>ROUND</span>
             <em>
@@ -961,6 +1151,27 @@ export function DuelScreen(props: DuelScreenProps) {
             </div>
           </div>
 
+          {/* One take-back a turn. Touch-move is the texture of the game, so
+              this is here to fix a misread, not to let anyone shop around. */}
+          <button
+            type="button"
+            className="kp-btn2 dv-undo"
+            disabled={undoLabel === null}
+            title={
+              undoLabel === null
+                ? state.undoSpent
+                  ? "You have already taken one back this turn"
+                  : "Nothing to take back"
+                : "Puts your junction back. A trap you sprang stays sprung."
+            }
+            onClick={() => {
+              if (soundOn) playUiPress();
+              dispatch({ type: "undo" });
+            }}
+          >
+            {undoLabel === null ? "UNDO (Z)" : `UNDO ${undoLabel} (Z)`}
+          </button>
+
           <button
             type="button"
             className={`kp-btn2 dv-end ${playerTurn && !arming && econ.ram === 0 ? "kp-btn2-signal" : ""}`.trim()}
@@ -988,8 +1199,12 @@ export function DuelScreen(props: DuelScreenProps) {
           </span>
           <i className="dv-ruler-b" aria-hidden="true" />
           <i className="dv-ruler-r" aria-hidden="true" />
+          <div key={slide.key} className={`dv-slidein dv-slidein-${slide.dir}`}>
           <DuelBoard
-            state={state}
+            board={state.boards[view]}
+            side={view}
+            round={state.round}
+            ended={state.phase !== "playing"}
             legal={legal}
             selected={new Set(targeting?.picked ?? [])}
             aimed={aimed}
@@ -998,6 +1213,24 @@ export function DuelScreen(props: DuelScreenProps) {
             onCell={onCell}
             machineTag={MACHINE_TAG}
           />
+          </div>
+          {/* The two grids run opposite ways and share one screen position, so
+              the way across is an edge you walk off: your goal is right, so
+              its grid is further right still. Lives outside `.dv-slidein`,
+              which is remounted on every view change. */}
+          <button
+            type="button"
+            className={`dv-viewarrow dv-viewarrow-${view === "player" ? "r" : "l"} ${
+              offBoardAlert ? "dv-viewarrow-alert" : ""
+            }`.trim()}
+            aria-label={view === "player" ? "Show the intrusion's grid" : "Show your grid"}
+            onClick={() => {
+              if (soundOn) playUiPress();
+              dispatch({ type: "view", side: view === "player" ? "opp" : "player" });
+            }}
+          >
+            <span aria-hidden="true">{view === "player" ? ">" : "<"}</span>
+          </button>
           {sweep > 0 && <div key={`sw-${sweep}`} className="dv-sweep" aria-hidden="true" />}
           {virus && (
             <div key={virus.key} className="dv-virus" aria-live="polite">
@@ -1014,12 +1247,12 @@ export function DuelScreen(props: DuelScreenProps) {
           <div className="dv-threats">
             {playerNear >= 99 && state.phase === "playing" && (
               <div className="dv-threat dv-threat-max" aria-live="assertive">
-                NO ROUTE FROM YOUR PORT TO THE CORE
+                NO ROUTE FROM YOUR ENTRY TO THE GOAL
               </div>
             )}
             {oppNear <= 2 && state.phase === "playing" && (
               <div className={`dv-threat ${oppNear === 0 ? "dv-threat-max" : ""}`.trim()} aria-live="assertive">
-                {oppNear === 0 ? "ITS ROUTE IS OPEN TO THE CORE" : "THE INTRUSION IS CLOSING ON THE CORE"}
+                {oppNear === 0 ? "ITS SIGNAL IS ON ITS GOAL" : "THE INTRUSION IS CLOSING ON ITS GOAL"}
               </div>
             )}
           </div>
@@ -1055,7 +1288,7 @@ export function DuelScreen(props: DuelScreenProps) {
             </div>
             <div className={`kp-datarow kp-datarow-plain dv-warnrow ${oppNear <= 2 ? "kp-datarow-warn" : ""} ${oppNear === 0 ? "dv-warn-max" : ""}`.trim()}>
               <span>ITS ROUTE</span>
-              <em>{oppNear >= 99 ? "CUT" : oppNear === 0 ? "AT THE CORE" : oppNear <= 2 ? "CLOSING" : "OPEN"}</em>
+              <em>{oppNear >= 99 ? "CUT" : oppNear === 0 ? "AT ITS GOAL" : oppNear <= 2 ? "CLOSING" : "OPEN"}</em>
             </div>
           </div>
 
@@ -1183,17 +1416,17 @@ export function DuelScreen(props: DuelScreenProps) {
               </>
             ) : state.phase === "won" ? (
               <>
-                <h2>{state.winKind === "gridlock" ? "LINK COLLAPSED" : "CORE SEIZED"}</h2>
+                <h2>{state.winKind === "cap" ? "LINK TIMED OUT" : "GOAL LIT"}</h2>
                 <div className="kp-frame-stripe" />
                 <p className="dv-result-reason">
-                  {state.endReason ?? "Your flood touched the core first. The intrusion collapses."}
+                  {state.endReason ?? "Your signal reached the goal first. The intrusion collapses."}
                 </p>
               </>
             ) : (
               <>
-                <h2>{state.winKind === "severed" ? "ROUTE SEVERED" : "CORE LOST"}</h2>
+                <h2>{state.winKind === "cap" ? "LINK TIMED OUT" : "GOAL LOST"}</h2>
                 <div className="kp-frame-stripe" />
-                <p className="dv-result-reason">{state.endReason ?? "Its flood got there first."}</p>
+                <p className="dv-result-reason">{state.endReason ?? "It lit its goal first."}</p>
               </>
             )}
             {!cfg.tutorial && (

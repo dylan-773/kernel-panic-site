@@ -31,7 +31,7 @@ import {
   tutorialLine,
 } from "../content/teaching";
 import { endPlayerTurn } from "../duel-actions";
-import { createDuel, mixSeed, MAX_OPENING_CLAIM } from "../duel-setup";
+import { createDuel, mixSeed, MAX_OPENING_BUILT } from "../duel-setup";
 import { BASE_KIT, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
 import { GameState, RunAction, runReducer } from "../run-reducer";
@@ -273,7 +273,7 @@ check(ladderHoles === 0, `the tutorial ladder goes silent in ${ladderHoles} reac
  * generation can hand out for free (3), so 23.9% of dives skipped the lesson.
  * Assert the opening line for every claim count the generator can produce.
  */
-for (let owned = 0; owned <= MAX_OPENING_CLAIM; owned++) {
+for (let owned = 0; owned <= MAX_OPENING_BUILT; owned++) {
   const line = tutorialLine({
     turn: "player",
     round: 1,
@@ -301,6 +301,8 @@ function playDuelToEnd(duel: DuelState): {
   capWin: boolean;
   overRotations: number;
   trapsFired: number;
+  redirectsTaken: number;
+  pressureRounds: number;
 } {
   let guard = 0;
   while (duel.phase === "playing" && guard++ < 4000) {
@@ -317,6 +319,8 @@ function playDuelToEnd(duel: DuelState): {
     capWin: duel.winKind === "cap",
     overRotations: Math.max(0, duel.econ.player.rotations - duel.par),
     trapsFired: duel.econ.player.trapsFired,
+    redirectsTaken: duel.econ.player.redirectsTaken,
+    pressureRounds: duel.pressureRounds,
   };
 }
 
@@ -359,10 +363,12 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        gridlockWin: res.won && duel.winKind === "gridlock",
+        gridlockWin: false,
         pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        redirectsTaken: res.redirectsTaken,
+        pressureRounds: res.pressureRounds,
         scans: duel.econ.player.scansCast,
         attackCasts: duel.econ.player.attacksCast,
         defendCasts: duel.econ.player.defendsCast,
@@ -398,10 +404,12 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        gridlockWin: res.won && duel.winKind === "gridlock",
+        gridlockWin: false,
         pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        redirectsTaken: res.redirectsTaken,
+        pressureRounds: res.pressureRounds,
         scans: duel.econ.player.scansCast,
         attackCasts: duel.econ.player.attacksCast,
         defendCasts: duel.econ.player.defendsCast,
@@ -434,10 +442,10 @@ for (let runIndex = 0; runIndex < 4; runIndex++) {
     if (run.screen === "day") {
       d({ type: "pickJob", index: run.jobsDone.findIndex((x) => !x) });
       d({ type: "startDuel" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
+      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, redirectsTaken: 0, pressureRounds: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
     } else if (run.screen === "finalePre") {
       d({ type: "startFinale" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
+      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, redirectsTaken: 0, pressureRounds: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
     } else if (run.screen === "result") {
       d({ type: "resultNext" });
     } else if (run.screen === "upgrade") {

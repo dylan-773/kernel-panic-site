@@ -330,6 +330,8 @@ export function ShopOS() {
                 pouchLeft: r.pouchLeft,
                 overRotations: r.overRotations,
                 trapsFired: r.trapsFired,
+                redirectsTaken: r.redirectsTaken,
+                pressureRounds: r.pressureRounds,
                 scans: r.scans,
                 attackCasts: r.attackCasts,
                 defendCasts: r.defendCasts,

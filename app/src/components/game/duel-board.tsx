@@ -1,15 +1,18 @@
 import { useMemo } from "react";
 import { effectiveDuelArms } from "../../game/duel-power";
-import { DuelCell, DuelState, Side } from "../../game/duel-types";
+import { Board, DuelCell, Side, isJunction } from "../../game/duel-types";
 import { DX, DY, oppositeDir, rotateArms } from "../../game/types";
 
 /**
- * The board as a circuit schematic: arms are crisp traces, hubs are pixel
- * squares, ports are component boxes, the core is a hatched component block
- * with corner brackets that flare when a flood touches it, slag is
+ * ONE board as a circuit schematic: arms are crisp traces, hubs are pixel
+ * squares, the entry is a component box, the goal column is a hatched block
+ * with corner brackets that flare when signal touches it, slag is
  * checker-dithered debris, and powered arms carry marching-dash current
- * DIRECTED port-to-frontier (a per-render BFS assigns every lit arm in/out
- * flow, so current visibly runs port-to-frontier along a claimed line).
+ * DIRECTED entry-to-frontier (a per-render BFS assigns every lit arm in/out
+ * flow, so current visibly runs entry-to-frontier along a built line).
+ *
+ * The component renders whichever board the viewport is on; `side` says whose
+ * it is, and drives the two-tone ownership palette. It never sees the other.
  *
  * NEVER `transform-box: fill-box` on the arm groups: CSS transforms on SVG
  * elements pivot on the local origin (the hub, after the parent translate),
@@ -21,7 +24,12 @@ const CS = 52;
 const HALF = CS / 2;
 
 export interface DuelBoardProps {
-  state: DuelState;
+  /** The board on screen right now. */
+  board: Board;
+  /** Whose board it is: drives the palette, not the geometry. */
+  side: Side;
+  round: number;
+  ended: boolean;
   legal: Set<number>;
   selected: Set<number>;
   /** Cells the machine has locked onto this beat (telegraphed move). */
@@ -105,24 +113,22 @@ function slagPoints(idx: number): string {
  * shallower neighbor is the inflow. Undirected marching reads wrong the
  * moment two arms join.
  */
-function flowDepths(state: DuelState, side: Side): number[] {
-  const D: number[] = new Array(state.cells.length).fill(Infinity);
-  const entry = side === "player" ? state.entryP : state.entryO;
-  const pow = state.power[side];
-  D[entry] = 0;
-  const q = [entry];
+function flowDepths(b: Board): number[] {
+  const D: number[] = new Array(b.cells.length).fill(Infinity);
+  D[b.entry] = 0;
+  const q = [b.entry];
   while (q.length > 0) {
     const i = q.shift()!;
-    const c = state.cells[i];
+    const c = b.cells[i];
     const arms = effectiveDuelArms(c);
     for (let d = 0; d < 4; d++) {
       if ((arms & (1 << d)) === 0) continue;
       const nx = c.x + DX[d];
       const ny = c.y + DY[d];
-      if (nx < 0 || nx >= state.w || ny < 0 || ny >= state.h) continue;
-      const n = ny * state.w + nx;
-      if (!pow[n] || isFinite(D[n])) continue;
-      if ((effectiveDuelArms(state.cells[n]) & (1 << oppositeDir(d))) === 0) continue;
+      if (nx < 0 || nx >= b.w || ny < 0 || ny >= b.h) continue;
+      const n = ny * b.w + nx;
+      if (!b.power[n] || isFinite(D[n])) continue;
+      if ((effectiveDuelArms(b.cells[n]) & (1 << oppositeDir(d))) === 0) continue;
       D[n] = D[i] + 1;
       q.push(n);
     }
@@ -131,7 +137,10 @@ function flowDepths(state: DuelState, side: Side): number[] {
 }
 
 function CellG({
-  state,
+  board,
+  side,
+  round,
+  ended,
   cell,
   idx,
   legal,
@@ -143,7 +152,10 @@ function CellG({
   onCell,
   machineTag,
 }: {
-  state: DuelState;
+  board: Board;
+  side: Side;
+  round: number;
+  ended: boolean;
   cell: DuelCell;
   idx: number;
   legal: boolean;
@@ -151,27 +163,31 @@ function CellG({
   aimed: boolean;
   traced: boolean;
   ghostMask: number | null;
-  depths: Record<Side, number[]>;
+  depths: number[];
   onCell: (idx: number) => void;
   machineTag: string;
 }) {
-  const litP = state.power.player[idx] ?? false;
-  const litO = state.power.opp[idx] ?? false;
-  const locked = cell.lockedThroughRound >= state.round;
-  const warded = cell.wardThroughRound >= state.round;
-  const trapVisible =
-    !!cell.trap && (cell.trap.by === "player" || cell.trap.revealed || state.phase !== "playing");
+  const mine = side === "player";
+  const lit = board.power[idx] ?? false;
+  const locked = cell.lockedThroughRound >= round;
+  const warded = cell.wardThroughRound >= round;
+  // Traps on this board were planted by the other side. The player sees their
+  // own (planted on the machine's grid) always, and the machine's only once
+  // Scan has exposed them.
+  const trapVisible = !!cell.trap && (!mine || cell.trap.revealed || ended);
 
-  const cls = ["dv-cell", `dv-k-${cell.kind}`];
-  if (cell.kind === "node") {
-    if (cell.owner === "player") cls.push("dv-own-p");
-    else if (cell.owner === "opp") cls.push("dv-own-o");
+  const cls = ["dv-cell", `dv-k-${cell.kind}`, mine ? "dv-b-p" : "dv-b-o"];
+  if (isJunction(cell)) {
+    // BUILT is the ownership channel now: ground you have lit reads as yours
+    // whether or not it is currently carrying.
+    if (cell.built) cls.push(mine ? "dv-own-p" : "dv-own-o");
     else cls.push("dv-own-n");
   }
-  if (cell.kind === "entryP") cls.push("dv-own-p");
-  if (cell.kind === "entryO") cls.push("dv-own-o");
-  if (litP) cls.push("dv-lit-p");
-  if (litO) cls.push("dv-lit-o");
+  if (cell.kind === "entry") cls.push(mine ? "dv-own-p" : "dv-own-o");
+  if (lit) cls.push(mine ? "dv-lit-p" : "dv-lit-o");
+  // Built but dark: the enemy cut this. The one state the old model could
+  // not express, and the one the player most needs to see.
+  if (isJunction(cell) && cell.built && !lit) cls.push("dv-cut");
   if (legal) cls.push("dv-legal");
   if (picked) cls.push("dv-picked");
   if (aimed) cls.push("dv-aimed");
@@ -184,16 +200,15 @@ function CellG({
     if (cell.trap.kind === "siphon") cls.push("dv-trap-siphon");
   }
 
-  const side: Side | null = litP ? "player" : litO ? "opp" : null;
   const flow = (liveDir: number): string => {
-    if (!side) return "";
-    const D = depths[side];
+    if (!lit) return "";
+    const D = depths;
     const nx = cell.x + DX[liveDir];
     const ny = cell.y + DY[liveDir];
-    if (nx < 0 || nx >= state.w || ny < 0 || ny >= state.h) return "";
-    const n = ny * state.w + nx;
-    const facing = (effectiveDuelArms(state.cells[n]) & (1 << oppositeDir(liveDir))) !== 0;
-    if (!(state.power[side][n] && facing && isFinite(D[n]) && isFinite(D[idx]))) return "";
+    if (nx < 0 || nx >= board.w || ny < 0 || ny >= board.h) return "";
+    const n = ny * board.w + nx;
+    const facing = (effectiveDuelArms(board.cells[n]) & (1 << oppositeDir(liveDir))) !== 0;
+    if (!(board.power[n] && facing && isFinite(D[n]) && isFinite(D[idx]))) return "";
     return D[n] < D[idx] ? " dv-flow-in" : " dv-flow-out";
   };
 
@@ -221,16 +236,17 @@ function CellG({
         </>
       )}
 
-      {cell.kind === "node" && (
+      {isJunction(cell) && (
         <>
           <rect className="dv-legalring" x={-HALF + 5} y={-HALF + 5} width={CS - 10} height={CS - 10} />
           <g className="dv-jit" style={{ animationDelay: `${(idx % 7) * 0.11}s` }}>
-            {/* claim pop rides its own wrapper (keyed on claimSeq so a new
-                claim retriggers it) and never fights the glitch jitter */}
+            {/* first-light pop rides its own wrapper and never fights the
+                glitch jitter. Keyed on `built` so it fires once, on the light
+                that built the node, and not again on every repair. */}
             <g
-              key={cell.claimSeq}
-              className={cell.claimSeq > 0 ? "dv-popg dv-pop" : "dv-popg"}
-              style={cell.claimSeq > 0 ? { animationDelay: `${cell.claimWave * 55}ms` } : undefined}
+              key={cell.built ? 1 : 0}
+              className={cell.built ? "dv-popg dv-pop" : "dv-popg"}
+              style={cell.built ? { animationDelay: `${cell.litWave * 55}ms` } : undefined}
             >
               <g className="dv-arms" style={{ transform: `rotate(${cell.spin * 90}deg)` }}>
                 <ArmSet mask={cell.base} cls="dv-arm" width={4} />
@@ -254,7 +270,7 @@ function CellG({
         </>
       )}
 
-      {(cell.kind === "entryP" || cell.kind === "entryO") && (
+      {cell.kind === "entry" && (
         <>
           <g className="dv-arms">
             <ArmSet mask={rotateArms(cell.base, cell.rot)} cls="dv-arm" width={4} />
@@ -262,13 +278,13 @@ function CellG({
           </g>
           <rect className="dv-portbody" x={-12} y={-12} width={24} height={24} />
           <rect className="dv-porteye" x={-4} y={-4} width={8} height={8} />
-          <text className={cell.kind === "entryO" ? "dv-tag dv-tag-o" : "dv-tag"} y={30} textAnchor="middle">
-            {cell.kind === "entryP" ? "YOU" : machineTag}
+          <text className={mine ? "dv-tag" : "dv-tag dv-tag-o"} y={30} textAnchor="middle">
+            {mine ? "YOU" : machineTag}
           </text>
         </>
       )}
 
-      {cell.kind === "core" && (
+      {cell.kind === "goal" && (
         <>
           <g className="dv-arms">
             <ArmSet mask={rotateArms(cell.base, cell.rot)} cls="dv-arm dv-arm-core" width={4} />
@@ -286,8 +302,8 @@ function CellG({
             <path key={i} className="dv-coreb" d={d} transform={`translate(${x} ${y})`} />
           ))}
           <rect className="dv-coreeye" x={-5} y={-5} width={10} height={10} />
-          <text className="dv-tag" y={34} textAnchor="middle">
-            CORE
+          <text className={mine ? "dv-tag" : "dv-tag dv-tag-o"} y={34} textAnchor="middle">
+            GOAL
           </text>
         </>
       )}
@@ -296,7 +312,10 @@ function CellG({
 }
 
 export function DuelBoard({
-  state,
+  board,
+  side,
+  round,
+  ended,
   legal,
   selected,
   aimed,
@@ -305,17 +324,14 @@ export function DuelBoard({
   onCell,
   machineTag = "SIG-0",
 }: DuelBoardProps) {
-  const depths = useMemo<Record<Side, number[]>>(
-    () => ({ player: flowDepths(state, "player"), opp: flowDepths(state, "opp") }),
-    [state],
-  );
+  const depths = useMemo(() => flowDepths(board), [board]);
   return (
     <svg
-      className="dv-board"
-      viewBox={`-10 -10 ${state.w * CS + 20} ${state.h * CS + 20}`}
+      className={`dv-board ${side === "player" ? "dv-board-p" : "dv-board-o"}`}
+      viewBox={`-10 -10 ${board.w * CS + 20} ${board.h * CS + 20}`}
       preserveAspectRatio="xMidYMid meet"
       role="application"
-      aria-label={`Duel grid, ${state.w} by ${state.h}`}
+      aria-label={`${side === "player" ? "Your" : "The intrusion's"} grid, ${board.w} by ${board.h}`}
     >
       <defs>
         <pattern id="dvGrid" width={CS} height={CS} patternUnits="userSpaceOnUse">
@@ -332,11 +348,14 @@ export function DuelBoard({
           <rect className="dv-checkdot" x={2} y={2} width={2} height={2} />
         </pattern>
       </defs>
-      <rect x={0} y={0} width={state.w * CS} height={state.h * CS} fill="url(#dvGrid)" />
-      {state.cells.map((cell, idx) => (
+      <rect x={0} y={0} width={board.w * CS} height={board.h * CS} fill="url(#dvGrid)" />
+      {board.cells.map((cell, idx) => (
         <CellG
           key={idx}
-          state={state}
+          board={board}
+          side={side}
+          round={round}
+          ended={ended}
           cell={cell}
           idx={idx}
           legal={legal.has(idx)}

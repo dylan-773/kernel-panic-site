@@ -56,6 +56,10 @@ export type RunAction =
       pouchLeft: number[];
       overRotations: number;
       trapsFired: number;
+      /** Enemy REDIRECTs that landed on your grid; ~3 RAM each to undo. */
+      redirectsTaken: number;
+      /** Rounds the machine ended within striking distance of its goal. */
+      pressureRounds: number;
       scans: number;
       attackCasts: number;
       defendCasts: number;
@@ -424,6 +428,8 @@ export function runReducer(state: GameState, action: RunAction): GameState {
             patchDrop,
             capWin: action.capWin,
             gridlockWin: action.gridlockWin,
+            redirectsTaken: action.redirectsTaken,
+            pressureRounds: action.pressureRounds,
             overRotations: action.overRotations,
             trapsFired: action.trapsFired,
             jobIndex: run.activeJob ?? 0,

@@ -23,7 +23,15 @@ export const PATCH_POUCH_MAX = 5;
 export const CRAFT_COST = 0;
 
 /** RAM to place a piece mid dive. Was 1; the shortcut has to cost tempo. */
-export const PLACE_COST = 2;
+/*
+ * Raised 2 -> 4 for split boards. A piece buys a fixed number of COLUMNS, and
+ * when the goal moved to the far edge those columns roughly doubled in value:
+ * at 2 RAM a cell was cutting ~6 off a 24-cost route, three times what the
+ * same RAM buys in rotations. It was the single biggest reason kitted dives
+ * were SHORTER than kit-less ones. At 4 it is still a good deal, just not a
+ * free one.
+ */
+export const PLACE_COST = 4;
 
 /** Extra drop chance per job threat tier above 1. Balance knob. */
 export const PATCH_DROP_TIER_BONUS = 0.05;

@@ -20,9 +20,10 @@ import {
   tutorialOutroScene,
   DAY_LINES,
 } from "../content/story";
-import { endPlayerTurn, playerHasRoute } from "../duel-actions";
+import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed } from "../duel-setup";
-import { BASE_KIT, DuelState } from "../duel-types";
+import { BASE_KIT, DuelState, isJunction } from "../duel-types";
+import { goalLive } from "../duel-power";
 import { botPlayTurn, oppStep } from "../opponent";
 import {
   DAY_REST_REGEN,
@@ -54,6 +55,8 @@ function playDuelToEnd(duel: DuelState): {
   gridlockWin: boolean;
   overRotations: number;
   trapsFired: number;
+  redirectsTaken: number;
+  pressureRounds: number;
 } {
   let guard = 0;
   while (duel.phase === "playing" && guard++ < 4000) {
@@ -65,33 +68,40 @@ function playDuelToEnd(duel: DuelState): {
     }
   }
   must(duel.phase !== "playing", "duel terminated");
-  // Every ending has to be nameable. A loss the machine won without ever
-  // touching the core used to print "Its flood got there first", which is
-  // how a legitimate route verdict read as a broken win check.
+  // Every ending has to be nameable.
   must(duel.winKind !== null, "finished duel records how it ended");
   must(
     duel.endReason !== null && duel.endReason.length > 0,
     `finished duel (${duel.winKind}) carries a player-facing reason`,
   );
-  if (duel.winKind === "severed") {
-    // The verdict is only allowed when no rotation AND no unspent patch cell
-    // can reopen a corridor. Holding a usable cell must never lose the dive.
-    must(!playerHasRoute(duel), "severed verdict means no route exists, patch cells included");
-    must(duel.phase === "lost", "severed is a loss");
+  // Split-board invariants: a "goal" verdict means the winner's own signal is
+  // actually reaching their own goal column, and the loser's is not. This is
+  // the check that would catch a settle crediting the wrong board.
+  if (duel.winKind === "goal") {
+    const winner = duel.phase === "won" ? "player" : "opp";
+    must(goalLive(duel.boards[winner]), "a goal verdict means the winner's goal is lit");
+    must(
+      !goalLive(duel.boards[winner === "player" ? "opp" : "player"]),
+      "only one side's goal is lit at the end",
+    );
   }
-  if (duel.winKind === "gridlock") {
-    must(duel.phase === "won", "a deadlocked board resolves in the player's favor");
-  }
-  if (duel.winKind === "gridlock" && duel.phase === "won") {
-    must(duel.strainChip >= 6, "gridlock wins carry the flat chip");
+  // BUILT is permanent: nothing in a dive may un-build a node.
+  for (const side of ["player", "opp"] as const) {
+    const b = duel.boards[side];
+    must(
+      b.power.every((live, i) => !live || !isJunction(b.cells[i]) || b.cells[i].built),
+      `${side}: every live node is built`,
+    );
   }
   return {
     won: duel.phase === "won",
     chip: duel.strainChip,
     capWin: duel.winKind === "cap",
-    gridlockWin: duel.winKind === "gridlock",
+    gridlockWin: false,
     overRotations: Math.max(0, duel.econ.player.rotations - duel.par),
     trapsFired: duel.econ.player.trapsFired,
+    redirectsTaken: duel.econ.player.redirectsTaken,
+    pressureRounds: duel.pressureRounds,
   };
 }
 
@@ -166,6 +176,8 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         pouchLeft,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        redirectsTaken: res.redirectsTaken,
+        pressureRounds: res.pressureRounds,
         scans: duel.econ.player.scansCast,
         attackCasts: duel.econ.player.attacksCast,
         defendCasts: duel.econ.player.defendsCast,
@@ -332,6 +344,8 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
+        redirectsTaken: res.redirectsTaken,
+        pressureRounds: res.pressureRounds,
         scans: duel.econ.player.scansCast,
         attackCasts: duel.econ.player.attacksCast,
         defendCasts: duel.econ.player.defendsCast,
