@@ -5,11 +5,11 @@
  * The tutorial used to go stale because nothing could fail for being
  * untaught. This is that failure. It asserts that every mechanic in the
  * inventory is either explained at a real moment or carries a written
- * waiver, that the moments land on surfaces a run actually reaches, and
+ * waiver, that the moments land on surfaces a day actually reaches, and
  * that no single surface turns into a lecture.
  */
 
-import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../content/arc";
+import { tutorialConfig } from "../content/tiers";
 import {
   AUGMENTS,
   ATTACK_MODE_LABEL,
@@ -30,13 +30,12 @@ import {
   taughtMechanics,
   tutorialLine,
 } from "../content/teaching";
+import { DayAction, GameState, dayReducer } from "../day-reducer";
 import { endPlayerTurn } from "../duel-actions";
 import { createDuel, mixSeed, MAX_OPENING_BUILT } from "../duel-setup";
 import { BASE_KIT, DuelState } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
-import { GameState, RunAction, runReducer } from "../run-reducer";
-import { PATCH_POUCH_MAX } from "../patch-cells";
-import { duelKitOf, EMPTY_META } from "../save";
+import { EMPTY_META } from "../save";
 
 const failures: string[] = [];
 
@@ -48,7 +47,7 @@ function check(cond: boolean, msg: string): void {
 const CORE_VERBS = ["rotate", "scan", "defend", "attack"];
 
 /**
- * Surfaces that are windows or shells rather than run screens. The run walk
+ * Surfaces that are windows or shells rather than day phases. The day walk
  * cannot visit them, so they are reachable by construction.
  */
 const WINDOW_SURFACES: TeachSurface[] = ["loadout", "solder", "desktop", "tutorial"];
@@ -60,6 +59,8 @@ const MAX_COACH_LINE = 160;
 const MAX_BEAT_LINE = 260;
 const MAX_TIP_LEN = 130;
 const MAX_LINES = 2;
+/** notBeforeDay gates early days; a week is the longest honest gate. */
+const MAX_NOT_BEFORE = 7;
 
 /* ------------------------------------------------------------------ */
 /* 1. Coverage: every mechanic is taught or waived, never neither      */
@@ -147,8 +148,8 @@ for (const m of TEACHING) {
   seenOrders.add(m.order);
   check(m.teaches.length > 0, `teaching moment "${m.id}" teaches nothing`);
   check(
-    m.notBeforeDay >= 0 && m.notBeforeDay <= FINAL_DAY,
-    `teaching moment "${m.id}" has notBeforeDay ${m.notBeforeDay} outside 0..${FINAL_DAY}`,
+    m.notBeforeDay >= 0 && m.notBeforeDay <= MAX_NOT_BEFORE,
+    `teaching moment "${m.id}" has notBeforeDay ${m.notBeforeDay} outside 0..${MAX_NOT_BEFORE}`,
   );
   check(m.title.trim().length > 0, `teaching moment "${m.id}" has no title`);
   check(
@@ -295,15 +296,7 @@ for (let owned = 0; owned <= MAX_OPENING_BUILT; owned++) {
 /* 4. Reachability: every surface a moment targets is really visited   */
 /* ------------------------------------------------------------------ */
 
-function playDuelToEnd(duel: DuelState): {
-  won: boolean;
-  chip: number;
-  capWin: boolean;
-  overRotations: number;
-  trapsFired: number;
-  redirectsTaken: number;
-  pressureRounds: number;
-} {
+function playDuelToEnd(duel: DuelState): void {
   let guard = 0;
   while (duel.phase === "playing" && guard++ < 4000) {
     if (duel.turn === "player") {
@@ -313,160 +306,100 @@ function playDuelToEnd(duel: DuelState): {
       oppStep(duel);
     }
   }
-  return {
-    won: duel.phase === "won",
-    chip: duel.strainChip,
-    capWin: duel.winKind === "cap",
-    overRotations: Math.max(0, duel.econ.player.rotations - duel.par),
-    trapsFired: duel.econ.player.trapsFired,
-    redirectsTaken: duel.econ.player.redirectsTaken,
-    pressureRounds: duel.pressureRounds,
-  };
-}
-
-const visited = new Set<string>();
-let s: GameState = { meta: { ...EMPTY_META }, run: null };
-const d = (a: RunAction) => {
-  s = runReducer(s, a);
-  if (s.run) visited.add(s.run.screen);
-};
-
-for (let runIndex = 0; runIndex < 4; runIndex++) {
-  d({ type: "startRun", seed: mixSeed(0x7ea, runIndex) });
-  d({ type: "storyDone" });
-  if (s.run && s.run.screen === "tutIntro") {
-    d({ type: "storyDone" });
-    const t = createDuel(tutorialConfig(), mixSeed(s.run.runSeed, 0, 0), BASE_KIT, s.run.ramPerTurn);
-    playDuelToEnd(t);
-    d({ type: "tutorialDone" });
-    d({ type: "storyDone" });
-  }
-  d({ type: "storyDone" });
-
-  let guard = 0;
-  while (s.run && guard++ < 200) {
-    const run = s.run;
-    if (run.screen === "day") {
-      const idx = run.jobsDone.findIndex((x) => !x);
-      d({ type: "pickJob", index: idx });
-      const job = run.jobs[idx];
-      d({ type: "startDuel" });
-      const duel = createDuel(
-        dayDuelConfig(run.day, job.dominant, job.tier, job.kitSeed),
-        mixSeed(run.runSeed, run.day, idx),
-        duelKitOf(run.kit, run.patchPouch),
-        run.ramPerTurn,
-      );
-      const res = playDuelToEnd(duel);
-      d({
-        type: "duelFinished",
-        won: res.won,
-        chip: res.chip,
-        capWin: res.capWin,
-        gridlockWin: false,
-        pouchLeft: duel.patchPouch,
-        overRotations: res.overRotations,
-        trapsFired: res.trapsFired,
-        redirectsTaken: res.redirectsTaken,
-        pressureRounds: res.pressureRounds,
-        scans: duel.econ.player.scansCast,
-        attackCasts: duel.econ.player.attacksCast,
-        defendCasts: duel.econ.player.defendsCast,
-      });
-      if (s.run && s.run.screen === "result") {
-        const draft = s.run.lastResult ? s.run.lastResult.draft : [];
-        if (draft.length > 0) {
-          const id = draft[0];
-          const full = s.run.kit.augments.length >= s.run.boostSlots;
-          d({ type: "pickAugment", id, replace: full ? s.run.kit.augments[0] : undefined });
-        }
-      }
-    } else if (run.screen === "result") {
-      d({ type: "resultNext" });
-    } else if (run.screen === "dayOpen") {
-      d({ type: "storyDone" });
-    } else if (run.screen === "upgrade") {
-      if (run.patchPouch.length < PATCH_POUCH_MAX) d({ type: "buyDarkPatch" });
-      d({ type: "buyPatch" });
-      d({ type: "chooseUpgrade", pick: "ram" });
-      d({ type: "closeNight" });
-    } else if (run.screen === "finalePre") {
-      d({ type: "startFinale" });
-      const duel = createDuel(
-        finaleConfig(),
-        mixSeed(run.runSeed, FINAL_DAY, 9),
-        duelKitOf(run.kit, run.patchPouch),
-        run.ramPerTurn,
-      );
-      const res = playDuelToEnd(duel);
-      d({
-        type: "duelFinished",
-        won: res.won,
-        chip: res.chip,
-        capWin: res.capWin,
-        gridlockWin: false,
-        pouchLeft: duel.patchPouch,
-        overRotations: res.overRotations,
-        trapsFired: res.trapsFired,
-        redirectsTaken: res.redirectsTaken,
-        pressureRounds: res.pressureRounds,
-        scans: duel.econ.player.scansCast,
-        attackCasts: duel.econ.player.attacksCast,
-        defendCasts: duel.econ.player.defendsCast,
-      });
-    } else if (run.screen === "runEnd" || run.screen === "finaleWin") {
-      d({ type: "storyDone" });
-    } else {
-      failures.push(`run walk hit an unexpected screen "${run.screen}"`);
-      break;
-    }
-  }
 }
 
 /**
- * The walk above plays honestly, and an honest run dies long before day 10:
- * reaching the finale means winning all 27 dives, so `finalePre` and
- * `finaleWin` were never once visited and nothing could claim first contact
- * there. That is a blind spot in the harness, not a fact about the game.
- *
- * This second pass exists only to record late-run surface reachability. It
- * forfeits nothing: it asserts no outcome, plays no duel, and reports no
- * numbers. It force-wins every dive so the screens past day 9 are seen at
- * all. Balance lives in `sim.ts`; this is a map of where a run can go.
+ * Day phases map onto teach surfaces: the open shop is simultaneously the
+ * floor, the counter, and (through INBOX at the bench) the analyze readout.
  */
-{
-  d({ type: "startRun", seed: mixSeed(0x5f1, 1) });
-  let guard = 0;
-  while (s.run && s.run.screen !== "finaleWin" && guard++ < 400) {
-    const run = s.run;
-    if (run.screen === "day") {
-      d({ type: "pickJob", index: run.jobsDone.findIndex((x) => !x) });
-      d({ type: "startDuel" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, redirectsTaken: 0, pressureRounds: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
-    } else if (run.screen === "finalePre") {
-      d({ type: "startFinale" });
-      d({ type: "duelFinished", won: true, chip: 0, capWin: false, gridlockWin: false, pouchLeft: run.patchPouch, overRotations: 0, trapsFired: 0, redirectsTaken: 0, pressureRounds: 0, scans: 0, attackCasts: 0, defendCasts: 0 });
-    } else if (run.screen === "result") {
-      d({ type: "resultNext" });
-    } else if (run.screen === "upgrade") {
-      d({ type: "chooseUpgrade", pick: "ram" });
-      d({ type: "closeNight" });
-    } else {
-      d({ type: "storyDone" });
-    }
-  }
-  check(
-    s.run !== null && guard < 400,
-    "the survivor walk never reached the finale; late-run surfaces cannot be verified",
-  );
+const PHASE_SURFACES: Record<string, TeachSurface[]> = {
+  open: ["floor", "counter", "analyze"],
+  duel: ["duel"],
+  result: ["result"],
+  evening: ["evening"],
+  bust: ["bust"],
+  sunday: ["sunday"],
+  morning: ["floor"],
+};
+
+const visited = new Set<string>();
+let s: GameState = { meta: { ...EMPTY_META }, shop: null, day: null };
+const d = (a: DayAction) => {
+  s = dayReducer(s, a);
+  if (s.day) for (const surf of PHASE_SURFACES[s.day.phase] ?? []) visited.add(surf);
+};
+
+function syntheticVerdict(won: boolean, chip: number) {
+  return {
+    type: "duelFinished" as const,
+    won,
+    chip,
+    capWin: false,
+    pouchLeft: [...s.day!.pouch],
+    overRotations: 0,
+    trapsFired: 0,
+    redirectsTaken: 0,
+    pressureRounds: 0,
+    scans: 1,
+    attackCasts: 1,
+    defendCasts: 0,
+  };
 }
 
-// "duel" is the screen every dive runs under; the walk records it directly.
+d({ type: "newGame", seed: mixSeed(0x7ea, 1) });
+d({ type: "storyDone" });
+check(s.day!.phase === "tutorial", "first boot reaches the tutorial dive");
+{
+  const t = createDuel(tutorialConfig(), mixSeed(s.shop!.seed, 0, 0), BASE_KIT, 5);
+  playDuelToEnd(t);
+}
+d({ type: "tutorialDone" });
+d({ type: "storyDone" });
+
+// A working week: dives, results, an evening, a bust, and a Sunday.
+let guard = 0;
+let bustsForced = 0;
+while (s.shop && s.shop.day <= 9 && guard++ < 400) {
+  const day = s.day!;
+  if (day.phase === "morning") {
+    d({ type: "storyDone" });
+  } else if (day.phase === "open") {
+    if (day.jobsResolved >= 2) {
+      d({ type: "closeShop" });
+    } else {
+      d({ type: "customerArrived" });
+      d({ type: "acceptJob" });
+      d({ type: "startDive" });
+      // Force exactly one bust mid-walk so the bust surface is reached.
+      if (bustsForced === 0 && s.shop.day === 2) {
+        bustsForced++;
+        d(syntheticVerdict(true, 999));
+      } else {
+        d(syntheticVerdict(true, 4));
+      }
+    }
+  } else if (day.phase === "result") {
+    const draft = day.lastResult ? day.lastResult.draft : [];
+    if (draft.length > 0) d({ type: "pickAugment", id: draft[0] });
+    d({ type: "resultNext" });
+  } else if (day.phase === "evening" || day.phase === "bust") {
+    d({ type: "sleep" });
+  } else if (day.phase === "sunday") {
+    d({ type: "attemptBackroom" });
+    if (s.day!.phase === "duel") d(syntheticVerdict(false, 0));
+    d({ type: "sleep" });
+  } else {
+    failures.push(`day walk hit an unexpected phase "${day.phase}"`);
+    break;
+  }
+}
+check(guard < 400, "the day walk terminated");
+
 for (const m of TEACHING) {
   if (WINDOW_SURFACES.includes(m.surface)) continue;
   check(
     visited.has(m.surface),
-    `teaching moment "${m.id}" targets surface "${m.surface}", which no run ever reaches`,
+    `teaching moment "${m.id}" targets surface "${m.surface}", which no day ever reaches`,
   );
 }
 
@@ -474,7 +407,7 @@ for (const m of MECHANIC_INVENTORY) {
   if (WINDOW_SURFACES.includes(m.firstContact)) continue;
   check(
     visited.has(m.firstContact),
-    `mechanic "${m.id}" claims first contact on "${m.firstContact}", which no run ever reaches`,
+    `mechanic "${m.id}" claims first contact on "${m.firstContact}", which no day ever reaches`,
   );
 }
 
@@ -493,5 +426,5 @@ console.log(
   `OK: ${MECHANIC_INVENTORY.length} mechanics, ${covered} taught, ${waived} waived, ` +
     `${TEACHING.length} coachmarks, ${TEACH_TIPS.length} tips, ${TUTORIAL_BEATS.length} tutorial beats`,
 );
-console.log(`OK: surfaces reached by the run walk: ${[...visited].sort().join(", ")}`);
+console.log(`OK: surfaces reached by the day walk: ${[...visited].sort().join(", ")}`);
 console.log("OK: teaching coverage complete");

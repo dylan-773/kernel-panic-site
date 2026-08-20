@@ -9115,3 +9115,348 @@ body.kp-dragging-piece, body.kp-dragging-piece .sv-slot:is(button) { cursor: gra
 /* REPAIR.LOG's still is the one cell that fills its box and crops via
  * object-fit, so it keeps the stretch it asks for. */
 .rl-cam img { width: 100%; height: 100%; }
+
+/* ==================================================================== */
+/* THE SCENE LAYER: the walkable shop (Phaser stage + room interface).  */
+/* The KP/OS window laws do not govern this layer; the vocabulary       */
+/* carries (boxed label rows, no border radius, risk never colour       */
+/* alone), but the room composes for a camera, not a desk.              */
+/* ==================================================================== */
+
+.sc-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #070510;
+}
+
+.ow-stage {
+  position: absolute;
+  inset: 0;
+}
+.ow-stage canvas {
+  image-rendering: pixelated;
+}
+
+/* --- the room HUD: as small as its four facts allow ----------------- */
+.sc-hud {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  z-index: 40;
+  pointer-events: none;
+  max-width: min(72vw, 720px);
+}
+.sc-hud-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--ch) 42%, transparent);
+  background: color-mix(in srgb, #070510 84%, transparent);
+  font-family: "Silkscreen", monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--ch-dim);
+  position: relative;
+}
+.sc-hud-chip em {
+  font-family: "VT323", monospace;
+  font-style: normal;
+  font-size: 17px;
+  color: var(--r-data, var(--ch-hot));
+  line-height: 1;
+}
+.sc-hud-held em {
+  color: var(--r-aux, var(--ch));
+}
+.sc-hud-bell em {
+  color: var(--r-ok, var(--ch));
+}
+.sc-hud-strain.sc-alarm {
+  border-color: var(--r-warn, var(--ch));
+  color: var(--r-warn, var(--ch));
+  background: color-mix(in srgb, var(--r-warn, var(--ch)) 18%, #070510);
+}
+.sc-hud-strain.sc-alarm em {
+  color: var(--r-warn, var(--ch));
+}
+.sc-riskflash {
+  position: absolute;
+  inset: 0;
+  background: var(--r-warn, var(--ch));
+  mix-blend-mode: difference;
+  animation: scRisk 0.9s steps(2, jump-none) infinite;
+  pointer-events: none;
+}
+@keyframes scRisk {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sc-riskflash { animation: none; opacity: 0.3; }
+}
+
+/* --- the interact prompt -------------------------------------------- */
+.sc-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--ch) 55%, transparent);
+  background: color-mix(in srgb, #070510 88%, transparent);
+  z-index: 40;
+  pointer-events: none;
+  max-width: min(86vw, 760px);
+}
+.sc-prompt-key {
+  font-family: "Silkscreen", monospace;
+  font-size: 10px;
+  padding: 3px 6px;
+  border: 1px solid var(--ch);
+  color: var(--px-void);
+  background: var(--ch);
+  line-height: 1;
+}
+.sc-prompt-label {
+  font-family: "VT323", monospace;
+  font-size: 19px;
+  color: var(--ch-hot);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- panels: intake, stations, confirms ------------------------------ */
+.sc-panelwrap {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #070510 55%, transparent);
+  z-index: 60;
+}
+.sc-panel {
+  width: min(92vw, 660px);
+  border: 3px solid var(--ch);
+  background: var(--px-void);
+  padding: 18px 20px 16px;
+  color: var(--ch-hot);
+  font-family: "VT323", monospace;
+  position: relative;
+}
+.sc-eyebrow {
+  display: block;
+  font-family: "Silkscreen", monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--ch-dim);
+  margin-bottom: 6px;
+}
+.sc-panel-title {
+  display: block;
+  font-family: "Silkscreen", monospace;
+  font-size: 16px;
+  color: var(--ch-hot);
+  letter-spacing: 0.04em;
+}
+.sc-panel-sub {
+  display: block;
+  font-size: 18px;
+  color: var(--ch-dim);
+  margin-top: 2px;
+}
+.sc-state {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  font-family: "Silkscreen", monospace;
+  font-size: 9px;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+}
+.sc-state-broken { color: var(--r-hazard, var(--ch)); }
+.sc-state-fixed { color: var(--r-ok, var(--ch)); }
+.sc-read {
+  font-size: 20px;
+  line-height: 1.35;
+  color: var(--ch-hot);
+  margin: 10px 0 4px;
+}
+.sc-read span { display: block; }
+.sc-rows { margin-top: 10px; display: grid; gap: 4px; }
+.sc-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  border: 1px solid color-mix(in srgb, var(--ch) 22%, transparent);
+  padding: 5px 8px;
+}
+.sc-row > span {
+  font-family: "Silkscreen", monospace;
+  font-size: 9px;
+  color: var(--ch-dim);
+  min-width: 128px;
+}
+.sc-row > em {
+  font-style: normal;
+  font-size: 18px;
+  color: var(--r-data, var(--ch-hot));
+}
+.sc-row .sc-dead,
+.sc-dead {
+  color: var(--ch-dim);
+}
+.sc-panel-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  align-items: center;
+}
+.sc-quote {
+  font-size: 21px;
+  line-height: 1.3;
+  min-height: 3.9em;
+  color: var(--ch-hot);
+  margin: 0 0 8px;
+}
+.sc-intake-body { display: flex; gap: 16px; }
+.sc-intake-portrait {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--ch) 40%, transparent);
+  padding: 4px;
+  align-self: flex-start;
+}
+.sc-intake-portrait img { display: block; image-rendering: pixelated; }
+.sc-intake-facts { flex: 1 1 auto; min-width: 0; }
+
+.sc-readlines { margin: 12px 0 4px; display: grid; gap: 8px; }
+.sc-readline {
+  font-size: 21px;
+  line-height: 1.35;
+  color: var(--ch-hot);
+  margin: 0;
+}
+.sc-readline.is-past { color: var(--ch-dim); }
+.sc-firstread { cursor: pointer; }
+
+/* --- morning card ----------------------------------------------------- */
+.sc-morningwrap { align-items: start; }
+.sc-morning {
+  margin-top: 12vh;
+  width: min(92vw, 560px);
+}
+.sc-morningline {
+  font-size: 22px;
+  line-height: 1.35;
+  margin: 6px 0 2px;
+  color: var(--ch-hot);
+}
+
+/* --- the loss toast ---------------------------------------------------- */
+.sc-toast {
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  z-index: 55;
+  width: min(92vw, 520px);
+  border: 2px solid color-mix(in srgb, var(--ch) 60%, transparent);
+  background: var(--px-void);
+  padding: 10px 14px;
+  font-family: "VT323", monospace;
+  cursor: pointer;
+}
+.sc-toast p {
+  margin: 4px 0 0;
+  font-size: 19px;
+  color: var(--ch-hot);
+}
+
+/* --- scene shroud: story panels floating over the room ----------------- */
+.sc-shroud {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #070510 68%, transparent);
+}
+.sc-shroud-panel {
+  width: min(94vw, 900px);
+  border: 3px solid var(--ch);
+  background: var(--px-void);
+}
+.sc-shroud-panel .ml-eva { cursor: pointer; }
+
+/* --- loadout pool (the deck's new decision) ---------------------------- */
+.lo-pool {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+}
+.lo-poollabel {
+  font-family: "Silkscreen", monospace;
+  font-size: 8px;
+  color: var(--ch-dim);
+  letter-spacing: 0.1em;
+}
+.lo-poolempty {
+  font-family: "VT323", monospace;
+  font-size: 15px;
+  color: var(--ch-dim);
+}
+.lo-poolitem {
+  font-family: "Silkscreen", monospace;
+  font-size: 8px;
+  color: var(--ch-hot);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--ch) 45%, transparent);
+  padding: 4px 7px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.lo-poolitem:disabled { color: var(--ch-dim); cursor: default; }
+.lo-bayaction {
+  font-style: normal;
+  font-size: 7px;
+  color: var(--ch-dim);
+  letter-spacing: 0.08em;
+}
+.lo-bay { text-align: left; background: none; cursor: pointer; }
+.lo-bay:disabled { cursor: default; }
+
+/* --- night deck grid --------------------------------------------------- */
+.nt-deckgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 10px 0 2px;
+}
+.nt-deckgrid .nt-cell:nth-child(4),
+.nt-deckgrid .nt-cell:nth-child(5) { grid-column: span 1; }
+.kp-ledger2-sv {
+  font-family: "VT323", monospace;
+  font-style: normal;
+  font-size: 20px;
+  color: var(--r-data, var(--ch-hot));
+}
+
+/* --- inbox dead reads --------------------------------------------------- */
+.ib-dead em, .ib-deadval, .ib-tell-dead, .ib-dominant-dead {
+  color: var(--ch-dim) !important;
+}
+.ib-pane-solo { position: relative; }
+.ib-idle-eva { padding: 6px 2px; }

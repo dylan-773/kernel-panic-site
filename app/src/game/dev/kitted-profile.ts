@@ -2,40 +2,54 @@
  * The canonical kitted player build for the balance harness. Not imported
  * by app code.
  *
- * One day-progressive profile rather than disconnected snapshots: a fixed
- * 9-pick night schedule, applied pick by pick, so the day-d sim kit is
- * exactly what a run following that schedule would hold walking into day d.
- * The finale row therefore measures the full kit. Mode pairs cycle per
- * seed from day 3 so all three archetypes get coverage without letting a
+ * Stage-based, not day-based: on the open calendar the question "what deck
+ * does a player hold when a tier N device lands on the counter" replaces
+ * "what does day N look like". Each tier is paired with the deck a player
+ * plausibly owns by the time the band opens that far - tier 1 meets the
+ * starter deck, tier 5 meets a late one - so the gated win rates measure
+ * the intended matchup, not a fixed-schedule fiction. Mode pairs cycle per
+ * seed from tier 2 so all three archetypes get coverage without letting a
  * fully random build double the variance.
  */
 
 import { AttackMode, AUGMENT_BY_ID, DefendMode, Tier } from "../content/kit";
+import { BASE_RAM } from "../day-reducer";
 import { mixSeed } from "../duel-setup";
 import { DuelKit } from "../duel-types";
 import { rollPatchMask } from "../patch-cells";
 import { Rng } from "../rng";
-import { BASE_RAM } from "../run-reducer";
 
-/** The one upgrade per closed night: 4 RAM + 2 attack + 1 scan + 2 defend. */
-export const NIGHT_SCHEDULE = [
-  "ram",
-  "attack",
-  "ram",
-  "scan",
-  "ram",
-  "defend",
-  "attack",
-  "ram",
-  "defend",
-] as const;
+export interface StageProfile {
+  ram: number;
+  scanTier: Tier;
+  attackTier: Tier;
+  defendTier: Tier;
+  /** Patch pieces walking into the dive. */
+  cells: number;
+  /** Engine-passive boosts slotted at this stage ("pair" = the archetype's). */
+  boosts: Array<string | "pair">;
+}
 
 /**
- * Build archetypes, cycled per seed from day 3. Purge appears twice on
+ * Deck by the tier being met. Stages carry the old measured schedule's
+ * shape (the day-3/5/8/9 decks the retired arc validated) forward.
+ */
+export const STAGE_PROFILES: Record<number, StageProfile> = {
+  1: { ram: BASE_RAM, scanTier: 1, attackTier: 1, defendTier: 1, cells: 0, boosts: [] },
+  2: { ram: 6, scanTier: 1, attackTier: 2, defendTier: 1, cells: 1, boosts: ["hotBoot"] },
+  3: { ram: 7, scanTier: 2, attackTier: 2, defendTier: 1, cells: 2, boosts: ["hotBoot", "longArms"] },
+  4: { ram: 8, scanTier: 2, attackTier: 3, defendTier: 2, cells: 3, boosts: ["hotBoot", "longArms", "pair"] },
+  5: { ram: 9, scanTier: 2, attackTier: 3, defendTier: 2, cells: 3, boosts: ["hotBoot", "longArms", "pair"] },
+  /** The back room: the full late deck. */
+  6: { ram: 9, scanTier: 2, attackTier: 3, defendTier: 3, cells: 3, boosts: ["hotBoot", "longArms", "pair"] },
+};
+
+/**
+ * Build archetypes, cycled per seed from tier 2. Purge appears twice on
  * purpose: it is the defensive workhorse against late trap pressure. Each
- * pair names the mode-matched boost that fills the third slot at day 6.
- * Only engine-passive boosts belong here; the policy bot has no
- * boost-specific code.
+ * pair names the mode-matched boost that fills the third slot late. Only
+ * engine-passive boosts belong here; the policy bot has no boost-specific
+ * code.
  */
 export const MODE_PAIRS: Array<{ attack: AttackMode; defend: DefendMode; boost: string }> = [
   { attack: "redirect", defend: "purge", boost: "jamAnchor" },
@@ -43,17 +57,10 @@ export const MODE_PAIRS: Array<{ attack: AttackMode; defend: DefendMode; boost: 
   { attack: "armHalt", defend: "lock", boost: "tripwire" },
 ];
 
-/** Slot-capped boost schedule: day it comes online -> augment id. */
-export const BOOST_SCHEDULE: Array<{ day: number; id: string | "pair" }> = [
-  { day: 2, id: "hotBoot" },
-  { day: 4, id: "longArms" },
-  { day: 6, id: "pair" },
-];
-
 // Tripwire for the ability agent: a catalog cut that touches this schedule
 // must update it, or the harness refuses to run at all.
 for (const id of [
-  ...BOOST_SCHEDULE.map((b) => b.id).filter((id) => id !== "pair"),
+  ...Object.values(STAGE_PROFILES).flatMap((s) => s.boosts).filter((id) => id !== "pair"),
   ...MODE_PAIRS.map((p) => p.boost),
 ]) {
   if (!AUGMENT_BY_ID[id]) {
@@ -61,50 +68,35 @@ for (const id of [
   }
 }
 
-function picksAtDay(day: number): readonly string[] {
-  return NIGHT_SCHEDULE.slice(0, Math.max(0, Math.min(day - 1, NIGHT_SCHEDULE.length)));
+export function ramAtStage(stage: number): number {
+  return STAGE_PROFILES[Math.max(1, Math.min(6, stage))].ram;
 }
 
-export function ramAtDay(day: number): number {
-  return BASE_RAM + picksAtDay(day).filter((p) => p === "ram").length;
+export function cellsAtStage(stage: number): number {
+  return STAGE_PROFILES[Math.max(1, Math.min(6, stage))].cells;
 }
 
-function tierAtDay(day: number, prog: "scan" | "attack" | "defend"): Tier {
-  return Math.min(3, 1 + picksAtDay(day).filter((p) => p === prog).length) as Tier;
-}
-
-/** Patch pieces walking into the day: none early, a decent pouch late. */
-export function cellsAtDay(day: number): number {
-  if (day <= 2) return 0;
-  if (day <= 4) return 1;
-  if (day <= 6) return 2;
-  return 3;
-}
-
-/** Mint the day's held pieces deterministically per seed. */
-export function pouchAtDay(day: number, seed: number): number[] {
+/** Mint the stage's held pieces deterministically per seed. */
+export function pouchAtStage(stage: number, seed: number): number[] {
   const rng = new Rng(mixSeed(seed, 0x9ec));
-  return Array.from({ length: cellsAtDay(day) }, () => rollPatchMask(rng));
+  return Array.from({ length: cellsAtStage(stage) }, () => rollPatchMask(rng));
 }
 
 /**
- * The day-d kit for one seed. Deterministic; the pair salt keeps the
+ * The stage deck for one seed. Deterministic; the pair salt keeps the
  * player archetype decorrelated from the opp dominant (seed % 6 in sim.ts,
  * and gcd(3, 6) = 3 would lock them in phase without it).
  */
-export function kitAtDay(day: number, seed: number): DuelKit {
-  const pair = day <= 2 ? MODE_PAIRS[0] : MODE_PAIRS[mixSeed(seed, 0x77aa) % MODE_PAIRS.length];
-  const augments: string[] = [];
-  for (const b of BOOST_SCHEDULE) {
-    if (day >= b.day) augments.push(b.id === "pair" ? pair.boost : b.id);
-  }
+export function kitAtStage(stage: number, seed: number): DuelKit {
+  const p = STAGE_PROFILES[Math.max(1, Math.min(6, stage))];
+  const pair = stage <= 1 ? MODE_PAIRS[0] : MODE_PAIRS[mixSeed(seed, 0x77aa) % MODE_PAIRS.length];
   return {
-    scanTier: tierAtDay(day, "scan"),
-    attackTier: tierAtDay(day, "attack"),
-    defendTier: tierAtDay(day, "defend"),
+    scanTier: p.scanTier,
+    attackTier: p.attackTier,
+    defendTier: p.defendTier,
     attackMode: pair.attack,
     defendMode: pair.defend,
-    augments,
-    patchPouch: pouchAtDay(day, seed),
+    augments: p.boosts.map((b) => (b === "pair" ? pair.boost : b)),
+    patchPouch: pouchAtStage(stage, seed),
   };
 }

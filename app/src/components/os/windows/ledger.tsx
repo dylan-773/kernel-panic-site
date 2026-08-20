@@ -1,20 +1,18 @@
 import { useEffect, useMemo } from "react";
 import { playLedgerPrint } from "../../../game/audio";
-import { FINAL_DAY } from "../../../game/content/arc";
 import { AUGMENTS, MODE_LABEL, OppMode } from "../../../game/content/kit";
-import { PATCH_POUCH_MAX } from "../../../game/patch-cells";
-import { BOOST_SLOTS_MAX } from "../../../game/run-reducer";
-import type { MetaState, RunState } from "../../../game/save";
+import { REPAIRS, pouchCapFor } from "../../../game/content/repairs";
+import type { DayState, MetaState, ShopState } from "../../../game/save";
+import { WEEKDAYS, weekdayOf } from "../../../game/save";
 import { customerById } from "../../game/screens";
 import { cardPortraitFor } from "../roster-art";
 import { Chip, DataRows, Hero, Nodes, PipRow, Ruler, SegMeter } from "../kp-ui";
 
 /**
- * LEDGER.LOG: the shop's accounting terminal as a full data sheet. THIS RUN
- * splits into slash rows beside a framed CREDITS hero cell; LIFETIME splits
- * into slash rows beside the MOST LETHAL dossier cell (the face that has
- * ended you the most, straight off the customer file). Print furniture at
- * the foot: dot matrix, seeded hex strip, the bench brand.
+ * LEDGER.LOG: the books, not a score. TODAY (held, unbanked, marked so)
+ * against LIFETIME, the MOST LETHAL dossier, print furniture at the foot.
+ * The window itself is a repair: the ledger terminal boots to a cursor
+ * until it is fixed, which is what makes the books worth reading.
  */
 
 function topOf(counts: Record<string, number>): { key: string; n: number } | null {
@@ -62,7 +60,15 @@ function LedgerFoot({ seedKey }: { seedKey: string }) {
   );
 }
 
-export function LedgerContent({ meta, run }: { meta: MetaState; run: RunState | null }) {
+export function LedgerContent({
+  meta,
+  shop,
+  day,
+}: {
+  meta: MetaState;
+  shop: ShopState;
+  day: DayState;
+}) {
   /* a fresh statement prints on every open (the window unmounts when
    * closed, so mount = open) */
   useEffect(() => {
@@ -77,65 +83,66 @@ export function LedgerContent({ meta, run }: { meta: MetaState; run: RunState | 
   return (
     <div className="kp-ledger2">
       <div className="kp-ledger2-head">
-        <Hero text={`LEDGER №${meta.runCount}`} />
+        <Hero text={`LEDGER D${shop.day}`} />
         <Chip label="BACK ROOM" value={meta.machineOpened ? "OPEN" : "SEALED"} crimson={meta.machineOpened} />
       </div>
 
-      <span className="kp-ledger2-strip">{"// THIS RUN _"}</span>
-      {run ? (
-        <div className="kp-ledger2-grid">
-          <DataRows
-            slash
-            rows={[
-              { label: "ATTEMPT", value: String(run.runNumber) },
-              { label: "DAY", value: `${Math.min(run.day, FINAL_DAY)}/10` },
-              { label: "RAM / TURN", value: String(run.ramPerTurn) },
-              { label: "KIT TIERS", value: `S${run.kit.scanTier} A${run.kit.attackTier} D${run.kit.defendTier}` },
-              { label: "AUGMENTS", value: `${run.kit.augments.length}/${boosts}` },
-              {
-                label: "NEURAL STRAIN",
-                value: (
-                  <span className="kp-ledger-strain">
-                    <SegMeter pct={run.strain} segs={16} dur={300} steps={8} />
-                    <em>{run.strain}/100</em>
-                  </span>
-                ),
-              },
-            ]}
-          />
-          <div className="kp-ledger2-credit kp-frame-nodes">
-            <Nodes />
-            <span className="kp-rpt-label">CREDITS</span>
-            <div className="kp-pay-big">
-              {run.credits}
-              <i>cr</i>
-            </div>
-            <div className="kp-ledger2-pips">
-              <span className="kp-rpt-label">POUCH</span>
-              <PipRow filled={run.patchPouch.length} total={PATCH_POUCH_MAX} size="sm" />
-            </div>
-            <div className="kp-ledger2-pips">
-              <span className="kp-rpt-label">BAYS</span>
-              <PipRow filled={run.boostSlots} total={BOOST_SLOTS_MAX} size="sm" />
-            </div>
+      <span className="kp-ledger2-strip">{"// TODAY, UNBANKED _"}</span>
+      <div className="kp-ledger2-grid">
+        <DataRows
+          slash
+          rows={[
+            { label: "DAY", value: `${shop.day} (${WEEKDAYS[weekdayOf(shop.day)]})` },
+            { label: "JOBS RUN", value: `${day.jobsWon} won / ${day.jobsResolved} run` },
+            { label: "TURNED AWAY", value: String(day.declined) },
+            { label: "HELD PAY", value: `${day.held.credits} cr` },
+            { label: "HELD SALVAGE", value: `${day.held.salvage} sv` },
+            {
+              label: "NEURAL STRAIN",
+              value: (
+                <span className="kp-ledger-strain">
+                  <SegMeter pct={day.strain} segs={16} dur={300} steps={8} />
+                  <em>{day.strain}/100</em>
+                </span>
+              ),
+            },
+          ]}
+        />
+        <div className="kp-ledger2-credit kp-frame-nodes">
+          <Nodes />
+          <span className="kp-rpt-label">BANKED</span>
+          <div className="kp-pay-big">
+            {shop.credits}
+            <i>cr</i>
+          </div>
+          <div className="kp-ledger2-pips">
+            <span className="kp-rpt-label">SALVAGE</span>
+            <em className="kp-ledger2-sv">{shop.salvage} sv</em>
+          </div>
+          <div className="kp-ledger2-pips">
+            <span className="kp-rpt-label">POUCH</span>
+            <PipRow filled={shop.patchPouch.length} total={pouchCapFor(shop.repairs)} size="sm" />
+          </div>
+          <div className="kp-ledger2-pips">
+            <span className="kp-rpt-label">REPAIRS</span>
+            <PipRow filled={shop.repairs.length} total={REPAIRS.length} size="sm" />
           </div>
         </div>
-      ) : (
-        <DataRows slash rows={[{ label: "ACTIVE RUN", value: "none" }]} />
-      )}
+      </div>
 
-      <Ruler left="RUN" right="LIFETIME" />
+      <Ruler left="TODAY" right="LIFETIME" />
 
       <span className="kp-ledger2-strip">{"// LIFETIME _"}</span>
       <div className="kp-ledger2-grid">
         <DataRows
           slash
           rows={[
-            { label: "ATTEMPTS", value: String(meta.runCount) },
-            { label: "MACHINE BEATEN", value: String(st.runsWon) },
+            { label: "DAYS CLOSED", value: String(st.daysClosed) },
+            { label: "DAYS LOST", value: String(st.daysBusted) },
+            { label: "TOWER ATTEMPTS", value: String(shop.attempts) },
             { label: "JOBS CLEARED", value: String(st.divesCleared) },
             { label: "DIVES LOST", value: String(st.divesLost) },
-            { label: "SCANS RUN", value: String(st.scans) },
+            { label: "AUGMENTS OWNED", value: `${shop.deck.ownedBoosts.length}/${boosts}` },
             {
               label: "MOST USED MODE",
               value: mode ? `${MODE_LABEL[mode.key as OppMode] ?? mode.key} x${mode.n}` : "none yet",
@@ -168,7 +175,7 @@ export function LedgerContent({ meta, run }: { meta: MetaState; run: RunState | 
         </div>
       </div>
 
-      <LedgerFoot seedKey={`ledger-${meta.runCount}`} />
+      <LedgerFoot seedKey={`ledger-${shop.day}`} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { sfx } from "../../../game/audio";
 import { DADLOG_CHROME, JournalEntry, visibleJournal } from "../../../game/content/journal";
-import type { MetaState } from "../../../game/save";
+import type { MetaState, ShopState } from "../../../game/save";
 
 /**
  * DAD.LOG as a KP/OS v3 instrument panel (ui-demos/dadlog-v3, cycle
@@ -341,16 +341,16 @@ function DocView({ entry }: { entry: JournalEntry | null }) {
   );
 }
 
-export function DadlogContent({ meta }: { meta: MetaState }) {
+export function DadlogContent({ shop, meta }: { shop: ShopState; meta: MetaState }) {
   const chrome = DADLOG_CHROME;
-  const { unlocked, nextLocked } = visibleJournal(meta);
+  const { unlocked, nextLocked } = visibleJournal(shop, meta);
 
   const allRows: Row[] = useMemo(() => {
     const out: Row[] = unlocked.map((e, i) => ({ entry: e, badge: i + 1 }));
     if (nextLocked) out.push({ entry: null, badge: unlocked.length + 1 });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta.runCount, meta.machineOpened]);
+  }, [shop.repairs.length, shop.attempts, meta.machineOpened]);
 
   const [tab, setTab] = useState<Tab>("ALL");
   const [openKey, setOpenKey] = useState<string | null>(() => {
@@ -392,9 +392,9 @@ export function DadlogContent({ meta }: { meta: MetaState }) {
       ["MOUNT", "READ ONLY"],
       ["SEGMENT", hexGroups(next, 1)],
       ["CHECKSUM", hexGroups(next, 2)],
-      ["PASSES", pad2(meta.runCount)],
+      ["PASSES", pad2(shop.repairs.length)],
     ] as Array<[string, string]>;
-  }, [openRow?.entry?.id, meta.runCount]);
+  }, [openRow?.entry?.id, shop.repairs.length]);
 
   const banks = useMemo(() => {
     const next = seeded("dadvol");

@@ -2,29 +2,22 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sfx } from "../../game/audio";
 import { CUSTOMERS, CustomerProfile } from "../../game/content/customers";
 import { Scene, StoryBeat } from "../../game/content/story";
-import { RunAction } from "../../game/run-reducer";
-import { MetaState } from "../../game/save";
-import { VERSION_LABEL } from "../../game/version";
-import { Btn, Chip, Hero, PhotoCell, Ticks } from "../os/kp-ui";
 
 /**
- * Flow-window surfaces that are not full windows of their own: the story
- * scene player (MORNING.LOG and friends), the idle desk (no run), and the
- * finale gate (BACKROOM.LCK).
+ * The story scene player. Scenes play in the room now (the shell floats
+ * this panel over the scene layer), so the player is a self-contained
+ * instrument panel with no window of its own.
  */
 
 export function customerById(id: string): CustomerProfile {
   return CUSTOMERS.find((c) => c.id === id) ?? CUSTOMERS[0];
 }
 
-type Dispatch = (a: RunAction) => void;
-
 /* ------------------------------------------------------------------ */
 /* Story scene player                                                  */
 /* ------------------------------------------------------------------ */
 
 const SPEAKER_NAME: Record<string, string> = {
-  sister: "RHEA",
   father: "DAD",
   system: "SYSTEM",
   companion: "???",
@@ -126,7 +119,7 @@ export function StoryScene({
             re-animates on every click reads as a glitch. */}
         <div className="ml-mast">
           <div className="ml-mast-l">
-            <span className="ml-eyebrow">{tag ? "MORNING.LOG // DAY START" : "SHOPFRONT // LOG"}</span>
+            <span className="ml-eyebrow">{tag ? "MORNING.LOG // DAY START" : "THE SHOP // LOG"}</span>
             {tag && (
               <div className="ml-numwrap">
                 <span className="ml-unit">{unit}</span>
@@ -177,12 +170,12 @@ export function StoryScene({
             </div>
             <div className="ml-ticks">
               <div className="ml-tick">
-                <span>SPIKE</span>
-                <em>3 TICKETS</em>
+                <span>FEED</span>
+                <em>SHOP CAM</em>
               </div>
               <div className="ml-tick">
                 <span>ON THE BOOK</span>
-                <em>{tag ? `${11 - Number(dayNum || 1)} DAYS` : "10 DAYS"}</em>
+                <em>NO LAST DAY</em>
               </div>
             </div>
           </div>
@@ -219,89 +212,6 @@ export function StoryScene({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Finale gate: BACKROOM.LCK                                           */
-/* ------------------------------------------------------------------ */
-
-export function FinalePre({
-  dispatch,
-  onConfigureKit,
-}: {
-  dispatch: Dispatch;
-  onConfigureKit: () => void;
-}) {
-  return (
-    <div className="kp-finalepre kp-frame-ticks kp-frame-ticks-heavy">
-      <Ticks />
-      <i className="kp-tick3" aria-hidden="true" />
-      <div className="kp-hero-day">
-        <b>DAY</b>
-        <Hero text="10" />
-      </div>
-      <div className="kp-screen-actions">
-        <Btn label="CONFIGURE KIT" variant="ghost" onClick={onConfigureKit} />
-        <Btn
-          label="OPEN THE BACK ROOM"
-          variant="danger"
-          onClick={() => {
-            sfx("claimTick", { bus: "ui" });
-            dispatch({ type: "startFinale" });
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Desktop idle (no active run)                                        */
-/* ------------------------------------------------------------------ */
-
-export function DesktopIdle({
-  meta,
-  dispatch,
-}: {
-  meta: MetaState;
-  dispatch: Dispatch;
-}) {
-  const startSeed = () => {
-    dispatch({ type: "startRun", seed: (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0 });
-  };
-  return (
-    <div className="kp-idle">
-      <div className="kp-idle-art" aria-hidden="true">
-        <PhotoCell
-          src={meta.machineOpened ? "/assets/px/stills/still-open.png" : "/assets/px/stills/still-locked.png"}
-          w={576}
-          h={384}
-        />
-      </div>
-      <h2>KERNEL PANIC</h2>
-      <p className="kp-idle-version">{VERSION_LABEL}</p>
-      {meta.machineOpened ? (
-        <p className="kp-idle-sub">
-          The back room is open now. The shop still takes tickets, if you want the practice.
-        </p>
-      ) : meta.runCount === 0 ? (
-        <p className="kp-idle-sub">Your father's shop. Your name on the ledger. His lock on the back room.</p>
-      ) : (
-        <p className="kp-idle-sub">
-          Attempt {meta.runCount} ended. The machine is still there. It is always still there.
-        </p>
-      )}
-      <div className="kp-idle-stats">
-        <Chip label="ATTEMPTS" value={String(meta.runCount)} />
-        <Chip label="BACK ROOM" value={meta.machineOpened ? "OPEN" : "SEALED"} />
-      </div>
-      <Btn
-        label={meta.runCount === 0 ? "OPEN THE SHOP" : `START ATTEMPT ${meta.runCount + 1}`}
-        variant="signal"
-        onClick={startSeed}
-      />
     </div>
   );
 }

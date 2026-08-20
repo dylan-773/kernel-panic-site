@@ -1,44 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "../../../game/audio";
-import { FINAL_DAY } from "../../../game/content/arc";
 import {
   AUGMENT_BY_ID,
   PRESSURE_STRAIN_PER,
   REDIRECT_STRAIN_PER,
 } from "../../../game/content/kit";
-import { PATCH_POUCH_MAX, shapeClassOf } from "../../../game/patch-cells";
-import type { RunAction } from "../../../game/run-reducer";
-import type { RunState } from "../../../game/save";
+import { pouchCapFor } from "../../../game/content/repairs";
+import { shapeClassOf } from "../../../game/patch-cells";
+import type { DayAction, GameState } from "../../../game/day-reducer";
+import { WEEKDAYS, weekdayOf } from "../../../game/save";
 import { customerById } from "../../game/screens";
 import { clientPrintFor } from "../roster-art";
 import { Teach } from "../../game/teach";
 import { PatchGlyph } from "../../game/patch-glyph";
 
 /**
- * REPAIR.LOG as a KP/OS v3 instrument panel (ui-demos/repair-log-v3, cycle
- * ux-2026-07-31-repair-log-v3). System: ../RULINGS.md.
+ * REPAIR.LOG as a KP/OS v3 instrument panel. The dive result read as a
+ * TRANSACTION. GLANCE ORDER: 1st the bill (CREDITED, BILLED, RECOVERED);
+ * 2nd the verdict slab and the client's own line; 3rd the strain trace.
  *
- * The dive result read as a TRANSACTION. GLANCE ORDER: 1st the bill, whose
- * three cells (CREDITED, BILLED, RECOVERED) are one focal row; 2nd the
- * verdict slab and the client's own line; 3rd the strain trace. The client
- * cam still, the telemetry ticks and the dive log are ambient.
- *
- * THE ALARM is the strain the run has LEFT, armed at or below 35 (the same
- * risk band LOADOUT.CFG uses) and owned by the BILLED cell alone. Not "this
- * ticket billed a lot": an expensive ticket you can afford is not an
- * emergency. Strain severs the run at zero, so the alarm is the distance to
- * zero, and it carries four channels: colour, inverse video, motion, and
- * position on the strain-left meter.
- *
- * CUTS (law 8, recorded in the demo's NOTES): the four boxed telemetry
- * sparklines are gone (four boxes of the same idea, none of which survived
- * being shrunk to the ceiling); their VALUES survive as unboxed gutter
- * ticks. The footer row, the brand plate and its battery pips are cut; the
- * chips moved into the masthead and the advance button rides the cache
- * divider. The patch piece's poster card became the bill's third cell.
+ * Under the day-as-run everything CREDITED here is HELD, not banked: the
+ * pay rides with the player until they close, and the masthead says so.
+ * The augment cache pick is held the same way and becomes permanent the
+ * moment the day banks.
  */
 
-type Dispatch = (a: RunAction) => void;
+type Dispatch = (a: DayAction) => void;
 
 const DROP_LINES: Record<"I" | "L" | "T" | "X", string> = {
   I: "A straight run pulled from the wreck. Two arms, dead opposite.",
@@ -151,9 +138,7 @@ interface DiveShape {
 }
 
 /** The strain trace: a flat pulse line, a spike per trap, a bump per
- * over-par rotation, a wobble tail on a cap win. Trap markers take
- * --r-hazard, so a spike is legible as an EVENT without spending the alarm
- * colour on a readout. */
+ * over-par rotation, a wobble tail on a cap win. */
 function Ecg({ shape }: { shape: DiveShape }) {
   const W = 640;
   const H = 54;
@@ -196,10 +181,7 @@ function Ecg({ shape }: { shape: DiveShape }) {
   );
 }
 
-/** The itemized receipt. Values are --r-line: they are live data, not
- * alarms, and nothing in a receipt is ever allowed to reach for red. THREE
- * rows are reserved whatever the branch actually bills, so a clean sweep, a
- * chip breakdown and a capped bill all leave the cell the same height. */
+/** The itemized receipt. THREE rows are reserved whatever the branch bills. */
 function Receipt({
   rows,
   startDelay,
@@ -232,19 +214,16 @@ function Bracket() {
   );
 }
 
-export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
-  const r = run.lastResult;
+export function ReportContent({ state, dispatch }: { state: GameState; dispatch: Dispatch }) {
+  const { shop, day } = state;
+  const r = day?.lastResult ?? null;
   const reduced = useReducedMotion();
-  const [pendingSwap, setPendingSwap] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   useEffect(() => {
     if (r && r.draft.length > 0) sfx("unlock", { at: 0.3 });
   }, [r]);
-  useEffect(() => {
-    if (r?.picked) setPendingSwap(null);
-  }, [r?.picked]);
 
-  const strainLeft = run.strain;
+  const strainLeft = day?.strain ?? 0;
   const [litStrain, setLitStrain] = useState(0);
   const strainSegs = Math.round((24 * strainLeft) / 100);
   useEffect(() => {
@@ -259,16 +238,12 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
     return () => timers.forEach(clearTimeout);
   }, [strainSegs, reduced]);
 
-  if (!r) return null;
-
-  const job = run.jobs[r.jobIndex];
-  const c = job ? customerById(job.customerId) : null;
-  const baysFull = run.kit.augments.length >= run.boostSlots;
-  const swapOffered =
-    r.picked === null && baysFull && r.draft.some((id) => AUGMENT_BY_ID[id]?.kind === "boost");
+  if (!shop || !day || !r) return null;
+  const cap = pouchCapFor(shop.repairs);
+  const c = customerById(r.customerId);
 
   const shape: DiveShape = {
-    key: `${run.runSeed}-${run.day}-${r.jobIndex}`,
+    key: `${shop.seed}-${shop.day}-${day.jobsResolved}`,
     rounds: Math.max(1, r.rounds ?? 10),
     trapRounds: r.trapRounds ?? [],
     parRounds: r.parRounds ?? [],
@@ -284,8 +259,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
     ]);
   if (r.trapsFired > 0)
     chipRows.push([`${r.trapsFired} trap${r.trapsFired === 1 ? "" : "s"} sprung`, `-${r.trapsFired * 4}`]);
-  // The two split-board terms. Optional on the type so a save written before
-  // the rebill still renders, just without these rows.
   const redirects = r.redirectsTaken ?? 0;
   const pressure = r.pressureRounds ?? 0;
   if (redirects > 0)
@@ -308,16 +281,13 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
   const cappedBill = rawChip > 45;
 
   const payRows: Array<[string, string]> = [];
-  if (r.capWin || r.salvage > 0 || r.cleanRunBonus > 0) {
+  if (r.capWin || r.cleanRunBonus > 0) {
     payRows.push(["ticket rate", `${r.basePay} cr`]);
     if (r.capWin)
-      payRows.push([
-        "reduced rate, you hit the turn cap",
-        `-${r.basePay - (r.pay - r.salvage - r.cleanRunBonus)} cr`,
-      ]);
+      payRows.push(["reduced rate, you hit the turn cap", `-${r.basePay - (r.pay - r.cleanRunBonus)} cr`]);
     if (r.cleanRunBonus > 0) payRows.push(["clean run, trap free to the cap", `+${r.cleanRunBonus} cr`]);
-    if (r.salvage > 0) payRows.push(["salvage, augment cache dry", `+${r.salvage} cr`]);
   }
+  payRows.push(["held until the day closes", "yours at close"]);
 
   /* the RECOVERED cell: clean-run bank first, else the job drop */
   const piece = r.cleanRun
@@ -327,8 +297,9 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
         line:
           r.cleanRun.status === "banked"
             ? `Zero strain billed. Banked a random ${SHAPE_NOUN[shapeClassOf(r.cleanRun.mask)].toLowerCase()}.`
-            : `Zero strain billed. Pouch already holds the maximum of ${PATCH_POUCH_MAX}.`,
-        status: r.cleanRun.status === "banked" ? `BANKED. POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}` : "POUCH FULL",
+            : `Zero strain billed. Pouch already holds the maximum of ${cap}.`,
+        status:
+          r.cleanRun.status === "banked" ? `IN THE POUCH. ${day.pouch.length} OF ${cap}` : "POUCH FULL",
         capped: r.cleanRun.status !== "banked",
         none: false,
       }
@@ -339,10 +310,10 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
           line:
             r.patchDrop.status === "banked"
               ? DROP_LINES[shapeClassOf(r.patchDrop.mask)]
-              : `${SHAPE_NOUN[shapeClassOf(r.patchDrop.mask)]} piece pulled from the wreck, but the pouch already holds the maximum of ${PATCH_POUCH_MAX}. Left on the bench.`,
+              : `${SHAPE_NOUN[shapeClassOf(r.patchDrop.mask)]} piece pulled from the wreck, but the pouch already holds the maximum of ${cap}. Left on the bench.`,
           status:
             r.patchDrop.status === "banked"
-              ? `BANKED. POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}`
+              ? `IN THE POUCH. ${day.pouch.length} OF ${cap}`
               : "LEFT ON THE BENCH",
           capped: r.patchDrop.status !== "banked",
           none: false,
@@ -351,23 +322,19 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
           mask: null as number | null,
           noun: null as string | null,
           line: "Nothing came off this one. The next clean run still banks.",
-          status: `POUCH ${run.patchPouch.length} OF ${PATCH_POUCH_MAX}`,
+          status: `POUCH ${day.pouch.length} OF ${cap}`,
           capped: false,
           none: true,
         };
 
   const freshMask =
     r.cleanRun?.status === "banked" ? r.cleanRun.mask : r.patchDrop?.status === "banked" ? r.patchDrop.mask : null;
-  const freshIndex = freshMask !== null ? run.patchPouch.lastIndexOf(freshMask) : -1;
+  const freshIndex = freshMask !== null ? day.pouch.lastIndexOf(freshMask) : -1;
 
-  const advanceLabel = run.jobsDone.every(Boolean) ? "CLOSE THE DAY" : "NEXT TICKET";
-  const cacheState = r.draft.length === 0 ? "DRY" : r.picked ? "INSTALLED" : "PICK ONE";
+  const cacheState = r.draft.length === 0 ? "DRY" : r.picked ? "HELD" : "PICK ONE";
   const noChoice = r.draft.length === 0;
   const clientPrint = c ? clientPrintFor(c) : null;
 
-  // BILLED owns the alarm, and the flash plate exists ONLY on that cell:
-  // putting one on every numeral would mean --r-warn was present, inert and
-  // at zero opacity, in cells that have no alarm.
   const billCls =
     strainLeft > 70 ? "rl-cell is-ok" : strainLeft <= RISK_BAND ? "rl-cell is-risk" : "rl-cell";
 
@@ -380,18 +347,18 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
             <span className="rl-eyebrow">REPAIR.LOG // TICKET</span>
             <div className="rl-mast-r">
               <span className="kp-chip-pct">
-                <span>DAY</span>
-                <em>{String(Math.min(run.day, FINAL_DAY)).padStart(2, "0")}</em>
+                <span>{WEEKDAYS[weekdayOf(shop.day)]}</span>
+                <em>DAY {shop.day}</em>
               </span>
               <span className="kp-chip-pct">
-                <span>TICKET</span>
+                <span>JOBS TODAY</span>
                 <em>
-                  {run.jobsDone.filter(Boolean).length} OF {run.jobs.length}
+                  {day.jobsWon} OF {day.jobsResolved}
                 </em>
               </span>
               <span className="kp-chip-pct">
-                <span>CREDITS</span>
-                <em>{run.credits}</em>
+                <span>HELD</span>
+                <em>{day.held.credits} CR</em>
               </span>
             </div>
           </div>
@@ -411,9 +378,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
               </span>
             </div>
           </div>
-          {/* the one line of human voice on a page of instrumentation. The
-              measure is reserved at two lines whatever its length, so a
-              short win line and a long one leave the masthead identical. */}
           {c ? (
             <Typed className="rl-quote" text={`"${c.winLine}"`} delay={160} interval={18} />
           ) : (
@@ -421,10 +385,7 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
           )}
         </div>
 
-        {/* Z2 THE CLIENT CAM STILL. The shop camera on the counter caught the
-            handover; what the log files is the CAPTURE, not the feed, so the
-            live furniture (REC light, scan roll, boot wipe) is gone. A report
-            shows evidence, it does not stream. */}
+        {/* Z2 THE CLIENT CAM STILL */}
         <div className="rl-cam" data-feed="color">
           {clientPrint ? (
             <img src={clientPrint} alt="" />
@@ -439,8 +400,8 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
         <aside className="rl-gutter">
           <div className="rl-ticks">
             <div className="rl-tick">
-              <span>RAM FLOW</span>
-              <em>{run.ramPerTurn}/T</em>
+              <span>SALVAGE PULLED</span>
+              <em>+{r.salvage} SV</em>
             </div>
             <div className="rl-tick">
               <span>OVER PAR</span>
@@ -459,26 +420,26 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
             <div className="rl-tick">
               <span>PATCH POUCH</span>
               <em>
-                {run.patchPouch.length} / {PATCH_POUCH_MAX}
+                {day.pouch.length} / {cap}
               </em>
             </div>
             <div className="rl-pouchrow">
-              {run.patchPouch.map((m, i) => (
+              {day.pouch.map((m, i) => (
                 <span key={i} className={i === freshIndex ? "rl-pslot fresh" : "rl-pslot"}>
                   <PatchGlyph mask={m} size={18} />
                 </span>
               ))}
-              {Array.from({ length: PATCH_POUCH_MAX - run.patchPouch.length }).map((_, i) => (
+              {Array.from({ length: Math.max(0, cap - day.pouch.length) }).map((_, i) => (
                 <span key={`e${i}`} className="rl-pslot empty" />
               ))}
             </div>
           </div>
         </aside>
 
-        {/* Z3 THE BILL: the focal zone. Three cells, one line item each. */}
+        {/* Z3 THE BILL */}
         <div className="rl-bill">
           <div className="rl-cell">
-            <span className="rl-cname">{"// CREDITED"}</span>
+            <span className="rl-cname">{"// CREDITED, HELD"}</span>
             <div className="rl-heroline">
               <span className="rl-num">
                 <RollUp target={r.pay} delay={300} />
@@ -492,8 +453,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
           <div className={billCls}>
             <span className="rl-cname">{"// BILLED"}</span>
             <div className="rl-heroline">
-              {/* zero strain billed reads as a VERDICT, not a number, so it
-                  takes the nominal role and the word rather than a numeral */}
               <span className={r.chip === 0 ? "rl-num is-clean" : "rl-num"}>
                 {r.chip === 0 ? "CLEAN" : <RollUp target={-r.chip} delay={360} />}
                 <i className="rl-riskflash" aria-hidden="true" />
@@ -508,8 +467,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
               }
               startDelay={620}
             />
-            {/* the alarm's fourth channel: position on a scale, which
-                survives both a colourblind reader and the CRT layer */}
             <span className="rl-strainbar">
               {Array.from({ length: 24 }).map((_, i) => (
                 <i key={i} className={i < litStrain ? "on" : undefined} />
@@ -518,7 +475,7 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
             <div className="rl-cellfoot">
               <span>STRAIN LEFT</span>
               <em>{strainLeft}</em>
-              <span>{strainLeft <= RISK_BAND ? "SEVERS AT 0" : ""}</span>
+              <span>{strainLeft <= RISK_BAND ? "ZERO LOSES THE DAY" : ""}</span>
             </div>
             <Bracket />
           </div>
@@ -526,7 +483,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
           <div className="rl-cell">
             <span className="rl-cname">{"// RECOVERED"}</span>
             <div className="rl-piece">
-              {/* the empty stage keeps the filled stage's exact footprint */}
               <div className={piece.capped || piece.none ? "rl-piecestage void" : "rl-piecestage"}>
                 {piece.mask !== null && <PatchGlyph mask={piece.mask} size={46} />}
               </div>
@@ -555,7 +511,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
             </div>
             <Ecg shape={shape} />
           </div>
-          {/* the dive log, capped at four lines under the trace it annotates */}
           <div className="rl-log">
             {(log.length > 0 ? log.slice(-4) : ["LINK CLOSED. NO TAP ON FILE."]).map((line, i) => (
               <Typed
@@ -570,10 +525,7 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
           </div>
         </section>
 
-        {/* Z5 THE CACHE: the only thing on this surface that needs a hand.
-            The decline slot is the rail slot OF the draft group, so the
-            choice reads "pick one of the drafts, or skip" rather than a
-            window-level button carrying a zone-level decision. */}
+        {/* Z5 THE CACHE */}
         <section className={noChoice ? "rl-cache no-choice" : "rl-cache"}>
           <div className="rl-div">
             <i />
@@ -588,59 +540,29 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
                 dispatch({ type: "resultNext" });
               }}
             >
-              {advanceLabel}
+              FILE IT
             </button>
           </div>
 
           {!noChoice && (
             <div className="rl-cacherail">
-              {pendingSwap !== null && r.picked === null ? (
-                <button type="button" className="kp-btn2 kp-btn2-ghost" onClick={() => setPendingSwap(null)}>
-                  CANCEL THE SWAP
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={r.picked === null ? "rl-skipcard" : "rl-skipcard skipped"}
-                  disabled={r.picked !== null}
-                  onClick={() => {
-                    sfx("press", { bus: "ui" });
-                    dispatch({ type: "resultNext" });
-                  }}
-                >
-                  SKIP THE DRAFT
-                </button>
-              )}
+              <button
+                type="button"
+                className={r.picked === null ? "rl-skipcard" : "rl-skipcard skipped"}
+                disabled={r.picked !== null}
+                onClick={() => {
+                  sfx("press", { bus: "ui" });
+                  dispatch({ type: "resultNext" });
+                }}
+              >
+                SKIP THE DRAFT
+              </button>
             </div>
           )}
 
           <div className="rl-cachebody">
             {noChoice ? (
-              <p className="rl-dry">Augment cache is dry. Salvage credited instead.</p>
-            ) : pendingSwap !== null && r.picked === null ? (
-              <div className="rl-swap">
-                <h4>EJECT WHICH BOOST FOR {AUGMENT_BY_ID[pendingSwap]?.name}?</h4>
-                <div className="rl-swaprow">
-                  {run.kit.augments.map((id) => {
-                    const a = AUGMENT_BY_ID[id];
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="rl-card"
-                        onClick={() => {
-                          sfx("granted", { bus: "ui" });
-                          dispatch({ type: "pickAugment", id: pendingSwap, replace: id });
-                        }}
-                      >
-                        <span className="rl-kind">EJECT</span>
-                        <strong>{a?.name ?? id}</strong>
-                        <p className="clamped">{a?.desc}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <p className="rl-dry">Augment cache is dry. The catalog is yours already.</p>
             ) : (
               <div className="rl-draft">
                 {r.draft.map((id, i) => {
@@ -648,7 +570,6 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
                   if (!a) return null;
                   const picked = r.picked === id;
                   const dimmed = r.picked !== null && !picked;
-                  const needsSwap = a.kind === "boost" && baysFull;
                   const open = expanded === id;
                   return (
                     <button
@@ -658,36 +579,19 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
                       disabled={r.picked !== null}
                       style={reduced ? undefined : { animationDelay: `${300 + i * 110}ms` }}
                       onClick={() => {
-                        if (needsSwap) {
-                          sfx("press", { bus: "ui" });
-                          setPendingSwap((p) => (p === id ? null : id));
-                          return;
-                        }
                         sfx("granted", { bus: "ui" });
                         dispatch({ type: "pickAugment", id });
                       }}
                     >
-                      <span className="rl-kind">
-                        {a.kind === "config"
-                          ? "CONFIG"
-                          : needsSwap && !picked
-                            ? "BOOST. BAYS FULL, PICK TO SWAP"
-                            : "BOOST"}
-                      </span>
+                      <span className="rl-kind">{a.kind === "config" ? "CONFIG" : "BOOST"}</span>
                       <strong>{a.name}</strong>
-                      {/* clamped to THREE RENDERED LINES by CSS, never by a
-                          character budget: the cards are different widths at
-                          different viewports, and a budget low enough to be
-                          safe everywhere starts hiding effect clauses. */}
                       <p className={open ? undefined : "clamped"}>
                         {a.desc}
                         {a.kind === "config" &&
                           " Unlocks the mode. Your active kit does not change; switch to it in LOADOUT.CFG when you want it."}
+                        {a.kind === "boost" &&
+                          " Held today, yours for good when the day banks. Slot it in LOADOUT.CFG."}
                       </p>
-                      {/* the MORE row is reserved on EVERY card and shown
-                          only where there is more, so a long card and a short
-                          one are the same height. A hidden remainder always
-                          carries a visible control. */}
                       <span className="rl-morerow">
                         <span
                           role="button"
@@ -707,7 +611,7 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
                           {open ? "LESS" : "MORE"}
                         </span>
                       </span>
-                      {picked && <em className="rl-stamp">INSTALLED</em>}
+                      {picked && <em className="rl-stamp">HELD</em>}
                     </button>
                   );
                 })}
@@ -717,8 +621,8 @@ export function ReportContent({ run, dispatch }: { run: RunState; dispatch: Disp
         </section>
       </div>
       <Teach id="strain-chip" />
+      <Teach id="held-banked" />
       <Teach id="augment-draft" signals={{ draftOffered: r.draft.length > 0 }} />
-      <Teach id="boost-swap" signals={{ swapOffered }} />
     </div>
   );
 }

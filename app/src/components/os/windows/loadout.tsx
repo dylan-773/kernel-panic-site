@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "../../../game/audio";
-import { FINAL_DAY } from "../../../game/content/arc";
 import {
   ATTACK_MODE_LABEL,
   ATTACK_WIDTH,
@@ -14,34 +13,35 @@ import {
   defendModeDesc,
   scanDesc,
 } from "../../../game/content/kit";
-import { PATCH_POUCH_MAX, shapeClassOf } from "../../../game/patch-cells";
-import type { GameState, RunAction } from "../../../game/run-reducer";
-import type { RunState } from "../../../game/save";
+import { pouchCapFor } from "../../../game/content/repairs";
+import { shapeClassOf } from "../../../game/patch-cells";
+import type { DayAction, GameState } from "../../../game/day-reducer";
+import {
+  WEEKDAYS,
+  ownedAttackModes,
+  ownedBoostsNow,
+  ownedDefendModes,
+  weekdayOf,
+} from "../../../game/save";
 import { tip } from "../../../game/content/teaching";
+import { Teach } from "../../game/teach";
 import { TapTip } from "../../game/tap-tip";
 import { PatchGlyph } from "../../game/patch-glyph";
 import { Btn } from "../kp-ui";
 
 /**
- * LOADOUT.CFG as a KP/OS v3 instrument panel. This is the system's
- * REFERENCE IMPLEMENTATION (ui-demos/loadout-eva, cycle
- * ux-2026-07-31-loadout-eva, five review rounds); ../RULINGS.md was
- * written from it, so anything here that looks like a house rule IS the
- * house rule.
+ * LOADOUT.CFG as a KP/OS v3 instrument panel: the system's REFERENCE
+ * IMPLEMENTATION. GLANCE ORDER: 1st the trinity's three hero numerals;
+ * 2nd the READY slab; 3rd NEURAL STRAIN.
  *
- * GLANCE ORDER: 1st the trinity's three hero numerals (RANGE, WIDTH,
- * WIDTH) at ~116px against 19px body; 2nd the READY slab; 3rd NEURAL
- * STRAIN. The operator rig, the ticks and the footline are deliberately
- * ambient and are demoted rather than merely moved.
- *
- * Colour carries state: amber structure, ivory data, GREEN nominal (READY,
- * and the live mode), RED risk (strain in the low band only, which also
- * floods inverse video and MOVES, so the signal is never colour alone),
- * cyan for the camera feed, which is a different signal class from bench
- * data. With no data-scheme every role collapses onto the single v2 accent.
+ * Under the day-as-run the deck gained the game's new central decision:
+ * unlocks are permanent, BAYS are not. The catalog fills up and stays full;
+ * the bays hold the subset that actually dives. A filled bay unslots on
+ * click, the pool below slots on click, and diving never waits on any of
+ * it.
  */
 
-type Dispatch = (a: RunAction) => void;
+type Dispatch = (a: DayAction) => void;
 
 const SHAPE_NOUN: Record<"I" | "L" | "T" | "X", string> = {
   I: "Straight",
@@ -53,11 +53,6 @@ const SHAPE_NOUN: Record<"I" | "L" | "T" | "X", string> = {
 const ATTACK_MODES_ALL: AttackMode[] = ["redirect", "armHalt", "armSiphon"];
 const DEFEND_MODES_ALL: DefendMode[] = ["purge", "lock", "ward"];
 
-/** Never truncate at a fixed character count. The budget sits above the
- * longest shipped description (redirect at tier 3, 122 chars) and only ever
- * cuts on a sentence boundary, so armHalt and armSiphon can never lose
- * their effect clause behind an ellipsis. The MORE affordance is reserved
- * for future content that exceeds it. */
 const DESC_BUDGET = 150;
 function clampDesc(text: string): { shown: string; rest: string } {
   if (text.length <= DESC_BUDGET) return { shown: text, rest: "" };
@@ -78,7 +73,6 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** Count-up number that climbs to `target` after `delay` ms. */
 function CountUp({
   target,
   delay = 0,
@@ -88,7 +82,6 @@ function CountUp({
   target: number;
   delay?: number;
   interval?: number;
-  /** Voice instrumentLock as this numeral settles (hero numerals only). */
   lock?: boolean;
 }) {
   const reduced = useReducedMotion();
@@ -122,8 +115,6 @@ function CountUp({
   return <>{v}</>;
 }
 
-/** Program desc line, typed and scoped PER PROGRAM: switching one mode must
- * not restart the other two panels' typewriters. */
 function ProgDesc({ text, delay = 0 }: { text: string; delay?: number }) {
   const reduced = useReducedMotion();
   const [n, setN] = useState(0);
@@ -185,7 +176,6 @@ function TierMeter({ tier, sweepBase }: { tier: number; sweepBase: number }) {
   );
 }
 
-/** One instrument bay of the trinity: the focal zone of the surface. */
 function ProgPanel({
   name,
   unit,
@@ -251,8 +241,6 @@ function ProgPanel({
         </div>
       )}
       <ProgDesc text={desc} delay={descDelay} />
-      {/* heavy corner brackets, scoped to the trinity only: applying them
-          everywhere destroys the emphasis they exist to create */}
       <i className="lo-bracket" aria-hidden="true">
         <i />
       </i>
@@ -261,7 +249,7 @@ function ProgPanel({
 }
 
 /** The live BENCH FEED clock (the same shop clock as the desk widget). */
-function FeedClock({ day }: { day: number }) {
+function FeedClock({ day, weekday }: { day: number; weekday: string }) {
   const [tsec, setTsec] = useState(22 * 3600 + 41 * 60 + 7);
   useEffect(() => {
     const t = setInterval(() => setTsec((s) => (s + 1) % 86400), 1000);
@@ -272,7 +260,7 @@ function FeedClock({ day }: { day: number }) {
   const ss = String(tsec % 60).padStart(2, "0");
   return (
     <span className="lo-clock">
-      DAY 0{day} {hh}:{mm}:{ss}
+      {weekday} {day} {hh}:{mm}:{ss}
     </span>
   );
 }
@@ -285,11 +273,8 @@ export function LoadoutContent({
   state: GameState;
   dispatch: Dispatch;
   onOpenSolder: () => void;
-  slot: number;
 }) {
-  const run = state.run as RunState;
-  const meta = state.meta;
-  const kit = run.kit;
+  const { meta, shop, day } = state;
   const reduced = useReducedMotion();
   const [ready, setReady] = useState(false);
   const [feedOn, setFeedOn] = useState(reduced);
@@ -306,7 +291,7 @@ export function LoadoutContent({
     };
   }, []);
 
-  const strain = run.strain;
+  const strain = day?.strain ?? 0;
   const strainSegs = useMemo(() => Math.round((30 * strain) / 100), [strain]);
   const [litStrain, setLitStrain] = useState(0);
   useEffect(() => {
@@ -321,9 +306,16 @@ export function LoadoutContent({
     return () => timers.forEach(clearTimeout);
   }, [strainSegs, reduced]);
 
-  // The one readout whose COLOUR carries state: nominal above 70, watch
-  // between, risk at or below 35. In the risk band it also floods inverse
-  // video and blinks, because colour is never the only channel.
+  if (!shop || !day) return null;
+  const deck = shop.deck;
+  const ownedA = ownedAttackModes(shop, day);
+  const ownedD = ownedDefendModes(shop, day);
+  const ownedBoosts = ownedBoostsNow(shop, day);
+  const pool = ownedBoosts.filter((id) => !deck.slotted.includes(id));
+  const evening = day.phase === "evening" || day.phase === "sunday";
+  const pouch = evening ? shop.patchPouch : day.pouch;
+  const cap = pouchCapFor(shop.repairs);
+
   const strainCls =
     strain > 70 ? "lo-sub lo-strain-ok" : strain <= 35 ? "lo-sub lo-strain-low" : "lo-sub";
 
@@ -333,64 +325,49 @@ export function LoadoutContent({
         {/* Z1 MASTHEAD */}
         <div className="lo-mast">
           <div className="lo-mast-l">
-            <span className="lo-eyebrow">LOADOUT.CFG // DIVE KIT</span>
+            <span className="lo-eyebrow">LOADOUT.CFG // THE NEURAL DECK</span>
             <div className="lo-slabwrap">
               <span className={ready ? "lo-slab kp-frame-ticks is-ready" : "lo-slab kp-frame-ticks"}>
                 <i className="kp-tick2" />
                 {ready ? "READY" : "LOADING"}
               </span>
               <span className="lo-line">
-                {ready ? "DIVE KIT READY." : "DIVE KIT IS LOADING..."}
+                {ready ? "THE DECK IS READY. IT WAS HIS." : "THE DECK IS LOADING..."}
                 {!ready && <span className="kp-boot-cursor">_</span>}
               </span>
             </div>
           </div>
           <div className="lo-mast-r">
             <span className="kp-chip-pct">
-              <span>RUN</span>
-              <em>{String(run.runNumber).padStart(2, "0")}</em>
-            </span>
-            <span className="kp-chip-pct">
-              <span>DAY</span>
-              <em>{String(Math.min(run.day, FINAL_DAY)).padStart(2, "0")}</em>
+              <span>{WEEKDAYS[weekdayOf(shop.day)]}</span>
+              <em>DAY {shop.day}</em>
             </span>
             <span className="kp-chip-pct">
               <span>CREDITS</span>
-              <em>{run.credits}</em>
+              <em>{shop.credits}</em>
             </span>
-            {run.screen === "analyze" && (
+            <span className="kp-chip-pct">
+              <span>SALVAGE</span>
+              <em>{shop.salvage}</em>
+            </span>
+            {day.phase === "open" && day.ticket && (
               <Btn
                 label="DIVE"
                 variant="signal"
                 onClick={() => {
                   sfx("claimTick", { bus: "ui" });
-                  dispatch({ type: "startDuel" });
-                }}
-              />
-            )}
-            {run.screen === "finalePre" && (
-              <Btn
-                label="DIVE INTO THE MACHINE"
-                variant="signal"
-                onClick={() => {
-                  sfx("claimTick", { bus: "ui" });
-                  dispatch({ type: "startFinale" });
+                  dispatch({ type: "startDive" });
                 }}
               />
             )}
           </div>
         </div>
 
-        {/* Z2 GUTTER: lowest glance priority, deliberately ambient. It sits
-            BESIDE the trinity because it is shorter than the instrument
-            bays, so its height is free; giving it a row of its own cost the
-            reference build 112px. */}
+        {/* Z2 GUTTER */}
         <aside className="lo-gutter">
           <div className="lo-gutter-top">
             <span className="lo-spine">OPERATOR RIG</span>
             <div className={feedOn ? "lo-mon on" : "lo-mon"} data-feed="color">
-              {/* a CROP at 1:1, never a downscale: resampling the dither
-                  mushes the dots to grey noise */}
               <img
                 src="/assets/px/window/v3/loadout-feed-color.png"
                 alt=""
@@ -403,7 +380,7 @@ export function LoadoutContent({
                 <i />
                 REC
               </span>
-              <FeedClock day={Math.min(run.day, FINAL_DAY)} />
+              <FeedClock day={shop.day} weekday={WEEKDAYS[weekdayOf(shop.day)]} />
               <i className="shade" aria-hidden="true" />
             </div>
           </div>
@@ -423,57 +400,57 @@ export function LoadoutContent({
             <div className="lo-tick">
               <span>RAM PER TURN</span>
               <em>
-                <CountUp target={run.ramPerTurn} delay={740} />
+                <CountUp target={deck.ramPerTurn} delay={740} />
               </em>
             </div>
           </div>
         </aside>
 
-        {/* Z3 TRINITY: the focal zone */}
+        {/* Z3 TRINITY */}
         <div className="lo-trinity">
           <ProgPanel
             name="SCAN.EXE"
             unit="RANGE"
-            tier={kit.scanTier}
-            value={Math.min(SCAN_RANGE[kit.scanTier], 99)}
+            tier={deck.scanTier}
+            value={Math.min(SCAN_RANGE[deck.scanTier], 99)}
             sweepBase={260}
             descDelay={480}
-            desc={scanDesc(kit.scanTier)}
+            desc={scanDesc(deck.scanTier)}
           />
           <ProgPanel
             name="ATTACK.EXE"
             unit="WIDTH"
-            tier={kit.attackTier}
-            value={ATTACK_WIDTH[kit.attackTier]}
+            tier={deck.attackTier}
+            value={ATTACK_WIDTH[deck.attackTier]}
             sweepBase={460}
             descDelay={640}
-            desc={attackModeDesc(kit.attackMode, kit.attackTier)}
+            desc={attackModeDesc(deck.attackMode, deck.attackTier)}
             modes={{
               all: ATTACK_MODES_ALL,
-              owned: kit.attackModes,
+              owned: ownedA,
               labels: ATTACK_MODE_LABEL,
-              active: kit.attackMode,
+              active: deck.attackMode,
               set: (m) => dispatch({ type: "setAttackMode", mode: m as AttackMode }),
               tipFor: (m, owned) =>
-                owned ? attackModeDesc(m as AttackMode, kit.attackTier) : tip("modeLocked"),
+                owned ? attackModeDesc(m as AttackMode, deck.attackTier) : tip("modeLocked"),
             }}
           />
           <ProgPanel
             name="DEFEND.EXE"
             unit="WIDTH"
-            tier={kit.defendTier}
-            value={DEFEND_WIDTH[kit.defendTier]}
+            tier={deck.defendTier}
+            value={DEFEND_WIDTH[deck.defendTier]}
             sweepBase={660}
             descDelay={800}
-            desc={defendModeDesc(kit.defendMode, kit.defendTier)}
+            desc={defendModeDesc(deck.defendMode, deck.defendTier)}
             modes={{
               all: DEFEND_MODES_ALL,
-              owned: kit.defendModes,
+              owned: ownedD,
               labels: DEFEND_MODE_LABEL,
-              active: kit.defendMode,
+              active: deck.defendMode,
               set: (m) => dispatch({ type: "setDefendMode", mode: m as DefendMode }),
               tipFor: (m, owned) =>
-                owned ? defendModeDesc(m as DefendMode, kit.defendTier) : tip("modeLocked"),
+                owned ? defendModeDesc(m as DefendMode, deck.defendTier) : tip("modeLocked"),
             }}
           />
         </div>
@@ -492,38 +469,43 @@ export function LoadoutContent({
                   <strong>BOOST BAYS</strong>
                 </TapTip>
                 <span className="kp-pip-row">
-                  {Array.from({ length: run.boostSlots }).map((_, p) => (
+                  {Array.from({ length: deck.slots }).map((_, p) => (
                     <i
                       key={p}
                       className={
-                        p < kit.augments.length ? "kp-pip-sq kp-pip-sq-sm kp-pip-on" : "kp-pip-sq kp-pip-sq-sm"
+                        p < deck.slotted.length ? "kp-pip-sq kp-pip-sq-sm kp-pip-on" : "kp-pip-sq kp-pip-sq-sm"
                       }
                     />
                   ))}
                 </span>
                 <em>
-                  {kit.augments.length} / {run.boostSlots}
+                  {deck.slotted.length} / {deck.slots}
                 </em>
               </div>
               <div className="lo-baywrap">
                 {Array.from({ length: 5 }).map((_, i) => {
-                  const aug = i < kit.augments.length ? AUGMENT_BY_ID[kit.augments[i]] : null;
-                  const future = i >= run.boostSlots;
+                  const aug = i < deck.slotted.length ? AUGMENT_BY_ID[deck.slotted[i]] : null;
+                  const future = i >= deck.slots;
                   const cls = aug
                     ? "lo-bay lo-has"
                     : future
                       ? "lo-bay lo-bay-empty lo-bay-future"
                       : "lo-bay lo-bay-empty";
                   const bay = (
-                    <div
+                    <button
+                      type="button"
                       className={reduced ? cls : `${cls} kp-slot-anim`}
                       style={reduced ? undefined : { animationDelay: `${760 + i * 90}ms` }}
+                      disabled={!aug}
+                      onClick={() => {
+                        if (!aug) return;
+                        sfx("tick", { bus: "ui" });
+                        dispatch({ type: "unslotBoost", id: aug.id });
+                      }}
                     >
-                      {/* a FILLED bay says permanently that it holds more
-                          than its name; empty and future bays hold nothing,
-                          so they carry no marker */}
-                      <span>{aug ? aug.name : "EMPTY BAY"}</span>
-                    </div>
+                      <span>{aug ? aug.name : future ? "NO BAY" : "EMPTY BAY"}</span>
+                      {aug && <em className="lo-bayaction">UNSLOT</em>}
+                    </button>
                   );
                   return aug ? (
                     <TapTip key={i} text={aug.desc}>
@@ -534,18 +516,53 @@ export function LoadoutContent({
                   );
                 })}
               </div>
+              {/* The pool: everything owned and benched. Equal footprint: an
+                  empty pool keeps its row. */}
+              <div className="lo-pool">
+                <span className="lo-poollabel">{"// THE POOL _"}</span>
+                {pool.length === 0 ? (
+                  <span className="lo-poolempty">
+                    {ownedBoosts.length === 0
+                      ? "NOTHING OWNED YET. CLEARED JOBS DRAFT AUGMENTS."
+                      : "EVERYTHING OWNED IS SLOTTED."}
+                  </span>
+                ) : (
+                  pool.map((id) => {
+                    const a = AUGMENT_BY_ID[id];
+                    if (!a) return null;
+                    const room = deck.slotted.length < deck.slots;
+                    return (
+                      <TapTip key={id} text={a.desc}>
+                        <button
+                          type="button"
+                          className="lo-poolitem"
+                          disabled={!room}
+                          onClick={() => {
+                            sfx("tick", { bus: "ui" });
+                            dispatch({ type: "slotBoost", id });
+                          }}
+                        >
+                          {a.name}
+                          <em className="lo-bayaction">{room ? "SLOT" : "BAYS FULL"}</em>
+                        </button>
+                      </TapTip>
+                    );
+                  })
+                )}
+              </div>
+              <Teach id="deck-slots" signals={{ swapOffered: ownedBoosts.length > deck.slots }} />
             </div>
 
             <div className="lo-sub">
               <div className="lo-subhead">
                 <strong>PATCH POUCH</strong>
                 <em>
-                  {run.patchPouch.length} / {PATCH_POUCH_MAX}
+                  {pouch.length} / {cap}
                 </em>
               </div>
               <button type="button" className="lo-pouchbtn" onClick={onOpenSolder} title="Open SOLDER.BAY">
                 <div className="lo-rack">
-                  {run.patchPouch.map((m, i) => (
+                  {pouch.map((m, i) => (
                     <span
                       key={i}
                       className={reduced ? undefined : "kp-slot-anim"}
@@ -555,21 +572,18 @@ export function LoadoutContent({
                       <span>{SHAPE_NOUN[shapeClassOf(m)]}</span>
                     </span>
                   ))}
-                  {Array.from({ length: PATCH_POUCH_MAX - run.patchPouch.length }).map((_, i) => (
+                  {Array.from({ length: Math.max(0, cap - pouch.length) }).map((_, i) => (
                     <span key={`h${i}`} aria-hidden="true">
                       <span className="lo-hole" />
                     </span>
                   ))}
                 </div>
-                {/* the four line paragraph is cut; the pointer sentence is
-                    not (law 8: prose that is taught elsewhere reduces to a
-                    chip plus its pointer) */}
                 <div className="lo-pouchfoot">
                   <span className="kp-chip-pct">
                     <span>PLACE COST</span>
                     <em>2 RAM</em>
                   </span>
-                  <span className="lo-pointer">CRAFT AT THE BENCH: SOLDER.BAY.</span>
+                  <span className="lo-pointer">WELD AT THE BENCH: SOLDER.BAY.</span>
                 </div>
               </button>
             </div>
@@ -593,7 +607,7 @@ export function LoadoutContent({
                   ))}
                 </span>
               </div>
-              <span className="lo-strainnote">SEVERS AT ZERO.</span>
+              <span className="lo-strainnote">ZERO LOSES THE DAY.</span>
             </div>
           </div>
         </section>

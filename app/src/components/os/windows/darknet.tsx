@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { sfx } from "../../../game/audio";
-import { PATCH_POUCH_MAX, armCount, shapeClassOf } from "../../../game/patch-cells";
-import { darkPullPrice, type RunAction } from "../../../game/run-reducer";
-import type { RunState } from "../../../game/save";
+import { pouchCapFor } from "../../../game/content/repairs";
+import { armCount, shapeClassOf } from "../../../game/patch-cells";
+import { darkPullPrice, type DayAction, type GameState } from "../../../game/day-reducer";
 import { PatchGlyph } from "../../game/patch-glyph";
+
+/** What the channel can see of the shop: the evening market's own ledger. */
+interface DarknetView {
+  live: boolean;
+  credits: number;
+  patchPouch: number[];
+  pouchCap: number;
+  darkBuys: number;
+  lastDarkBuy: number | null;
+  price: number;
+}
 
 /**
  * DARKNET.LNK: the gray market as a real dark-web CLI (ported from the
@@ -11,7 +22,7 @@ import { PatchGlyph } from "../../game/patch-glyph";
  * channel fresh: an unregistered-channel handshake over three relay hops,
  * the vendor banner, then a live prompt. Trades are typed or clicked; the
  * chips type themselves into the prompt so the mouse-only path is complete.
- * BUY runs escrow, dispatches buyDarkPatch (the reducer owns the roll), and
+ * BUY runs escrow, dispatches buyDarkPull (the reducer owns the roll), and
  * reveals the piece the reducer actually rolled with a decelerating shape
  * scramble. The market is only live during the night phase; the link drops
  * on screen change and EXIT burns the channel and closes the window.
@@ -29,7 +40,7 @@ import { PatchGlyph } from "../../game/patch-glyph";
  * chrome is DARKNET's identity and is deliberately unmapped to any role.
  */
 
-type Dispatch = (a: RunAction) => void;
+type Dispatch = (a: DayAction) => void;
 
 const SHAPE_NOUN: Record<"I" | "L" | "T" | "X", string> = {
   I: "STRAIGHT",
@@ -133,7 +144,7 @@ function datarow(label: string, value: string): HTMLElement {
 }
 
 interface EngineHooks {
-  runRef: { current: RunState | null };
+  runRef: { current: DarknetView | null };
   dispatch: Dispatch;
   onExit: () => void;
   setRoute: (txt: string, dead: boolean) => void;
@@ -246,9 +257,10 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
   };
 
   const pouchStrip = (pouch: number[]): void => {
+    const cap = hooks.runRef.current?.pouchCap ?? 5;
     instant(() => {
       const row = el("div", "o-pouch kp-pouch-row2");
-      for (let i = 0; i < PATCH_POUCH_MAX; i++) {
+      for (let i = 0; i < cap; i++) {
         if (i < pouch.length) {
           const slot = el("span", "kp-pouch-slot");
           slot.appendChild(glyphSvg(pouch[i], 20));
@@ -257,7 +269,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
           row.appendChild(el("span", "kp-pouch-slot empty"));
         }
       }
-      row.appendChild(el("i", "o-pouchtag", `POUCH ${pouch.length}/${PATCH_POUCH_MAX}`));
+      row.appendChild(el("i", "o-pouchtag", `POUCH ${pouch.length}/${cap}`));
       push(row);
     });
   };
@@ -287,7 +299,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
 
   const cmdHelp = (): void => {
     const r = hooks.runRef.current;
-    const price = r ? darkPullPrice(r) : 0;
+    const price = r ? r.price : 0;
     instant(() => {
       const box = el("div", "o-help");
       const rows: Array<[string, string]> = [
@@ -309,7 +321,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
 
   const cmdList = (): void => {
     const r = hooks.runRef.current;
-    const price = r ? darkPullPrice(r) : 0;
+    const price = r ? r.price : 0;
     typeLine("t-ven", "Tonight, same as every night. One crate.", 15);
     instant(() => {
       const card = el("div", "o-card kp-frame-ticks");
@@ -343,16 +355,16 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
   const cmdPouch = (): void => {
     const r = hooks.runRef.current;
     pouchStrip(r ? r.patchPouch : []);
-    if (r && r.patchPouch.length >= PATCH_POUCH_MAX) {
+    if (r && r.patchPouch.length >= r.pouchCap) {
       typeLine("t-ven", "That is a full bag. I admire the appetite.", 15);
     }
   };
 
   const cmdBuy = (): void => {
     const r = hooks.runRef.current;
-    if (!r || r.screen !== "upgrade") return;
-    const cost = darkPullPrice(r);
-    if (r.patchPouch.length >= PATCH_POUCH_MAX) {
+    if (!r || !r.live) return;
+    const cost = r.price;
+    if (r.patchPouch.length >= r.pouchCap) {
       typeLine("t-ven", "Dealer is not a storage locker. Pouch is full. Come back with room.", 13);
       return;
     }
@@ -378,7 +390,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
       row.appendChild(amt);
       push(row);
       const pay = () => {
-        hooks.dispatch({ type: "buyDarkPatch" });
+        hooks.dispatch({ type: "buyDarkPull" });
         done();
       };
       if (reduced) {
@@ -491,7 +503,7 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
     else if (cmd === "haggle")
       typeLine(
         "t-ven",
-        `The price climbs by the day. Tonight it is ${r ? darkPullPrice(r) : 0} cr. Tomorrow it is more.`,
+        `The price climbs by the day. Tonight it is ${r ? r.price : 0} cr. Tomorrow it is more.`,
         13,
       );
     else if (EGGS[cmd]) typeLine("t-ven", EGGS[cmd], 15);
@@ -578,20 +590,33 @@ function makeEngine(log: HTMLElement, hooks: EngineHooks) {
 type Engine = ReturnType<typeof makeEngine>;
 
 export function DarknetContent({
-  run,
+  state,
   dispatch,
   onExit,
 }: {
-  run: RunState | null;
+  state: GameState;
   dispatch: Dispatch;
   onExit: () => void;
 }) {
-  const open = run !== null && run.screen === "upgrade";
+  const { shop, day } = state;
+  const routerUp = !!shop && shop.repairs.includes("onionRouter");
+  const open = !!shop && !!day && day.phase === "evening" && routerUp;
+  const run: DarknetView | null = shop
+    ? {
+        live: open,
+        credits: shop.credits,
+        patchPouch: shop.patchPouch,
+        pouchCap: pouchCapFor(shop.repairs),
+        darkBuys: shop.darkBuys,
+        lastDarkBuy: shop.lastDarkBuy,
+        price: darkPullPrice(shop),
+      }
+    : null;
 
   const logRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engRef = useRef<Engine | null>(null);
-  const runRef = useRef<RunState | null>(run);
+  const runRef = useRef<DarknetView | null>(run);
   runRef.current = run;
   const dispatchRef = useRef<Dispatch>(dispatch);
   dispatchRef.current = dispatch;
@@ -823,7 +848,7 @@ export function DarknetContent({
                 <>
                   {/* tonight's price: the largest glyphs on the page and the
                       only numeral that takes --r-data */}
-                  <span className="dn-num">{run ? darkPullPrice(run) : "--"}</span>
+                  <span className="dn-num">{run ? run.price : "--"}</span>
                   <span className="dn-unit">CR</span>
                 </>
               )}
@@ -876,7 +901,7 @@ export function DarknetContent({
           <span key={`p${pouchN}`} className="kp-chip-pct chip-flash">
             <span>POUCH</span>
             <em>
-              {pouchN}/{PATCH_POUCH_MAX}
+              {pouchN}/{run ? run.pouchCap : 5}
             </em>
           </span>
         </div>

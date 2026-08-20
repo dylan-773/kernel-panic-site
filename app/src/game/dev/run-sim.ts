@@ -1,41 +1,39 @@
 /**
- * End-to-end run-layer harness. Not imported by app code.
+ * End-to-end day-layer harness. Not imported by app code.
  * Run from app/: bun run src/game/dev/run-sim.ts
  *
  * Drives the FULL game loop through the real reducers exactly as the UI
- * would: meta hydration, run start, opener scene, tutorial, ten days of
- * pick-analyze-build-dive, augment drafts, upgrades, finale, story scenes
- * on run end. Asserts state-machine invariants at every step.
+ * would: hydration, the first boot at the tower, open days of face-to-face
+ * intake and dives, closing, the evening economy, Sundays and back room
+ * attempts. Asserts state-machine invariants at every step, including the
+ * one property the day-as-run design invents and cannot ship without:
+ *
+ *   A BUSTED DAY LEAVES THE SHOP LAYER UNTOUCHED.
+ *
+ * Strain zero costs the held column and the evening, and nothing else.
  */
 
-import { dayDuelConfig, finaleConfig, tutorialConfig, FINAL_DAY } from "../content/arc";
 import { CUSTOMERS } from "../content/customers";
 import { AUGMENTS, MODE_TELL } from "../content/kit";
+import { REPAIRS, pouchCapFor } from "../content/repairs";
+import { backroomConfig, tierDuelConfig, tutorialConfig, tierBandFor } from "../content/tiers";
 import {
-  dayOpenScene,
-  finaleWinScene,
-  runEndScene,
-  runOpenerScene,
-  tutorialIntroScene,
-  tutorialOutroScene,
-  DAY_LINES,
-} from "../content/story";
-import { endPlayerTurn } from "../duel-actions";
-import { createDuel, mixSeed } from "../duel-setup";
-import { BASE_KIT, DuelState, isJunction } from "../duel-types";
-import { goalLive } from "../duel-power";
-import { botPlayTurn, oppStep } from "../opponent";
-import {
-  DAY_REST_REGEN,
+  DayAction,
   GameState,
   darkPullPrice,
+  dayReducer,
+  deckCost,
+  genCustomer,
   ownsAugment,
-  runReducer,
-  RunAction,
-  slotCost,
-} from "../run-reducer";
-import { PATCH_POUCH_MAX, armUnionCraft, isPatchMask } from "../patch-cells";
-import { duelKitOf, EMPTY_META } from "../save";
+} from "../day-reducer";
+import { endPlayerTurn } from "../duel-actions";
+import { goalLive } from "../duel-power";
+import { createDuel, mixSeed } from "../duel-setup";
+import { BASE_KIT, DuelState, isJunction } from "../duel-types";
+import { botPlayTurn, oppStep } from "../opponent";
+import { armUnionCraft, isPatchMask } from "../patch-cells";
+import { EMPTY_META, ShopState, duelKitOf, isSunday, weekdayName } from "../save";
+import { kittedPlayTurn } from "./kitted-bot";
 
 let dispatchCount = 0;
 
@@ -43,16 +41,38 @@ function must(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`INVARIANT: ${msg} (after ${dispatchCount} dispatches)`);
 }
 
-function d(state: GameState, action: RunAction): GameState {
+function d(state: GameState, action: DayAction): GameState {
   dispatchCount++;
-  return runReducer(state, action);
+  return dayReducer(state, action);
 }
 
-function playDuelToEnd(duel: DuelState): {
+/** The shop-layer fields a working day must never touch. */
+function progressionSnapshot(shop: ShopState): string {
+  return JSON.stringify({
+    day: shop.day,
+    credits: shop.credits,
+    salvage: shop.salvage,
+    patchPouch: shop.patchPouch,
+    repairs: shop.repairs,
+    darkBuys: shop.darkBuys,
+    visits: shop.visits,
+    deck: {
+      ramPerTurn: shop.deck.ramPerTurn,
+      scanTier: shop.deck.scanTier,
+      attackTier: shop.deck.attackTier,
+      defendTier: shop.deck.defendTier,
+      slots: shop.deck.slots,
+      ownedBoosts: shop.deck.ownedBoosts,
+      attackModes: shop.deck.attackModes,
+      defendModes: shop.deck.defendModes,
+    },
+  });
+}
+
+function playDuelToEnd(duel: DuelState, kitted: boolean): {
   won: boolean;
   chip: number;
   capWin: boolean;
-  gridlockWin: boolean;
   overRotations: number;
   trapsFired: number;
   redirectsTaken: number;
@@ -61,22 +81,19 @@ function playDuelToEnd(duel: DuelState): {
   let guard = 0;
   while (duel.phase === "playing" && guard++ < 4000) {
     if (duel.turn === "player") {
-      botPlayTurn(duel, "player", 0.95);
+      if (kitted) kittedPlayTurn(duel);
+      else botPlayTurn(duel, "player", 0.95);
       if (duel.phase === "playing" && duel.turn === "player") endPlayerTurn(duel);
     } else {
       oppStep(duel);
     }
   }
   must(duel.phase !== "playing", "duel terminated");
-  // Every ending has to be nameable.
   must(duel.winKind !== null, "finished duel records how it ended");
   must(
     duel.endReason !== null && duel.endReason.length > 0,
     `finished duel (${duel.winKind}) carries a player-facing reason`,
   );
-  // Split-board invariants: a "goal" verdict means the winner's own signal is
-  // actually reaching their own goal column, and the loser's is not. This is
-  // the check that would catch a settle crediting the wrong board.
   if (duel.winKind === "goal") {
     const winner = duel.phase === "won" ? "player" : "opp";
     must(goalLive(duel.boards[winner]), "a goal verdict means the winner's goal is lit");
@@ -85,7 +102,6 @@ function playDuelToEnd(duel: DuelState): {
       "only one side's goal is lit at the end",
     );
   }
-  // BUILT is permanent: nothing in a dive may un-build a node.
   for (const side of ["player", "opp"] as const) {
     const b = duel.boards[side];
     must(
@@ -97,7 +113,6 @@ function playDuelToEnd(duel: DuelState): {
     won: duel.phase === "won",
     chip: duel.strainChip,
     capWin: duel.winKind === "cap",
-    gridlockWin: false,
     overRotations: Math.max(0, duel.econ.player.rotations - duel.par),
     trapsFired: duel.econ.player.trapsFired,
     redirectsTaken: duel.econ.player.redirectsTaken,
@@ -105,242 +120,329 @@ function playDuelToEnd(duel: DuelState): {
   };
 }
 
-function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
-  let s: GameState = { meta: startMeta, run: null };
-  s = d(s, { type: "startRun", seed: mixSeed(0xabc, runIndex) });
-  must(s.run !== null, "run started");
-  must(s.run!.screen === "opener", "opener first");
-  must(runOpenerScene(s.run!.runNumber).beats.length > 0, "opener scene has beats");
+/** Synthetic dive verdict for machine-level tests: fast and exact. */
+function syntheticVerdict(s: GameState, won: boolean, chip: number) {
+  return {
+    type: "duelFinished" as const,
+    won,
+    chip,
+    capWin: false,
+    pouchLeft: [...s.day!.pouch],
+    overRotations: 0,
+    trapsFired: 0,
+    redirectsTaken: 0,
+    pressureRounds: 0,
+    scans: 1,
+    attackCasts: 1,
+    defendCasts: 0,
+  };
+}
 
-  s = d(s, { type: "storyDone" });
-  if (s.run!.runNumber === 1) {
-    must(s.run!.screen === "tutIntro", "run 1 goes to the tutorial intro");
-    must(tutorialIntroScene().beats.length >= 2, "tutorial intro has beats");
-    s = d(s, { type: "storyDone" });
-    must(s.run!.screen === "tutorial", "tutorial after its intro");
-    const t = createDuel(tutorialConfig(), mixSeed(s.run!.runSeed, 0, 0), BASE_KIT, s.run!.ramPerTurn);
-    const res = playDuelToEnd(t);
-    must(!res.won, "tutorial is unwinnable");
-    s = d(s, { type: "tutorialDone" });
-    must(s.run!.screen === "tutOutro", "tutorial outro after the seal");
-    must(tutorialOutroScene().beats.length >= 2, "tutorial outro has beats");
-    s = d(s, { type: "storyDone" });
+/** Take one job through a REAL dive; returns whether it was won. */
+function realDive(sRef: { s: GameState }): boolean {
+  const { s } = sRef;
+  const shop = s.shop!;
+  const day = s.day!;
+  const ticket = day.ticket!;
+  must(!!MODE_TELL[ticket.dominant], "analyze tell exists");
+  must(CUSTOMERS.some((c) => c.id === ticket.customerId), "customer exists");
+  const duel = createDuel(
+    tierDuelConfig(ticket.tier, ticket.dominant, ticket.kitSeed),
+    mixSeed(shop.seed, shop.day, day.jobsResolved),
+    duelKitOf(shop, day),
+    shop.deck.ramPerTurn,
+  );
+  must(duel.par > 0, "par computed for every dive");
+  const res = playDuelToEnd(duel, true);
+  const pouchLeft = duel.patchPouch;
+  {
+    // The dive can only SPEND pieces: what is left is a sub-multiset of
+    // what went in.
+    const before = [...day.pouch];
+    for (const m of pouchLeft) {
+      const at = before.indexOf(m);
+      must(at !== -1, "dive never mints pieces");
+      before.splice(at, 1);
+    }
   }
-  must(s.run!.screen === "dayOpen", "morning scene before the board");
-  must(dayOpenScene(s.run!.day).beats.length >= 2, "day-open scene has beats");
-  s = d(s, { type: "storyDone" });
-  must(s.run!.screen === "day", "day board reached");
+  const strainBefore = day.strain;
+  const heldBefore = day.held.credits;
+  sRef.s = d(s, {
+    type: "duelFinished",
+    won: res.won,
+    chip: res.chip,
+    capWin: res.capWin,
+    pouchLeft,
+    overRotations: res.overRotations,
+    trapsFired: res.trapsFired,
+    redirectsTaken: res.redirectsTaken,
+    pressureRounds: res.pressureRounds,
+    scans: duel.econ.player.scansCast,
+    attackCasts: duel.econ.player.attacksCast,
+    defendCasts: duel.econ.player.defendsCast,
+  });
+  const after = sRef.s;
+  if (res.won && after.day!.phase === "result") {
+    const lr = after.day!.lastResult!;
+    must(lr.won, "result records the win");
+    must(after.day!.strain <= strainBefore, "strain never rises on a win");
+    must(after.day!.held.credits === heldBefore + lr.pay, "the pay is HELD, not banked");
+    const banked: number[] = [];
+    if (lr.cleanRun?.status === "banked") banked.push(lr.cleanRun.mask);
+    if (lr.patchDrop?.status === "banked") banked.push(lr.patchDrop.mask);
+    must(
+      after.day!.pouch.length === pouchLeft.length + banked.length,
+      "day pouch is dive leftovers plus banked channels exactly",
+    );
+    must(after.day!.pouch.every(isPatchMask), "every held piece is a valid mask");
+    const draft = lr.draft;
+    must(new Set(draft).size === draft.length, "draft never repeats a card");
+    for (const id of draft) {
+      const def = AUGMENTS.find((a) => a.id === id);
+      must(!!def, "draft ids exist");
+      must(!ownsAugment(after.shop!, after.day!, id), "draft never offers owned augments");
+    }
+  }
+  if (!res.won) {
+    must(
+      after.day!.phase === "open" || after.day!.phase === "bust",
+      "a loss returns to the floor",
+    );
+    if (after.day!.phase === "open") {
+      must(after.day!.strain === strainBefore, "a loss bills no strain");
+      must(after.day!.ticket === null, "the failed ticket goes home");
+    }
+  }
+  return res.won;
+}
 
-  let guard = 0;
-  let picks = 0;
-  while (s.run && guard++ < 200) {
-    const run = s.run;
-    if (run.screen === "day") {
-      const idx = run.jobsDone.findIndex((x) => !x);
-      must(idx !== -1, "day board always has an open job");
-      must(DAY_LINES.length >= 9, "day lines exist");
-      s = d(s, { type: "pickJob", index: idx });
-      must(s.run!.screen === "analyze", "analyze after pick");
-      const job = s.run!.jobs[idx];
-      must(!!MODE_TELL[job.dominant], "analyze tell exists");
-      must(CUSTOMERS.some((c) => c.id === job.customerId), "customer exists");
-      s = d(s, { type: "startDuel" });
-      must(s.run!.screen === "duel", "dive launches straight from analyze");
-      const duel = createDuel(
-        dayDuelConfig(run.day, job.dominant, job.tier, job.kitSeed),
-        mixSeed(run.runSeed, run.day, idx),
-        duelKitOf(s.run!.kit, s.run!.patchPouch),
-        s.run!.ramPerTurn,
-      );
-      must(duel.par > 0, "par computed for every dive");
-      const res = playDuelToEnd(duel);
-      const pouchLeft = duel.patchPouch;
-      const strainBefore = s.run!.strain;
-      const pouchBefore = s.run!.patchPouch;
-      // The dive can only SPEND pieces: what is left is a sub-multiset of
-      // what went in.
-      {
-        const before = [...pouchBefore];
-        for (const m of pouchLeft) {
-          const at = before.indexOf(m);
-          must(at !== -1, "dive never mints pieces");
-          before.splice(at, 1);
+/** Play one full working day; returns true if it busted. */
+function playWorkingDay(
+  sRef: { s: GameState },
+  opts: { jobs: number; forceBust: boolean; real: boolean; buyEverything: boolean },
+): boolean {
+  let s = sRef.s;
+  must(s.day!.phase === "morning", "working day opens on the morning line");
+  s = d(s, { type: "storyDone" });
+  must(s.day!.phase === "open", "the shop opens");
+  sRef.s = s;
+
+  let busted = false;
+  for (let j = 0; j < opts.jobs && !busted; j++) {
+    s = sRef.s;
+    const shop = s.shop!;
+    const day = s.day!;
+    // Determinism: the same state generates the same customer.
+    const a = genCustomer(shop, day);
+    const b = genCustomer(shop, day);
+    must(JSON.stringify(a) === JSON.stringify(b), "customer generation is deterministic");
+    const band = tierBandFor(day.jobsResolved, shop.repairs.length);
+    s = d(s, { type: "customerArrived" });
+    must(s.day!.waiting !== null, "a customer walked in");
+    const w = s.day!.waiting!;
+    must(w.tier >= band[0] && w.tier <= band[1], "arrival tier inside the band");
+    must(w.tier >= 1 && w.tier <= 5, "tier in range");
+    // Decline path exercised on every third arrival.
+    if (j % 3 === 2) {
+      const declined = s.day!.declined;
+      s = d(s, { type: "declineJob" });
+      must(s.day!.waiting === null, "declined customer leaves");
+      must(s.day!.declined === declined + 1, "decline counted");
+      must(s.day!.ticket === null, "no ticket from a decline");
+      s = d(s, { type: "customerArrived" });
+      must(s.day!.waiting !== null, "the next customer arrives after a decline");
+    }
+    s = d(s, { type: "acceptJob" });
+    must(s.day!.ticket !== null, "accepted job is on the spike");
+    must(s.day!.waiting === null, "the counter clears on accept");
+    s = d(s, { type: "startDive" });
+    must(s.day!.phase === "duel", "the dive takes the screen");
+    sRef.s = s;
+
+    if (opts.forceBust && j === opts.jobs - 1) {
+      sRef.s = d(sRef.s, syntheticVerdict(sRef.s, true, 999));
+      must(sRef.s.day!.phase === "bust", "strain zero loses the day");
+      must(sRef.s.day!.strain === 0, "bust zeroes strain");
+      busted = true;
+    } else if (opts.real) {
+      const won = realDive(sRef);
+      if (sRef.s.day!.phase === "bust") {
+        busted = true;
+      } else if (won && sRef.s.day!.phase === "result") {
+        const draft = sRef.s.day!.lastResult!.draft;
+        if (draft.length > 0) {
+          const pick = draft[j % draft.length];
+          const before = sRef.s;
+          sRef.s = d(sRef.s, { type: "pickAugment", id: pick });
+          must(ownsAugment(sRef.s.shop!, sRef.s.day!, pick), "picked augment owned (held)");
+          must(
+            progressionSnapshot(before.shop!) === progressionSnapshot(sRef.s.shop!),
+            "picking an augment never touches shop progression",
+          );
         }
+        sRef.s = d(sRef.s, { type: "resultNext" });
+        must((sRef.s.day!.phase as string) === "open", "back to the floor after the result");
       }
-      s = d(s, {
-        type: "duelFinished",
-        won: res.won,
-        chip: res.chip,
-        capWin: res.capWin,
-        gridlockWin: res.gridlockWin,
-        pouchLeft,
-        overRotations: res.overRotations,
-        trapsFired: res.trapsFired,
-        redirectsTaken: res.redirectsTaken,
-        pressureRounds: res.pressureRounds,
-        scans: duel.econ.player.scansCast,
-        attackCasts: duel.econ.player.attacksCast,
-        defendCasts: duel.econ.player.defendsCast,
-      });
-      if (res.won && s.run) {
-        // Conservation at the run layer: end pouch = pouchLeft + banked
-        // channels reported on the result, cap respected, all masks valid.
-        const lr = s.run.lastResult!;
-        const banked: number[] = [];
-        if (lr.cleanRun?.status === "banked") banked.push(lr.cleanRun.mask);
-        if (lr.patchDrop?.status === "banked") banked.push(lr.patchDrop.mask);
-        must(
-          s.run.patchPouch.length === pouchLeft.length + banked.length,
-          "pouch is dive leftovers plus banked channels exactly",
-        );
-        must(s.run.patchPouch.length <= PATCH_POUCH_MAX, "pouch capped after banking");
-        must(s.run.patchPouch.every(isPatchMask), "every held piece is a valid mask");
-        if (lr.cleanRun?.status === "capped" || lr.patchDrop?.status === "capped") {
-          must(pouchLeft.length + banked.length === PATCH_POUCH_MAX, "capped means the pouch was full");
-        }
-        must(
-          !(res.chip === 0 && s.run.kit.augments.includes("cleanRun")) || lr.cleanRun !== null,
-          "clean run always reports on a chip-zero win",
-        );
-      }
-      if (!res.won) {
-        must(s.run!.screen === "runEnd", "loss ends run");
-        must(s.run!.strain === 0, "loss zeroes strain");
+    } else {
+      const won = j % 2 === 0;
+      sRef.s = d(sRef.s, syntheticVerdict(sRef.s, won, won ? 6 : 0));
+      if (sRef.s.day!.phase === "bust") {
+        // Chips accumulate across days; a thin morning can genuinely bust.
+        busted = true;
+      } else if (won) {
+        must(sRef.s.day!.phase === "result", "result after a synthetic win");
+        sRef.s = d(sRef.s, { type: "resultNext" });
       } else {
-        must(s.run!.strain <= strainBefore, "strain never rises on win");
+        must(sRef.s.day!.phase === "open", "floor after a synthetic loss");
+      }
+    }
+  }
+
+  if (busted) {
+    // The evening is forfeit: nothing in it may execute.
+    let sb = sRef.s;
+    const snap = progressionSnapshot(sb.shop!);
+    sb = d(sb, { type: "buyRepair", id: REPAIRS[0].id });
+    sb = d(sb, { type: "buyPatchHeal" });
+    sb = d(sb, { type: "buyDarkPull" });
+    sb = d(sb, { type: "buyDeck", kind: "ram" });
+    must(progressionSnapshot(sb.shop!) === snap, "a busted evening sells nothing");
+    must(sb.day!.phase === "bust", "bust holds until sleep");
+    sRef.s = sb;
+    return true;
+  }
+
+  // Close: everything held banks, exactly.
+  let sc = sRef.s;
+  const held = sc.day!.held;
+  const shopBefore = sc.shop!;
+  const dayPouch = sc.day!.pouch;
+  sc = d(sc, { type: "closeShop" });
+  must(sc.day!.phase === "evening", "closing opens the evening");
+  must(sc.shop!.credits === shopBefore.credits + held.credits, "held credits banked exactly");
+  must(sc.shop!.salvage === shopBefore.salvage + held.salvage, "held salvage banked exactly");
+  must(
+    sc.shop!.patchPouch.length ===
+      Math.min(dayPouch.length, pouchCapFor(shopBefore.repairs)),
+    "day pouch banked to cap",
+  );
+  for (const id of held.boosts) {
+    must(sc.shop!.deck.ownedBoosts.includes(id), "held boosts banked into the deck pool");
+  }
+  must(sc.day!.held.credits === 0, "the held column empties into the bank");
+
+  if (opts.buyEverything) {
+    // The evening economy: repairs, deck parts, patches, the darknet.
+    for (const r of REPAIRS) {
+      const before = sc.shop!;
+      sc = d(sc, { type: "buyRepair", id: r.id });
+      const bought = sc.shop!.repairs.includes(r.id) && !before.repairs.includes(r.id);
+      if (bought) {
+        must(sc.shop!.credits === before.credits - r.cost, "repair paid for exactly");
         must(
-          s.run!.screen === "result" || s.run!.screen === "runEnd",
-          "result or bled-out end after win",
+          !r.stageAfter || sc.shop!.repairs.includes(r.stageAfter),
+          "staged repairs in order",
         );
-        if (s.run!.screen === "result") {
-          const draft = s.run!.lastResult!.draft;
-          must(new Set(draft).size === draft.length, "draft never repeats a card");
-          for (const id of draft) {
-            const def = AUGMENTS.find((a) => a.id === id);
-            must(!!def, "draft ids exist");
-            must(!ownsAugment(s.run!.kit, id), "draft never offers owned augments");
-            if (def?.requires?.kind === "augment") {
-              must(ownsAugment(s.run!.kit, def.requires.id), "requires-gated cards only appear once their driver is owned");
-            }
-            if (def?.requires?.kind === "pouch") {
-              must(s.run!.patchPouch.length > 0, "pouch-gated cards only appear while holding a piece");
-            }
+      }
+    }
+    for (const kind of ["ram", "scanTier", "attackTier", "defendTier", "slot"] as const) {
+      const before = sc.shop!;
+      const cost = deckCost(before, kind);
+      sc = d(sc, { type: "buyDeck", kind });
+      if (cost !== null && before.salvage >= cost) {
+        must(sc.shop!.salvage === before.salvage - cost, "deck part paid in salvage");
+      } else {
+        must(sc.shop!.salvage === before.salvage, "no deck part past the ceiling");
+      }
+    }
+    must(sc.shop!.deck.ramPerTurn <= 9, "RAM capped");
+    must(sc.shop!.deck.slots <= 5, "bays capped");
+    {
+      const before = sc.shop!;
+      const strainBefore = sc.day!.strain;
+      sc = d(sc, { type: "buyPatchHeal" });
+      if (before.credits >= 60 && strainBefore < 100) {
+        must(sc.day!.strain === Math.min(100, strainBefore + 12), "night patch heals 12");
+        must(sc.shop!.credits === before.credits - 60, "night patch paid for");
+      }
+    }
+    {
+      const before = sc.shop!;
+      const cost = darkPullPrice(before);
+      sc = d(sc, { type: "buyDarkPull" });
+      if (
+        before.repairs.includes("onionRouter") &&
+        before.credits >= cost &&
+        before.patchPouch.length < pouchCapFor(before.repairs)
+      ) {
+        must(sc.shop!.patchPouch.length === before.patchPouch.length + 1, "dark pull banked");
+        must(isPatchMask(sc.shop!.patchPouch[before.patchPouch.length]), "dark pull is a valid piece");
+        must(sc.shop!.credits === before.credits - cost, "dark pull paid for");
+      } else {
+        must(sc.shop!.patchPouch.length === before.patchPouch.length, "no pull without the router");
+      }
+    }
+    {
+      // Weld the first legal pair in the banked pouch, if any.
+      const pouch = sc.shop!.patchPouch;
+      outer: for (let i = 0; i < pouch.length; i++) {
+        for (let j = i + 1; j < pouch.length; j++) {
+          const union = armUnionCraft(pouch[i], pouch[j]);
+          if (union === null) continue;
+          const before = sc.shop!;
+          sc = d(sc, { type: "weldPieces", a: i, b: j });
+          if (before.repairs.includes("solderBay")) {
+            must(sc.shop!.patchPouch.length === before.patchPouch.length - 1, "weld joins two into one");
+            must(sc.shop!.patchPouch.includes(union), "weld is the union of its inputs");
+            must(sc.shop!.credits === before.credits, "the weld is free");
+          } else {
+            must(sc.shop!.patchPouch.length === before.patchPouch.length, "no weld without the bay");
           }
-          if (draft.length > 0) {
-            const pick = draft[picks++ % draft.length];
-            const def = AUGMENTS.find((a) => a.id === pick)!;
-            const boosts = s.run!.kit.augments;
-            const full = def.kind === "boost" && boosts.length >= s.run!.boostSlots;
-            if (full) {
-              const eject = boosts[0];
-              s = d(s, { type: "pickAugment", id: pick, replace: eject });
-              must(!s.run!.kit.augments.includes(eject), "swap ejects the named boost");
-              must(s.run!.lastResult!.replaced === eject, "swap records the ejected boost");
-            } else {
-              s = d(s, { type: "pickAugment", id: pick });
-            }
-            must(ownsAugment(s.run!.kit, pick), "picked augment owned");
-            must(s.run!.lastResult!.picked === pick, "pick recorded");
-            must(
-              s.run!.kit.augments.length <= s.run!.boostSlots || s.run!.boostSlots === 0,
-              "boosts never exceed the bays",
-            );
-          }
+          break outer;
         }
       }
-    } else if (run.screen === "result") {
-      const strainBefore = run.strain;
-      s = d(s, { type: "resultNext" });
-      if (s.run!.screen === "upgrade") {
-        must(
-          s.run!.strain === Math.min(100, strainBefore + DAY_REST_REGEN),
-          "night rest restores strain",
-        );
-        must(s.run!.lastRegen === s.run!.strain - strainBefore, "lastRegen recorded");
+    }
+  }
+
+  sRef.s = sc;
+  return false;
+}
+
+function playSunday(sRef: { s: GameState }, attempt: boolean, winIt: boolean): void {
+  let s = sRef.s;
+  must(s.day!.phase === "sunday", "Sunday phase on the seventh day");
+  must(isSunday(s.shop!.day), "the calendar agrees it is Sunday");
+  // No customers on Sunday: the arrival machine refuses structurally.
+  const before = s.day!;
+  s = d(s, { type: "customerArrived" });
+  must(s.day!.encounterIndex === before.encounterIndex, "no customers arrive on Sunday");
+  if (attempt) {
+    const attemptsBefore = s.shop!.attempts;
+    s = d(s, { type: "attemptBackroom" });
+    must(s.day!.phase === "duel", "the tower accepts the attempt");
+    must(s.shop!.attempts === attemptsBefore + 1, "the attempt is counted");
+    if (winIt) {
+      s = d(s, syntheticVerdict(s, true, 0));
+      must(s.day!.phase === "finaleWin" || s.day!.phase === "sunday", "win or spar resolves");
+      if (s.day!.phase === "finaleWin") {
+        must(s.meta.machineOpened, "the machine opens on a fair win");
+        s = d(s, { type: "storyDone" });
+        must((s.day!.phase as string) === "sunday", "the game continues after the win");
       }
-    } else if (run.screen === "dayOpen") {
-      must(dayOpenScene(run.day).beats.length >= 2, "day-open scene has beats");
-      s = d(s, { type: "storyDone" });
-      must(
-        s.run!.screen === (run.day === FINAL_DAY ? "finalePre" : "day"),
-        "morning scene lands on the board",
-      );
-    } else if (run.screen === "upgrade") {
-      // Exercise the shop: a blind darknet pull when affordable, then a
-      // craft when a legal pair sits in the pouch, then close.
-      const creditsBefore = run.credits;
-      const pouchBefore = run.patchPouch.length;
-      const pullCost = darkPullPrice(run);
-      s = d(s, { type: "buyDarkPatch" });
-      if (creditsBefore >= pullCost && pouchBefore < PATCH_POUCH_MAX) {
-        must(s.run!.patchPouch.length === pouchBefore + 1, "dark patch bought");
-        must(isPatchMask(s.run!.patchPouch[pouchBefore]), "dark patch is a valid piece");
-        must(s.run!.credits === creditsBefore - pullCost, "dark patch paid for");
-        must(s.run!.lastDarkBuy === s.run!.patchPouch[pouchBefore], "reveal shows the rolled piece");
-      }
-      must(s.run!.patchPouch.length <= PATCH_POUCH_MAX, "pouch capped");
-      {
-        // A bay when affordable: credits debit, cap respected.
-        const slots = s.run!.boostSlots;
-        const credits = s.run!.credits;
-        const bayCost = slotCost(s.run!);
-        s = d(s, { type: "buySlot" });
-        if (bayCost !== null && credits >= bayCost) {
-          must(s.run!.boostSlots === slots + 1, "bay installed");
-          must(s.run!.credits === credits - bayCost, "bay paid for");
-        } else {
-          must(s.run!.boostSlots === slots, "no bay past the cap or without credits");
-        }
-        must(s.run!.boostSlots >= 3 && s.run!.boostSlots <= 5, "bays stay in range");
-      }
-      {
-        // Craft the first legal pair, if any: two pieces become their union.
-        const pouch = s.run!.patchPouch;
-        outer: for (let i = 0; i < pouch.length; i++) {
-          for (let j = i + 1; j < pouch.length; j++) {
-            const union = armUnionCraft(pouch[i], pouch[j]);
-            if (union === null) continue;
-            const lenBefore = pouch.length;
-            s = d(s, { type: "craftPatch", a: i, b: j });
-            must(s.run!.patchPouch.length === lenBefore - 1, "craft turns two pieces into one");
-            must(s.run!.patchPouch.includes(union), "crafted piece is the union of its inputs");
-            break outer;
-          }
-        }
-      }
-      const strainBeforeClose = s.run!.strain;
-      const cycle = ["ram", "scan", "attack", "defend"] as const;
-      // The night is two steps now: picking must NOT end the day, so the
-      // shop rows stay spendable after the upgrade is chosen.
-      must(s.run!.nightPick === null, "night opens undecided");
-      s = d(s, { type: "closeNight" });
-      must(s.run!.day === run.day, "night cannot close without a pick");
-      s = d(s, { type: "chooseUpgrade", pick: cycle[guard % 4] });
-      must(s.run!.day === run.day, "choosing an upgrade does not end the night");
-      must(s.run!.nightPick === cycle[guard % 4], "night pick recorded");
-      s = d(s, { type: "buyPatch" });
-      s = d(s, { type: "closeNight" });
-      must(s.run!.nightPick === null, "night pick cleared on close");
-      must(s.run!.day > run.day, "day advanced after closing the night");
-      must(s.run!.kit.scanTier <= 3 && s.run!.kit.attackTier <= 3, "tiers capped");
-      must(s.run!.strain >= strainBeforeClose, "day close never drains strain");
-      must(s.run!.strain <= 100, "strain capped at 100");
-    } else if (run.screen === "finalePre") {
-      s = d(s, { type: "startFinale" });
-      must(s.run!.screen === "duel", "finale dives directly");
+    } else {
+      // Play the real backroom config so the hardest board is exercised.
       const duel = createDuel(
-        finaleConfig(),
-        mixSeed(run.runSeed, FINAL_DAY, 9),
-        duelKitOf(s.run!.kit, s.run!.patchPouch),
-        s.run!.ramPerTurn,
+        backroomConfig(),
+        mixSeed(s.shop!.seed, s.shop!.day, 99),
+        duelKitOf(s.shop!, s.day!),
+        s.shop!.deck.ramPerTurn,
       );
-      const res = playDuelToEnd(duel);
+      const res = playDuelToEnd(duel, true);
       s = d(s, {
         type: "duelFinished",
         won: res.won,
         chip: res.chip,
         capWin: res.capWin,
-        gridlockWin: res.gridlockWin,
         pouchLeft: duel.patchPouch,
         overRotations: res.overRotations,
         trapsFired: res.trapsFired,
@@ -350,41 +452,137 @@ function playRun(runIndex: number, startMeta: GameState["meta"]): GameState {
         attackCasts: duel.econ.player.attacksCast,
         defendCasts: duel.econ.player.defendsCast,
       });
-      if (res.won) {
-        must(s.run!.screen === "finaleWin", "finale win screen");
+      if (s.day!.phase === "finaleWin") {
         must(s.meta.machineOpened, "machine opened");
-        must(finaleWinScene().beats.length >= 5, "finale scene has beats");
-      } else {
-        must(s.run!.screen === "runEnd", "finale loss ends run");
+        s = d(s, { type: "storyDone" });
       }
-    } else if (run.screen === "runEnd" || run.screen === "finaleWin") {
-      must(runEndScene(run.runNumber).beats.length > 0, "run end scene has beats");
-      s = d(s, { type: "storyDone" });
-      must(s.run === null, "run cleared after final story");
-    } else {
-      throw new Error(`unexpected screen ${run.screen}`);
+      must(s.day!.phase === "sunday", "a lost attempt returns to the quiet shop");
+      const again = d(s, { type: "attemptBackroom" });
+      must(again.day!.phase === "sunday", "one attempt per Sunday");
+      s = again;
     }
   }
-  must(s.run === null, "run completed");
-  return s;
+  sRef.s = s;
 }
 
-let meta = { ...EMPTY_META };
-let finaleWins = 0;
-const RUNS = 40;
-for (let i = 0; i < RUNS; i++) {
-  const before = meta.machineOpened;
-  const endState = playRun(i, meta);
-  meta = endState.meta;
-  if (meta.machineOpened && !before) finaleWins++;
+function sleepAndAdvance(sRef: { s: GameState }): void {
+  const before = sRef.s;
+  const dayBefore = before.shop!.day;
+  const strainBefore = before.day!.strain;
+  sRef.s = d(before, { type: "sleep" });
+  const s = sRef.s;
+  must(s.shop!.day === dayBefore + 1, "sleep advances the calendar");
+  must(s.shop!.strain === Math.min(100, strainBefore + 10), "sleep restores 10 strain");
+  must(s.day!.strain === s.shop!.strain, "the new day wakes at the carried strain");
+  must(
+    s.day!.phase === (isSunday(s.shop!.day) ? "sunday" : "morning"),
+    "the week has a shape: six working days, then Sunday",
+  );
+  must(
+    JSON.stringify(s.day!.pouch) === JSON.stringify(s.shop!.patchPouch),
+    "the day pouch opens as a copy of the bank",
+  );
+  must(s.day!.held.credits === 0 && s.day!.held.salvage === 0, "nothing is held at dawn");
+  must(s.day!.ticket === null && s.day!.waiting === null, "the counter opens clear");
+  for (const id of s.shop!.deck.slotted) {
+    must(s.shop!.deck.ownedBoosts.includes(id), "slotted boosts all owned after sleep");
+  }
 }
-must(meta.runCount === RUNS, "run count tracked");
-console.log(
-  `OK: ${RUNS} full runs, ${dispatchCount} dispatches, machineOpened=${meta.machineOpened}, finaleWins=${finaleWins}`,
-);
-// Story scenes render for every run number we can reach.
-for (let n = 1; n <= 12; n++) {
-  must(runOpenerScene(n).beats.length > 0, `opener ${n}`);
-  must(runEndScene(n).beats.length > 0, `ender ${n}`);
+
+/* ------------------------------------------------------------------ */
+
+if (import.meta.main) {
+  // --- First boot: the tower, the grade, the shut door. -------------
+  let state: GameState = { meta: { ...EMPTY_META }, shop: null, day: null };
+  state = d(state, { type: "hydrate", meta: { ...EMPTY_META }, shop: null, day: null });
+  state = d(state, { type: "newGame", seed: 0xbeef });
+  must(state.shop !== null && state.day !== null, "a new game builds both layers");
+  must(state.day!.phase === "tutIntro", "first boot opens at the tower");
+  state = d(state, { type: "storyDone" });
+  must(state.day!.phase === "tutorial", "the scripted dive follows the intro");
+  {
+    const t = createDuel(tutorialConfig(), mixSeed(state.shop!.seed, 0, 0), BASE_KIT, 5);
+    const res = playDuelToEnd(t, false);
+    must(!res.won, "the tutorial is unwinnable");
+  }
+  state = d(state, { type: "tutorialDone" });
+  must(state.day!.phase === "tutOutro", "the door shuts");
+  must(state.shop!.attempts === 1, "the first boot counts as attempt one");
+  must(state.day!.strain === 100, "the grade bills nothing");
+  state = d(state, { type: "storyDone" });
+  must(state.day!.phase === "morning", "the shop opens anyway");
+  must(weekdayName(state.shop!.day) === "MON", "the calendar starts on a Monday");
+
+  const sRef = { s: state };
+
+  // --- Week one: real dives, close every day, buy the shop back. ----
+  let busts = 0;
+  let realWins = 0;
+  for (let dayN = 1; dayN <= 6; dayN++) {
+    const bust = playWorkingDay(sRef, {
+      jobs: 2 + (dayN % 2),
+      forceBust: false,
+      real: true,
+      buyEverything: true,
+    });
+    if (bust) busts++;
+    else realWins += sRef.s.shop ? 1 : 0;
+    sleepAndAdvance(sRef);
+  }
+  playSunday(sRef, true, false);
+  sleepAndAdvance(sRef);
+
+  // --- The bust property, exercised on a fresh Monday. --------------
+  {
+    const snap = progressionSnapshot(sRef.s.shop!);
+    const bust = playWorkingDay(sRef, {
+      jobs: 3,
+      forceBust: true,
+      real: false,
+      buyEverything: false,
+    });
+    must(bust, "the forced bust busts");
+    must(
+      progressionSnapshot(sRef.s.shop!) === snap,
+      "A BUSTED DAY LEAVES THE SHOP LAYER UNTOUCHED",
+    );
+    const dayBefore = sRef.s.shop!.day;
+    sleepAndAdvance(sRef);
+    must(sRef.s.shop!.day === dayBefore + 1, "tomorrow opens normally");
+    const after = JSON.parse(progressionSnapshot(sRef.s.shop!));
+    const before = JSON.parse(snap);
+    before.day = after.day; // the calendar is the one thing that moved
+    must(JSON.stringify(before) === JSON.stringify(after), "banked survives the bust, exactly");
+    must(sRef.s.meta.stats.daysBusted >= 1, "the bust is tallied");
+  }
+
+  // --- Grind to a full catalog and a rich shop (synthetic, fast). ---
+  for (let week = 0; week < 6; week++) {
+    for (let wd = 0; wd < 6; wd++) {
+      if (sRef.s.day!.phase !== "morning") break;
+      playWorkingDay(sRef, { jobs: 3, forceBust: false, real: false, buyEverything: true });
+      sleepAndAdvance(sRef);
+    }
+    if (sRef.s.day!.phase === "sunday") {
+      playSunday(sRef, week === 5, week === 5);
+      sleepAndAdvance(sRef);
+    }
+  }
+  must(sRef.s.meta.machineOpened, "the machine opened on the scripted win");
+  must(sRef.s.shop!.repairs.length === REPAIRS.length, "every repair is eventually buyable");
+  must(sRef.s.shop!.deck.ramPerTurn === 9, "the deck reaches full RAM");
+  must(sRef.s.shop!.deck.slots === 5, "the deck reaches full bays");
+
+  // --- Post-win: the game keeps going. -------------------------------
+  playWorkingDay(sRef, { jobs: 2, forceBust: false, real: true, buyEverything: false });
+  sleepAndAdvance(sRef);
+
+  console.log(
+    `OK: ${dispatchCount} dispatches, day ${sRef.s.shop!.day}, ` +
+      `credits ${sRef.s.shop!.credits}, salvage ${sRef.s.shop!.salvage}, ` +
+      `repairs ${sRef.s.shop!.repairs.length}/${REPAIRS.length}, ` +
+      `boosts ${sRef.s.shop!.deck.ownedBoosts.length}, ` +
+      `busted ${sRef.s.meta.stats.daysBusted}, closed ${sRef.s.meta.stats.daysClosed}, ` +
+      `machineOpened ${sRef.s.meta.machineOpened}`,
+  );
 }
-console.log("OK: story scenes cover run numbers 1-12");

@@ -1,37 +1,34 @@
 import { AttackMode, AUGMENT_BY_ID, AugmentId, DefendMode, OppMode, Tier } from "./content/kit";
-import { DuelKit, PIECE_X } from "./duel-types";
-import { PATCH_POUCH_MAX, isPatchMask } from "./patch-cells";
+import { isRepairId, pouchCapFor, RepairId } from "./content/repairs";
+import { DuelKit } from "./duel-types";
+import { isPatchMask } from "./patch-cells";
 
 /**
- * Two-layer persistence, both browser-local. Meta survives everything and
- * holds only identity: how many attempts, whether the machine ever opened,
- * and the sound flags. All power - tiers, configs, augments - lives on the
- * run and dies with it. Run state exists so a refresh resumes mid-run.
+ * Three-layer persistence, all browser-local, per save slot. The three
+ * lifetimes are the design (see day-close-and-banking): META survives
+ * everything and holds identity plus settings; SHOP is the permanent layer
+ * (everything ever banked: the building, the deck, the money, the story);
+ * DAY is the discardable layer (everything held since the shop opened).
+ * A failed day is a DELETE of the day object, never a diff of the shop,
+ * which is what makes "strain zero cannot touch banked state" a structural
+ * property instead of a promise.
  */
 
 export interface MetaState {
-  /** Runs started, 1-based key for every story beat. */
-  runCount: number;
   machineOpened: boolean;
   sound: boolean;
   music: boolean;
   /**
-   * Teaching moment ids this player has already been shown. Survives runs:
-   * a mechanic is explained once, ever, at the moment it first matters.
-   * Saves from before the teaching layer land here empty on purpose, so a
-   * returning player still gets the explanations nothing ever gave them.
+   * Teaching moment ids this player has already been shown. A mechanic is
+   * explained once, ever, at the moment it first matters.
    */
   taught: string[];
-  /**
-   * Lifetime tallies, kept across runs purely for the ledger. Nothing here
-   * feeds a rule; a corrupt or missing field degrades to zero rather than
-   * costing a save.
-   */
+  /** Lifetime tallies, kept purely for the ledger. Nothing here feeds a rule. */
   stats: LifetimeStats;
 }
 
 export interface LifetimeStats {
-  /** Runs that beat the machine on day 10. */
+  /** Back room wins. */
   runsWon: number;
   /** Jobs cleared, tutorial excluded. */
   divesCleared: number;
@@ -41,6 +38,10 @@ export interface LifetimeStats {
   modeUse: Record<string, number>;
   /** Losses per customer id, for "most lethal". */
   lostTo: Record<string, number>;
+  /** Days closed with the haul banked. */
+  daysClosed: number;
+  /** Days lost to strain zero. */
+  daysBusted: number;
 }
 
 export const EMPTY_STATS: LifetimeStats = {
@@ -50,149 +51,223 @@ export const EMPTY_STATS: LifetimeStats = {
   scans: 0,
   modeUse: {},
   lostTo: {},
+  daysClosed: 0,
+  daysBusted: 0,
 };
 
-export type RunScreen =
-  | "opener"
+/* ------------------------------------------------------------------ */
+/* The permanent layer: the shop                                       */
+/* ------------------------------------------------------------------ */
+
+/** The neural deck: everything the player IS in a duel. It was Dad's. */
+export interface DeckState {
+  ramPerTurn: number;
+  scanTier: Tier;
+  attackTier: Tier;
+  defendTier: Tier;
+  /** Modes owned (configs unlocked from drafts). */
+  attackModes: AttackMode[];
+  defendModes: DefendMode[];
+  /** Modes live for the next dive. */
+  attackMode: AttackMode;
+  defendMode: DefendMode;
+  /** Boost bays: how many boosts the deck carries into a dive. */
+  slots: number;
+  /** Every boost ever banked. Permanent; the catalog fills and stays full. */
+  ownedBoosts: AugmentId[];
+  /** The subset actually slotted, chosen in LOADOUT.CFG. */
+  slotted: AugmentId[];
+}
+
+export function baseDeck(): DeckState {
+  return {
+    ramPerTurn: 5,
+    scanTier: 1,
+    attackTier: 1,
+    defendTier: 1,
+    attackModes: ["redirect"],
+    defendModes: ["purge"],
+    attackMode: "redirect",
+    defendMode: "purge",
+    slots: 3,
+    ownedBoosts: [],
+    slotted: [],
+  };
+}
+
+export interface ShopState {
+  /** Save-long seed; every deterministic stream salts off it. */
+  seed: number;
+  /** 1-based calendar day. Weekday = (day - 1) % 7, 0 = Monday, 6 = Sunday. */
+  day: number;
+  credits: number;
+  salvage: number;
+  /** Strain carried into the day (written back at sleep). 0..100. */
+  strain: number;
+  /** Banked patch pieces. */
+  patchPouch: number[];
+  deck: DeckState;
+  repairs: RepairId[];
+  /** Journal entries whose first read (at the object) has happened. */
+  artifactsRead: string[];
+  /** Recovered sector playbacks seen (1..7). */
+  sectorsFound: number[];
+  /** Lifetime visits per customer id, for intake quote rotation. */
+  visits: Record<string, number>;
+  /** Lifetime darknet purchases; salts each buy's rng stream. */
+  darkBuys: number;
+  /** The piece the last darknet buy rolled, for the reveal beat. */
+  lastDarkBuy: number | null;
+  /** Back room attempts, the first boot included. */
+  attempts: number;
+  /** Sunday scenes already played (scene index count). */
+  sundayScenes: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* The discardable layer: the day                                      */
+/* ------------------------------------------------------------------ */
+
+export type DayPhase =
   | "tutIntro"
   | "tutorial"
   | "tutOutro"
-  | "dayOpen"
-  | "day"
-  | "analyze"
-  | "build"
+  | "morning"
+  | "open"
   | "duel"
   | "result"
-  | "upgrade"
-  | "finalePre"
-  | "runEnd"
+  | "bust"
+  | "evening"
+  | "sunday"
   | "finaleWin";
 
-export interface JobInstance {
+/** Everything earned since the day opened. Lost whole at strain zero. */
+export interface HeldState {
+  credits: number;
+  salvage: number;
+  boosts: AugmentId[];
+  attackModes: AttackMode[];
+  defendModes: DefendMode[];
+}
+
+export const EMPTY_HELD: HeldState = {
+  credits: 0,
+  salvage: 0,
+  boosts: [],
+  attackModes: [],
+  defendModes: [],
+};
+
+export interface CounterCustomer {
   customerId: string;
   quoteIndex: 0 | 1;
   tier: number;
   dominant: OppMode;
   kitSeed: number;
+  /** This profile's lifetime visit number, 1-based. */
+  visit: number;
 }
 
-/** The run's whole build: three programs, their tiers, modes and augments. */
-export interface RunKit {
-  scanTier: Tier;
-  attackTier: Tier;
-  defendTier: Tier;
-  attackMode: AttackMode;
-  defendMode: DefendMode;
-  attackModes: AttackMode[];
-  defendModes: DefendMode[];
-  augments: AugmentId[];
+export interface DayResult {
+  won: boolean;
+  chip: number;
+  /** Total credited. Itemized by the fields below, never bare. */
+  pay: number;
+  /** Ticket rate for the job's tier, before the cap-win halving. */
+  basePay: number;
+  /** Deck parts pulled out of the cleared machine. */
+  salvage: number;
+  /** CLEAN RUN's consolation on a trap-free cap win, itemized. */
+  cleanRunBonus: number;
+  cleanRun: { status: "banked"; mask: number } | { status: "capped" } | null;
+  patchDrop: { status: "banked" | "capped"; mask: number } | null;
+  capWin: boolean;
+  overRotations: number;
+  trapsFired: number;
+  redirectsTaken?: number;
+  pressureRounds?: number;
+  customerId: string;
+  tier: number;
+  /** Augment draft offered for this win; empty when the pool ran dry. */
+  draft: AugmentId[];
+  picked: AugmentId | null;
+  /** REPAIR.LOG telemetry. */
+  rounds?: number;
+  trapRounds?: number[];
+  parRounds?: number[];
+  log?: string[];
 }
 
-export function baseRunKit(): RunKit {
-  return {
-    scanTier: 1,
-    attackTier: 1,
-    defendTier: 1,
-    attackMode: "redirect",
-    defendMode: "purge",
-    attackModes: ["redirect"],
-    defendModes: ["purge"],
-    augments: [],
-  };
-}
-
-/** The one RunKit-to-DuelKit mapping. Every dive, real or simulated, uses this. */
-export function duelKitOf(kit: RunKit, patchPouch: number[]): DuelKit {
-  return {
-    scanTier: kit.scanTier,
-    attackTier: kit.attackTier,
-    defendTier: kit.defendTier,
-    attackMode: kit.attackMode,
-    defendMode: kit.defendMode,
-    augments: kit.augments,
-    patchPouch: [...patchPouch],
-  };
-}
-
-/** The one upgrade a closed day buys. Null until the player commits. */
-export type NightPick = "ram" | "scan" | "attack" | "defend" | null;
-
-export const NIGHT_PICKS: Array<Exclude<NightPick, null>> = ["ram", "scan", "attack", "defend"];
-
-export interface RunState {
-  runSeed: number;
-  runNumber: number;
-  day: number;
+export interface DayState {
+  phase: DayPhase;
+  /** Live strain, 0..100. Written back to the shop at sleep. */
   strain: number;
-  ramPerTurn: number;
-  credits: number;
-  /** Shaped patch pieces held (4-bit arm masks), carried across the run. */
-  patchPouch: number[];
-  /** Lifetime darknet purchases this run; salts each buy's rng stream. */
-  darkBuys: number;
-  /** The piece the last darknet buy rolled, for the reveal beat. */
-  lastDarkBuy: number | null;
-  /** Strain restored by the most recent day-close rest (for the meter fill). */
-  lastRegen: number;
   /**
-   * Upgrade chosen at the night screen but not yet applied. The pick used
-   * to end the night the instant it was made, which quietly forfeited the
-   * night patch and patch cell sitting on the same screen.
+   * Pieces available to dive with today: the banked pouch copied at open,
+   * plus today's drops, minus spends. Banked whole at close; discarded
+   * whole at bust (the banked pouch is untouched by construction).
    */
-  nightPick: NightPick;
-  kit: RunKit;
-  /** Boost bay capacity. Configs never occupy a bay. */
-  boostSlots: number;
-  jobs: JobInstance[];
-  jobsDone: boolean[];
-  screen: RunScreen;
-  activeJob: number | null;
-  /** Result of the last finished duel, for the result screen. */
-  lastResult: {
-    won: boolean;
-    chip: number;
-    /** Total credited. Itemized by the two fields below, never bare. */
-    pay: number;
-    /** Ticket rate for the job's tier, before the cap-win halving. */
-    basePay: number;
-    /** Salvage paid in place of an augment when the cache ran dry. */
-    salvage: number;
-    /** CLEAN RUN's consolation on a trap-free cap win, itemized. */
-    cleanRunBonus: number;
-    /** Did CLEAN RUN fire, and what piece did it bank (pouch permitting)? */
-    cleanRun: { status: "banked"; mask: number } | { status: "capped" } | null;
-    /** Did the job drop a piece, and which? Capped drops still name the
-     * shape that was left on the bench. */
-    patchDrop: { status: "banked" | "capped"; mask: number } | null;
-    capWin: boolean;
-    /** Gridlock collapse win: full pay, flat strain chip. */
-    gridlockWin: boolean;
-    /** Chip inputs, kept so the result row can show what actually billed. */
-    overRotations: number;
-    trapsFired: number;
-    /** Enemy REDIRECTs taken, and rounds under pressure. Absent on old saves. */
-    redirectsTaken?: number;
-    pressureRounds?: number;
-    jobIndex: number;
-    /** Augment draft offered for this win; empty when the pool ran dry. */
-    draft: AugmentId[];
-    picked: AugmentId | null;
-    /** Boost ejected by a full-bay swap, for the result stamp. */
-    replaced: AugmentId | null;
-    /** REPAIR.LOG telemetry: how the dive actually went, for the strain
-     * trace, sparklines, and the dive log rail. Absent on older saves. */
-    rounds?: number;
-    trapRounds?: number[];
-    parRounds?: number[];
-    log?: string[];
-  } | null;
+  pouch: number[];
+  held: HeldState;
+  /** The customer at the counter, not yet taken or turned away. */
+  waiting: CounterCustomer | null;
+  /** The accepted job on the spike. One at a time; intake is face to face. */
+  ticket: CounterCustomer | null;
+  /** Customers that have walked in today (determinism index). */
+  encounterIndex: number;
+  /**
+   * Today's arrivals per customer id. Folded into the shop's lifetime visit
+   * counts at close; discarded whole at bust, so the shop layer stays
+   * untouched by an open day.
+   */
+  arrivals: Record<string, number>;
+  /** Dives finished today, win or lose. Depth escalates the tier band. */
+  jobsResolved: number;
+  jobsWon: number;
+  declined: number;
+  /** Sunday latch: one attempt at the tower per Sunday. */
+  attemptedBackroom: boolean;
+  lastResult: DayResult | null;
+  /** Strain restored by the most recent sleep (for the meter fill). */
+  lastRegen: number;
 }
 
-export const META_KEY = "kernel-panic-meta-v2";
-export const RUN_KEY = "kernel-panic-run-v2";
+/* ------------------------------------------------------------------ */
+/* Kit assembly                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Boosts the player owns right now: banked pool plus today's held picks. */
+export function ownedBoostsNow(shop: ShopState, day: DayState | null): AugmentId[] {
+  return [...shop.deck.ownedBoosts, ...(day ? day.held.boosts : [])];
+}
+
+export function ownedAttackModes(shop: ShopState, day: DayState | null): AttackMode[] {
+  return [...shop.deck.attackModes, ...(day ? day.held.attackModes : [])];
+}
+
+export function ownedDefendModes(shop: ShopState, day: DayState | null): DefendMode[] {
+  return [...shop.deck.defendModes, ...(day ? day.held.defendModes : [])];
+}
+
+/** The one deck-to-DuelKit mapping. Every dive, real or simulated, uses this. */
+export function duelKitOf(shop: ShopState, day: DayState): DuelKit {
+  const deck = shop.deck;
+  return {
+    scanTier: deck.scanTier,
+    attackTier: deck.attackTier,
+    defendTier: deck.defendTier,
+    attackMode: deck.attackMode,
+    defendMode: deck.defendMode,
+    augments: [...deck.slotted],
+    patchPouch: [...day.pouch],
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Parsing                                                             */
+/* ------------------------------------------------------------------ */
 
 export const EMPTY_META: MetaState = {
-  runCount: 0,
   machineOpened: false,
   sound: true,
   music: true,
@@ -209,24 +284,33 @@ function parseCounts(v: unknown): Record<string, number> {
   return out;
 }
 
-/** Saves written before lifetime stats existed start their tallies at zero. */
+function num(x: unknown, fallback = 0): number {
+  return typeof x === "number" && isFinite(x) ? x : fallback;
+}
+
+function posInt(x: unknown): number {
+  const n = num(x);
+  return n > 0 ? Math.floor(n) : 0;
+}
+
+/** Saves written before a tally existed start it at zero. */
 function parseStats(v: unknown): LifetimeStats {
   const p = (v ?? {}) as Partial<LifetimeStats>;
-  const num = (x: unknown): number => (typeof x === "number" && isFinite(x) && x > 0 ? x : 0);
   return {
-    runsWon: num(p.runsWon),
-    divesCleared: num(p.divesCleared),
-    divesLost: num(p.divesLost),
-    scans: num(p.scans),
+    runsWon: posInt(p.runsWon),
+    divesCleared: posInt(p.divesCleared),
+    divesLost: posInt(p.divesLost),
+    scans: posInt(p.scans),
     modeUse: parseCounts(p.modeUse),
     lostTo: parseCounts(p.lostTo),
+    daysClosed: posInt(p.daysClosed),
+    daysBusted: posInt(p.daysBusted),
   };
 }
 
 function parseMeta(raw: string): MetaState {
   const p = JSON.parse(raw) as Partial<MetaState>;
   return {
-    runCount: typeof p.runCount === "number" ? p.runCount : 0,
     machineOpened: p.machineOpened === true,
     sound: p.sound !== false,
     music: p.music !== false,
@@ -235,66 +319,150 @@ function parseMeta(raw: string): MetaState {
   };
 }
 
-function parseRun(raw: string): RunState | null {
-  const p = JSON.parse(raw) as RunState;
-  // Light shape check; anything off (older kit-less saves included) means
-  // the run is not resumable. Meta survives regardless.
-  if (
-    typeof p.runSeed !== "number" ||
-    typeof p.day !== "number" ||
-    typeof p.strain !== "number" ||
-    !Array.isArray(p.jobs) ||
-    typeof p.screen !== "string" ||
-    !p.kit ||
-    typeof p.kit.scanTier !== "number" ||
-    !Array.isArray(p.kit.augments)
-  ) {
-    return null;
-  }
-  // Migration ladder for the pouch. Saves from the integer era held only
-  // crosses (that is literally what 35 cr bought), so N cells become N
-  // cross masks: exact value preserved, deterministic, nothing to scum.
-  const legacyCells = (p as { patchCells?: unknown }).patchCells;
-  if (typeof legacyCells === "number" && isFinite(legacyCells)) {
-    p.patchPouch = Array(Math.max(0, Math.min(Math.floor(legacyCells), PATCH_POUCH_MAX))).fill(PIECE_X);
-  } else if (Array.isArray(p.patchPouch)) {
-    p.patchPouch = p.patchPouch.filter(isPatchMask).slice(0, PATCH_POUCH_MAX);
-  } else {
-    p.patchPouch = [];
-  }
-  if (typeof p.darkBuys !== "number" || !isFinite(p.darkBuys)) p.darkBuys = 0;
-  if (!isPatchMask(p.lastDarkBuy)) p.lastDarkBuy = null;
-  /*
-   * RAM per turn is the one run field the duel layer does arithmetic with
-   * before anything validates it: createDuel feeds it straight into the
-   * opening turn. A save that lost the field resumed with `undefined`, which
-   * made every turn's budget NaN - and because `NaN < cost` is false, every
-   * spend guard passed instead of denying. The readout showed NaN while RAM
-   * was effectively infinite. Repair it here like the rest of the ladder.
-   * Bounds mirror BASE_RAM/MAX_RAM in run-reducer (which imports this module,
-   * so they cannot be imported back without a cycle).
-   */
-  if (typeof p.ramPerTurn !== "number" || !isFinite(p.ramPerTurn)) p.ramPerTurn = 5;
-  p.ramPerTurn = Math.max(5, Math.min(9, Math.floor(p.ramPerTurn)));
-  if (typeof p.credits !== "number" || !isFinite(p.credits)) p.credits = 0;
-  // Pre-bay saves start at base capacity; anything odd clamps into range.
-  if (typeof p.boostSlots !== "number" || !isFinite(p.boostSlots)) p.boostSlots = 3;
-  p.boostSlots = Math.max(3, Math.min(5, Math.floor(p.boostSlots)));
-  // Catalog surgery: ids the catalog no longer knows are no-ops that would
-  // waste a bay; drop them. Over-cap runs are grandfathered, never trimmed.
-  p.kit.augments = p.kit.augments.filter((id) => typeof id === "string" && !!AUGMENT_BY_ID[id]);
-  if (typeof p.lastRegen !== "number") p.lastRegen = 0;
-  // Pre-night-pick saves resume with the night still undecided.
-  if (!NIGHT_PICKS.includes(p.nightPick as Exclude<NightPick, null>)) p.nightPick = null;
-  // Never resume into a transient screen; land on the day board.
-  if (p.screen === "duel" || p.screen === "analyze" || p.screen === "build") {
-    p.screen = "day";
-    p.activeJob = null;
-  }
-  if (p.screen === "tutorial" || p.screen === "tutIntro" || p.screen === "tutOutro" || p.screen === "opener") {
-    p.screen = "opener";
-  }
-  return p;
+const TIERS: Tier[] = [1, 2, 3];
+const ATTACKS: AttackMode[] = ["redirect", "armHalt", "armSiphon"];
+const DEFENDS: DefendMode[] = ["purge", "lock", "ward"];
+
+function parseTier(v: unknown): Tier {
+  return TIERS.includes(v as Tier) ? (v as Tier) : 1;
+}
+
+function parseDeck(v: unknown): DeckState {
+  const p = (v ?? {}) as Partial<DeckState>;
+  const attackModes = Array.isArray(p.attackModes)
+    ? p.attackModes.filter((m): m is AttackMode => ATTACKS.includes(m as AttackMode))
+    : [];
+  const defendModes = Array.isArray(p.defendModes)
+    ? p.defendModes.filter((m): m is DefendMode => DEFENDS.includes(m as DefendMode))
+    : [];
+  if (!attackModes.includes("redirect")) attackModes.unshift("redirect");
+  if (!defendModes.includes("purge")) defendModes.unshift("purge");
+  // Catalog surgery: boost ids the catalog no longer knows are dropped so a
+  // removed augment never bricks a save.
+  const owned = Array.isArray(p.ownedBoosts)
+    ? p.ownedBoosts.filter((id): id is AugmentId => typeof id === "string" && !!AUGMENT_BY_ID[id])
+    : [];
+  const slots = Math.max(3, Math.min(5, Math.floor(num(p.slots, 3))));
+  const slotted = (Array.isArray(p.slotted) ? p.slotted : [])
+    .filter((id): id is AugmentId => typeof id === "string" && owned.includes(id))
+    .slice(0, slots);
+  return {
+    /*
+     * RAM per turn is the one field the duel layer does arithmetic with
+     * before anything validates it: a save that lost it resumed with NaN
+     * budgets whose spend guards all passed. Clamp it here like the rest.
+     */
+    ramPerTurn: Math.max(5, Math.min(9, Math.floor(num(p.ramPerTurn, 5)))),
+    scanTier: parseTier(p.scanTier),
+    attackTier: parseTier(p.attackTier),
+    defendTier: parseTier(p.defendTier),
+    attackModes,
+    defendModes,
+    attackMode: attackModes.includes(p.attackMode as AttackMode) ? (p.attackMode as AttackMode) : "redirect",
+    defendMode: defendModes.includes(p.defendMode as DefendMode) ? (p.defendMode as DefendMode) : "purge",
+    slots,
+    ownedBoosts: owned,
+    slotted,
+  };
+}
+
+function parseShop(raw: string): ShopState | null {
+  const p = JSON.parse(raw) as Partial<ShopState>;
+  if (typeof p.seed !== "number" || typeof p.day !== "number") return null;
+  const repairs = Array.isArray(p.repairs) ? p.repairs.filter(isRepairId) : [];
+  return {
+    seed: p.seed >>> 0,
+    day: Math.max(1, Math.floor(p.day)),
+    credits: Math.max(0, num(p.credits)),
+    salvage: Math.max(0, num(p.salvage)),
+    strain: Math.max(0, Math.min(100, num(p.strain, 100))),
+    patchPouch: (Array.isArray(p.patchPouch) ? p.patchPouch : [])
+      .filter(isPatchMask)
+      .slice(0, pouchCapFor(repairs)),
+    deck: parseDeck(p.deck),
+    repairs,
+    artifactsRead: Array.isArray(p.artifactsRead)
+      ? p.artifactsRead.filter((s): s is string => typeof s === "string")
+      : [],
+    sectorsFound: Array.isArray(p.sectorsFound)
+      ? p.sectorsFound.filter((n): n is number => typeof n === "number" && n >= 1 && n <= 7)
+      : [],
+    visits: parseCounts(p.visits),
+    darkBuys: posInt(p.darkBuys),
+    lastDarkBuy: isPatchMask(p.lastDarkBuy) ? (p.lastDarkBuy as number) : null,
+    attempts: posInt(p.attempts),
+    sundayScenes: posInt(p.sundayScenes),
+  };
+}
+
+const DAY_PHASES: DayPhase[] = [
+  "tutIntro",
+  "tutorial",
+  "tutOutro",
+  "morning",
+  "open",
+  "duel",
+  "result",
+  "bust",
+  "evening",
+  "sunday",
+  "finaleWin",
+];
+
+function parseHeld(v: unknown): HeldState {
+  const p = (v ?? {}) as Partial<HeldState>;
+  return {
+    credits: Math.max(0, num(p.credits)),
+    salvage: Math.max(0, num(p.salvage)),
+    boosts: Array.isArray(p.boosts)
+      ? p.boosts.filter((id): id is AugmentId => typeof id === "string" && !!AUGMENT_BY_ID[id])
+      : [],
+    attackModes: Array.isArray(p.attackModes)
+      ? p.attackModes.filter((m): m is AttackMode => ATTACKS.includes(m as AttackMode))
+      : [],
+    defendModes: Array.isArray(p.defendModes)
+      ? p.defendModes.filter((m): m is DefendMode => DEFENDS.includes(m as DefendMode))
+      : [],
+  };
+}
+
+function parseCustomer(v: unknown): CounterCustomer | null {
+  const p = (v ?? null) as Partial<CounterCustomer> | null;
+  if (!p || typeof p.customerId !== "string" || typeof p.kitSeed !== "number") return null;
+  return {
+    customerId: p.customerId,
+    quoteIndex: p.quoteIndex === 1 ? 1 : 0,
+    tier: Math.max(1, Math.min(5, Math.floor(num(p.tier, 1)))),
+    dominant: (p.dominant ?? "redirect") as OppMode,
+    kitSeed: p.kitSeed,
+    visit: Math.max(1, Math.floor(num(p.visit, 1))),
+  };
+}
+
+function parseDay(raw: string): DayState | null {
+  const p = JSON.parse(raw) as Partial<DayState>;
+  if (typeof p.phase !== "string" || !DAY_PHASES.includes(p.phase as DayPhase)) return null;
+  let phase = p.phase as DayPhase;
+  // Never resume into a transient screen. A refresh mid-dive lands back on
+  // the floor with the ticket still on the spike: a safe abort, never a loss.
+  if (phase === "duel") phase = "open";
+  if (phase === "tutorial" || phase === "tutOutro") phase = "tutIntro";
+  return {
+    phase,
+    strain: Math.max(0, Math.min(100, num(p.strain, 100))),
+    pouch: (Array.isArray(p.pouch) ? p.pouch : []).filter(isPatchMask),
+    held: parseHeld(p.held),
+    waiting: parseCustomer(p.waiting),
+    ticket: parseCustomer(p.ticket),
+    encounterIndex: posInt(p.encounterIndex),
+    arrivals: parseCounts(p.arrivals),
+    jobsResolved: posInt(p.jobsResolved),
+    jobsWon: posInt(p.jobsWon),
+    declined: posInt(p.declined),
+    attemptedBackroom: p.attemptedBackroom === true,
+    lastResult: (p.lastResult ?? null) as DayResult | null,
+    lastRegen: num(p.lastRegen),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -307,21 +475,32 @@ function slotMetaKey(slot: number): string {
   return `kernel-panic-s${slot}-meta-v2`;
 }
 
+function slotShopKey(slot: number): string {
+  return `kernel-panic-s${slot}-shop-v1`;
+}
+
+function slotDayKey(slot: number): string {
+  return `kernel-panic-s${slot}-day-v1`;
+}
+
+/** The run-era key, deleted on sight: the run model has no migration path. */
 function slotRunKey(slot: number): string {
   return `kernel-panic-s${slot}-run-v3`;
 }
 
-/** Pre-slot saves become USER 01 so nobody loses their attempts count. */
+/**
+ * Clear the run-era layer. Meta (attempts, stats, taught flags, settings)
+ * survives; the mid-run snapshot does not, because the day-as-run schema
+ * has no honest way to resume a ten-day run that no longer exists.
+ */
 export function migrateLegacySave(): void {
   if (typeof window === "undefined") return;
   try {
-    const legacyMeta = window.localStorage.getItem(META_KEY);
-    if (!legacyMeta) return;
-    if (!window.localStorage.getItem(slotMetaKey(1))) {
-      window.localStorage.setItem(slotMetaKey(1), legacyMeta);
+    for (let slot = 1; slot <= SLOT_COUNT; slot++) {
+      window.localStorage.removeItem(slotRunKey(slot));
     }
-    window.localStorage.removeItem(META_KEY);
-    window.localStorage.removeItem(RUN_KEY);
+    window.localStorage.removeItem("kernel-panic-meta-v2");
+    window.localStorage.removeItem("kernel-panic-run-v2");
   } catch {
     // Nothing to migrate.
   }
@@ -347,35 +526,58 @@ export function saveSlotMeta(slot: number, m: MetaState): void {
   }
 }
 
-export function loadSlotRun(slot: number): RunState | null {
+export function loadSlotShop(slot: number): ShopState | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(slotRunKey(slot));
+    const raw = window.localStorage.getItem(slotShopKey(slot));
     if (!raw) return null;
-    return parseRun(raw);
+    return parseShop(raw);
   } catch {
     return null;
   }
 }
 
-/** Wipe a slot completely: meta, run, everything. There is no undo. */
+export function saveSlotShop(slot: number, s: ShopState | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (s === null) window.localStorage.removeItem(slotShopKey(slot));
+    else window.localStorage.setItem(slotShopKey(slot), JSON.stringify(s));
+  } catch {
+    // Storage unavailable; play continues unpersisted.
+  }
+}
+
+export function loadSlotDay(slot: number): DayState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(slotDayKey(slot));
+    if (!raw) return null;
+    return parseDay(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function saveSlotDay(slot: number, d: DayState | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (d === null) window.localStorage.removeItem(slotDayKey(slot));
+    else window.localStorage.setItem(slotDayKey(slot), JSON.stringify(d));
+  } catch {
+    // Storage unavailable; play continues unpersisted.
+  }
+}
+
+/** Wipe a slot completely: meta, shop, day, everything. There is no undo. */
 export function deleteSlot(slot: number): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(slotMetaKey(slot));
+    window.localStorage.removeItem(slotShopKey(slot));
+    window.localStorage.removeItem(slotDayKey(slot));
     window.localStorage.removeItem(slotRunKey(slot));
   } catch {
     // Storage unavailable; nothing to delete.
-  }
-}
-
-export function saveSlotRun(slot: number, r: RunState | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (r === null) window.localStorage.removeItem(slotRunKey(slot));
-    else window.localStorage.setItem(slotRunKey(slot), JSON.stringify(r));
-  } catch {
-    // Storage unavailable; play continues unpersisted.
   }
 }
 
@@ -399,30 +601,62 @@ export function applyOneTimeSoundReset(meta: MetaState): MetaState {
 export interface SlotSummary {
   slot: number;
   empty: boolean;
-  runCount: number;
-  machineOpened: boolean;
-  /** Mid-run snapshot, when one is waiting. */
+  /** Calendar day reached, 1-based. */
   day: number | null;
   strain: number | null;
+  credits: number | null;
+  repairs: number;
+  machineOpened: boolean;
 }
 
 export function slotSummaries(): SlotSummary[] {
   const out: SlotSummary[] = [];
   for (let slot = 1; slot <= SLOT_COUNT; slot++) {
-    if (typeof window === "undefined" || !window.localStorage.getItem(slotMetaKey(slot))) {
-      out.push({ slot, empty: true, runCount: 0, machineOpened: false, day: null, strain: null });
+    const hasMeta =
+      typeof window !== "undefined" && !!window.localStorage.getItem(slotMetaKey(slot));
+    const shop = loadSlotShop(slot);
+    if (!hasMeta && !shop) {
+      out.push({
+        slot,
+        empty: true,
+        day: null,
+        strain: null,
+        credits: null,
+        repairs: 0,
+        machineOpened: false,
+      });
       continue;
     }
     const meta = loadSlotMeta(slot);
-    const run = loadSlotRun(slot);
+    const day = loadSlotDay(slot);
     out.push({
       slot,
       empty: false,
-      runCount: meta.runCount,
+      day: shop ? shop.day : null,
+      strain: day ? day.strain : shop ? shop.strain : null,
+      credits: shop ? shop.credits : null,
+      repairs: shop ? shop.repairs.length : 0,
       machineOpened: meta.machineOpened,
-      day: run ? run.day : null,
-      strain: run ? run.strain : null,
     });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Weekday helpers                                                     */
+/* ------------------------------------------------------------------ */
+
+export const WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
+
+/** 0 = Monday .. 6 = Sunday. */
+export function weekdayOf(day: number): number {
+  return (day - 1) % 7;
+}
+
+export function isSunday(day: number): boolean {
+  return weekdayOf(day) === 6;
+}
+
+export function weekdayName(day: number): (typeof WEEKDAYS)[number] {
+  return WEEKDAYS[weekdayOf(day)];
 }

@@ -2,12 +2,19 @@
  * Balance harness for the flood-claim duel. Not imported by app code.
  * Run from app/: bun run src/game/dev/sim.ts
  *
- * A proxy player using the same Dijkstra routing bot as the opponent (high
- * greed, no program casts) plays every day config across many seeds — a
- * lower bound on real player strength, since humans also get the kit.
+ * The open calendar killed the day-indexed curve, so the rows here are the
+ * five JOB TIERS plus the back room. Two passes per tier on identical
+ * seeds: a kit-less Dijkstra proxy (a floor and nothing more - it never
+ * locks, wards or purges, and on split boards defence is half the game)
+ * and the stage-deck kitted policy bot, which is the pass the gate reads.
+ *
+ * GATES (exit 1): the tutorial must win 0 of 200; every tier's measured
+ * mean pd must land within PD_TOLERANCE of its pdTarget; every kitted win
+ * rate must land inside its tier band; the back room must never close on
+ * the player's first turn.
  */
 
-import { DAY_CONFIGS, PD_TOLERANCE, dayDuelConfig, finaleConfig, tutorialConfig } from "../content/arc";
+import { PD_TOLERANCE, TIER_CONFIGS, backroomConfig, tierDuelConfig, tutorialConfig } from "../content/tiers";
 import { OppMode } from "../content/kit";
 import { endPlayerTurn } from "../duel-actions";
 import { computePower, routeCost, routePlan } from "../duel-power";
@@ -15,11 +22,25 @@ import { createDuel, mixSeed } from "../duel-setup";
 import { BASE_KIT, Board, DuelEndKind, DuelState, Side } from "../duel-types";
 import { botPlayTurn, oppStep } from "../opponent";
 import { kittedPlayTurn } from "./kitted-bot";
-import { cellsAtDay, kitAtDay, ramAtDay } from "./kitted-profile";
+import { kitAtStage, ramAtStage, cellsAtStage } from "./kitted-profile";
 
 const PROXY_GREED = 0.95;
 const SEEDS = 200;
 const MODES: OppMode[] = ["redirect", "armHalt", "armSiphon", "purge", "lock", "ward"];
+
+/**
+ * The gated bands, kitted pass. Wide on purpose: the gate exists to catch a
+ * regression that flips a tier's character (a tier 1 that bullies, a tier 5
+ * that folds), not to pin a decimal.
+ */
+const WIN_BANDS: Record<number, [number, number]> = {
+  1: [65, 95],
+  2: [65, 95],
+  3: [45, 75],
+  4: [35, 70],
+  5: [25, 70],
+};
+const BACKROOM_BAND: [number, number] = [15, 60];
 
 /*
  * AI wall-clock proxy. The cadence is not flat: a rotation lands in 170ms, a
@@ -39,8 +60,7 @@ function pctl(sorted: number[], q: number): number {
 /**
  * Opening route costs, read before a single turn is played. `pd` is what the
  * whole difficulty curve is actually made of: `par` is derived from it, and
- * pd/ramPerTurn is the approach length in turns. Printing it directly rather
- * than inverting par is the only way to see the generator missing `minCost`.
+ * pd/ramPerTurn is the approach length in turns.
  */
 function openingCosts(s: DuelState): { pd: number; od: number } {
   const pd = routeCost(s.boards.player);
@@ -48,13 +68,7 @@ function openingCosts(s: DuelState): { pd: number; od: number } {
   return { pd: isFinite(pd) ? pd : 0, od: isFinite(od) ? od : 0 };
 }
 
-/**
- * Days whose measured mean `pd` drifted off `pdTarget`. `arc.ts` has always
- * claimed this file asserts the band; it never did, and under the old shared
- * board the generator missed by 7-11 on every single day while the whole
- * difficulty table tuned a number nothing read. Collected here and fatal at
- * the end, so one miss does not hide the rest.
- */
+/** Tiers whose measured mean `pd` drifted off `pdTarget`. Fatal at the end. */
 const pdMisses: string[] = [];
 
 function checkPd(label: string, pd: number, target: number): string {
@@ -65,25 +79,35 @@ function checkPd(label: string, pd: number, target: number): string {
   return `${pd.toFixed(1)}/${target}`;
 }
 
+/** Kitted rows that landed outside their band. Fatal at the end. */
+const bandMisses: string[] = [];
+
+function checkBand(label: string, win: number, band: [number, number]): void {
+  if (win < band[0] || win > band[1]) {
+    bandMisses.push(
+      `${label.trim()}: kitted win ${win.toFixed(1)}% outside band ${band[0]}-${band[1]}%`,
+    );
+  }
+}
+
 /**
  * A route plan has to be executable, not just a number. Snap every node on the
  * plan to the rotation it asked for and the goal must light, for exactly the
- * RAM the plan quoted. Nothing has ever checked this, and `plan.cost` is
- * treated as truth by par, the round-cap tiebreak, the machine's whole turn
- * queue and board generation's fairness loop. Plans flagged `approx` are
- * exempt by contract: they promise a route exists, not that the queue conducts.
+ * RAM the plan quoted. `plan.cost` is treated as truth by par, the round-cap
+ * tiebreak, the machine's whole turn queue and board generation's fairness
+ * loop. Plans flagged `approx` are exempt by contract: they promise a route
+ * exists, not that the queue conducts.
  */
 function checkPlanHonesty(seeds: number): { checked: number; bad: string[] } {
   const bad: string[] = [];
   let checked = 0;
-  for (let day = 1; day <= 9; day++) {
-    const tiers = DAY_CONFIGS[day].jobTiers;
+  for (let tier = 1; tier <= 5; tier++) {
     for (let seed = 0; seed < seeds; seed++) {
       const s = createDuel(
-        dayDuelConfig(day, MODES[seed % MODES.length], tiers[seed % 3], seed),
+        tierDuelConfig(tier, MODES[seed % MODES.length], seed),
         seed,
         BASE_KIT,
-        5 + Math.floor((day - 1) / 2),
+        ramAtStage(tier),
       );
       for (const side of ["player", "opp"] as Side[]) {
         const b = s.boards[side];
@@ -92,14 +116,14 @@ function checkPlanHonesty(seeds: number): { checked: number; bad: string[] } {
         checked++;
         const quoted = plan.steps.reduce((n, st) => n + st.turns, 0);
         if (quoted !== plan.cost) {
-          bad.push(`day ${day} seed ${seed} ${side}: steps sum to ${quoted} but cost says ${plan.cost}`);
+          bad.push(`tier ${tier} seed ${seed} ${side}: steps sum to ${quoted} but cost says ${plan.cost}`);
           continue;
         }
         const probe: Board = { ...b, cells: b.cells.map((c) => ({ ...c })) };
         for (const st of plan.path) probe.cells[st.idx].rot = st.targetRot;
         const power = computePower(probe);
         if (!probe.goal.some((i) => power[i])) {
-          bad.push(`day ${day} seed ${seed} ${side}: executed a cost-${plan.cost} plan, goal stayed dark`);
+          bad.push(`tier ${tier} seed ${seed} ${side}: executed a cost-${plan.cost} plan, goal stayed dark`);
         }
       }
     }
@@ -146,7 +170,7 @@ function pct(n: number, d: number): string {
   return `${((100 * n) / d).toFixed(1)}%`;
 }
 
-function runDay(label: string, pdTarget: number, mk: (seed: number) => DuelState): number {
+function runTier(label: string, pdTarget: number, mk: (seed: number) => DuelState): number {
   let wins = 0;
   let caps = 0;
   let roundsTotal = 0;
@@ -258,7 +282,7 @@ function tallyEnd(r: KittedResult): void {
 }
 
 /** Paired kitted pass: same seeds, same configs, richer columns. */
-function runDayKitted(
+function runTierKitted(
   label: string,
   baseWin: number,
   mk: (seed: number) => DuelState,
@@ -332,62 +356,82 @@ if (import.meta.main) {
       if (r.won) playerWins++;
     }
     console.log(`tutorial   player wins: ${playerWins} of ${SEEDS} (must be 0)`);
+    if (playerWins > 0) {
+      console.log("TUTORIAL IS WINNABLE. It must post 0 wins by construction.");
+      process.exit(1);
+    }
   }
 
+  // Kit-less floor pass. A lower bound and nothing more: the proxy never
+  // locks, wards or purges, and on split boards defence is half the game.
   const baseWins: number[] = [];
-  for (let day = 1; day <= 9; day++) {
-    const ram = 5 + Math.floor((day - 1) / 2);
-    const tiers = DAY_CONFIGS[day].jobTiers;
-    baseWins[day] = runDay(`day ${day} r${ram}`, DAY_CONFIGS[day].pdTarget, (seed) =>
+  for (let tier = 1; tier <= 5; tier++) {
+    baseWins[tier] = runTier(`tier ${tier} r${ramAtStage(tier)}`, TIER_CONFIGS[tier].pdTarget, (seed) =>
       createDuel(
-        dayDuelConfig(day, MODES[seed % MODES.length], tiers[seed % 3], seed),
+        tierDuelConfig(tier, MODES[seed % MODES.length], seed),
         seed,
         BASE_KIT,
-        ram,
+        ramAtStage(tier),
       ),
     );
   }
-
-  const baseFinale = runDay("finale r9", finaleConfig().pdTarget, (seed) =>
-    createDuel(finaleConfig(), seed, BASE_KIT, 9),
+  const baseBackroom = runTier("backroom r9", backroomConfig().pdTarget, (seed) =>
+    createDuel(backroomConfig(), seed, BASE_KIT, ramAtStage(6)),
   );
 
   // Kitted pass: same seeds and configs as the rows above, so every delta
   // is a paired comparison on identical boards. The kit-less block stays
   // byte-identical by construction; nothing above this line may change.
   console.log(
-    `\nkitted: picks ${[...Array(9).keys()].map((d) => `r${ramAtDay(d + 1)}`).join("/")} fin r${ramAtDay(10)}; pairs RP/SP/HL by seed; boosts hotBoot@2 longArms@4 pair@6; cells ${[...Array(9).keys()].map((d) => cellsAtDay(d + 1)).join("/")}`,
+    `\nkitted: stage decks r${[1, 2, 3, 4, 5].map((t) => ramAtStage(t)).join("/")} backroom r${ramAtStage(6)}; pairs RP/SP/HL by seed; cells ${[1, 2, 3, 4, 5].map((t) => cellsAtStage(t)).join("/")}`,
   );
-  for (let day = 1; day <= 9; day++) {
-    const tiers = DAY_CONFIGS[day].jobTiers;
-    runDayKitted(`day ${day} r${ramAtDay(day)}`, baseWins[day], (seed) =>
+  for (let tier = 1; tier <= 5; tier++) {
+    const { win } = runTierKitted(`tier ${tier} r${ramAtStage(tier)}`, baseWins[tier], (seed) =>
       createDuel(
-        dayDuelConfig(day, MODES[seed % MODES.length], tiers[seed % 3], seed),
+        tierDuelConfig(tier, MODES[seed % MODES.length], seed),
         seed,
-        kitAtDay(day, seed),
-        ramAtDay(day),
+        kitAtStage(tier, seed),
+        ramAtStage(tier),
       ),
     );
+    checkBand(`tier ${tier}`, win, WIN_BANDS[tier]);
   }
-  const fin = runDayKitted(`finale r${ramAtDay(10)}`, baseFinale, (seed) =>
-    createDuel(finaleConfig(), seed, kitAtDay(10, seed), ramAtDay(10)),
+  const fin = runTierKitted(`backroom r${ramAtStage(6)}`, baseBackroom, (seed) =>
+    createDuel(backroomConfig(), seed, kitAtStage(6, seed), ramAtStage(6)),
   );
+  checkBand("backroom", fin.win, BACKROOM_BAND);
   const hist = [0, 0, 0, 0, 0];
   // With oppOpens the machine's opening turn consumes round 1, so the
   // player's Nth turn ends round N+1; report PLAYER turns.
-  const shift = finaleConfig().oppOpens ? 1 : 0;
+  const shift = backroomConfig().oppOpens ? 1 : 0;
   for (const r of fin.closeRounds) hist[Math.max(1, Math.min(r - shift, 5)) - 1]++;
   console.log(
-    `finale close player-turns: t1 ${hist[0]}  t2 ${hist[1]}  t3 ${hist[2]}  t4 ${hist[3]}  t5+ ${hist[4]}   (t1 must be 0)`,
+    `backroom close player-turns: t1 ${hist[0]}  t2 ${hist[1]}  t3 ${hist[2]}  t4 ${hist[3]}  t5+ ${hist[4]}   (t1 must be 0)`,
   );
   console.log(
     `kitted ends: won goal ${endTally.wonGoal} cap ${endTally.wonCap} . lost goal ${endTally.lostGoal} seal ${endTally.lostSeal} cap ${endTally.lostCap}`,
   );
+  if (hist[0] > 0) {
+    console.log("BACKROOM CLOSED ON TURN 1. oppOpens must forbid this by construction.");
+    process.exit(1);
+  }
 
+  let failed = false;
   if (pdMisses.length > 0) {
     console.log(`\nPD TARGET MISSED (tolerance ${PD_TOLERANCE}):`);
     for (const line of pdMisses) console.log(`  ${line}`);
-    process.exit(1);
+    failed = true;
+  } else {
+    console.log(`pd targets: every tier within ${PD_TOLERANCE} of its pdTarget`);
   }
-  console.log(`pd targets: every day within ${PD_TOLERANCE} of its pdTarget`);
+  if (bandMisses.length > 0) {
+    console.log(`\nWIN BAND MISSED:`);
+    for (const line of bandMisses) console.log(`  ${line}`);
+    failed = true;
+  } else {
+    console.log(
+      `win bands: every kitted tier inside its band (${[1, 2, 3, 4, 5].map((t) => WIN_BANDS[t].join("-")).join(", ")}; backroom ${BACKROOM_BAND.join("-")})`,
+    );
+  }
+  if (failed) process.exit(1);
 }

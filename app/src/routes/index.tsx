@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ShopOS } from "../components/os/shop-os";
+import { GameShell } from "../components/scene/game-shell";
 
 export const Route = createFileRoute("/")({
   component: Index,
 });
 
 function Index() {
-  return <ShopOS />;
+  return <GameShell />;
 }

@@ -223,6 +223,25 @@ export function PhotoCell({
  *   '*' hot highlight / '#' ink / 'o' mid / '+' dim shadow / '-' faint
  * (every tone derives from the hue vars, so a hue switch recolors them). */
 export const PX_ICONS: Record<string, string[]> = {
+  /* crescent over a sill: the evening, the shop shut, the night yours */
+  night: [
+    "........................",
+    "..........####..........",
+    "......####****##........",
+    "....##********##........",
+    "...##********##.........",
+    "..##********##..........",
+    "..##*******##...........",
+    ".##********##...........",
+    ".##********##...........",
+    ".##*********##..........",
+    "..##*********###........",
+    "..##************###.....",
+    "...###*************##...",
+    ".....###+++++++++++##...",
+    ".......#############....",
+    "........................",
+  ],
   /* envelope: lit flap face, shaded body, sheen under the top edge */
   inbox: [
     "########################",

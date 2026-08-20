@@ -12,6 +12,7 @@ export type IconName =
   | "loadout"
   | "solder"
   | "report"
+  | "night"
   | "journal"
   | "manual"
   | "ledger"

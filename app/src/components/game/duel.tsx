@@ -1456,7 +1456,7 @@ export function DuelScreen(props: DuelScreenProps) {
                 {state.phase !== "won" && (
                   <div className="kp-datarow kp-datarow-plain dv-hazrow kp-datarow-warn">
                     <span>NEURAL STRAIN</span>
-                    <em>ZEROED. THE RUN IS OVER.</em>
+                    <em>NO CHARGE. A LOSS COSTS THE WORK, NEVER STRAIN.</em>
                   </div>
                 )}
               </div>

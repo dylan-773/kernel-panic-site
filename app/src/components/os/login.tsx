@@ -104,11 +104,11 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
                       rows={
                         s.day !== null
                           ? [
-                              { label: "ATTEMPT", value: String(s.runCount) },
                               { label: "DAY", value: String(s.day) },
-                              { label: "STRAIN", value: String(s.strain) },
+                              { label: "CREDITS", value: String(s.credits ?? 0) },
+                              { label: "REPAIRS", value: String(s.repairs) },
                             ]
-                          : [{ label: "ATTEMPTS", value: String(s.runCount) }]
+                          : [{ label: "DAY", value: "1" }]
                       }
                     />
                     <span className="kp-slot-line kp-slot-dim">
@@ -127,7 +127,7 @@ export function LoginScreen({ onLogin }: { onLogin: (slot: number) => void }) {
                     e.stopPropagation();
                     if (
                       window.confirm(
-                        `Delete USER 0${s.slot}? Every attempt and journal entry on this slot is gone for good.`,
+                        `Delete USER 0${s.slot}? The shop, the deck and every recovered file on this slot are gone for good.`,
                       )
                     ) {
                       sfx("stamp", { bus: "ui" });

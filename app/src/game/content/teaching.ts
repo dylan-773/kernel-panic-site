@@ -16,18 +16,19 @@
  * trigger). The Narrative Director owns the words. See tutorial/ledger.md.
  */
 
-/** Surfaces a moment can attach to. Run screens plus the window surfaces. */
+/** Surfaces a moment can attach to. Day phases plus the window surfaces. */
 export type TeachSurface =
   | "tutorial"
   | "duel"
-  | "day"
+  | "floor"
+  | "counter"
   | "analyze"
   | "loadout"
   | "solder"
   | "result"
-  | "upgrade"
-  | "finalePre"
-  | "runEnd"
+  | "evening"
+  | "sunday"
+  | "bust"
   | "desktop";
 
 /**
@@ -43,8 +44,10 @@ export type TeachWhen =
   | "draftOffered"
   /** The pouch holds a pair whose union is strictly bigger than both. */
   | "craftReady"
-  /** A drafted BOOST would exceed the bay cap: taking it means benching one. */
-  | "swapOffered";
+  /** Owned boosts exceed the bay count: the deck now carries a choice. */
+  | "swapOffered"
+  /** The evening opens with strain below full: tomorrow starts short. */
+  | "strainShort";
 
 export type TeachSignals = Partial<Record<TeachWhen, boolean>>;
 
@@ -126,9 +129,9 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
     label: "Combine two patch pieces into the union of their arms, at the SOLDER.BAY bench",
     firstContact: "solder",
     waiver:
-      "SOLDER.BAY's status line states the outgrow rule every time a piece is picked up (PICK A PARTNER. THE WELD MUST OUTGROW BOTH.), the schematic blinks the arms a partner would add, and the rack marks non-outgrowing partners dead and disabled, so an illegal weld cannot be attempted at all. CRAFT shows no price inline, matching the convention that every paid action states its cost on its own row.",
+      "SOLDER.BAY's status line states the outgrow rule every time a piece is picked up (PICK A PARTNER. THE WELD MUST OUTGROW BOTH.), the schematic blinks the arms a partner would add, and the rack marks non-outgrowing partners dead and disabled, so an illegal weld cannot be attempted at all.",
   },
-  { id: "strainChip", label: "Neural Strain as run health", firstContact: "result" },
+  { id: "strainChip", label: "Neural Strain as the day's health", firstContact: "result" },
   { id: "manualRef", label: "MANUAL.TXT as the full reference", firstContact: "desktop" },
   // The kit header carries the basics, so the coachmark went; the locked-mode
   // tip still carries the part a header cannot, at the control it applies to.
@@ -136,15 +139,59 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
   { id: "analyzeTell", label: "The diagnostic readout and its tell", firstContact: "analyze" },
   { id: "threatTier", label: "Threat tier 1 to 5", firstContact: "analyze" },
   { id: "augmentDraft", label: "The post job augment draft", firstContact: "result" },
-  { id: "augmentCadence", label: "One augment per cleared ticket, three tickets a day", firstContact: "result" },
   { id: "ram", label: "RAM per turn as the action budget", firstContact: "tutorial" },
   { id: "ramCarry", label: "Unspent RAM carries into the next turn, capped", firstContact: "duel" },
-  { id: "dayUpgrade", label: "One upgrade per closed day", firstContact: "upgrade" },
-  { id: "nightPatch", label: "Buying strain back with credits", firstContact: "upgrade" },
-  { id: "darkWebBuy", label: "Buying a random patch piece on the darknet", firstContact: "upgrade" },
-  { id: "slotBuy", label: "Buying an extra boost bay at night", firstContact: "upgrade" },
-  { id: "boostSlots", label: "Boost bays cap ownership at 3, buyable to 5; configs exempt", firstContact: "result" },
-  { id: "boostSwap", label: "A full bay swaps a new boost in for one installed", firstContact: "result" },
+  { id: "nightPatch", label: "Buying strain back with credits in the evening", firstContact: "evening" },
+  { id: "darkWebBuy", label: "Buying a random patch piece on the darknet", firstContact: "evening" },
+  { id: "strainCarryover", label: "Strain does not reset overnight; sleep restores only a little", firstContact: "evening" },
+
+  // The room.
+  { id: "walkInteract", label: "Walking the shop and interacting with its stations", firstContact: "floor" },
+  { id: "counterIntake", label: "A customer at the counter: take the job or turn it away", firstContact: "counter" },
+  { id: "heldVsBanked", label: "Pay is HELD until the day closes; closing banks it", firstContact: "result" },
+  { id: "benchSit", label: "Sitting at the bench enters KP/OS; standing up leaves it", firstContact: "floor" },
+
+  // The day as the run.
+  {
+    id: "closeBank",
+    label: "Going upstairs closes the day and banks the haul",
+    firstContact: "floor",
+    waiver:
+      "The stairs' own interact prompt states the trade on every open-day visit (CLOSE THE SHOP. EVERYTHING HELD BANKS THE MOMENT YOU DO.), and the close confirm itemizes the held credits and salvage before committing. A permanent labelled prompt on the only control that can commit the day outranks a once-ever callout.",
+  },
+  {
+    id: "bustLoss",
+    label: "Strain zero loses the day's unbanked haul and the evening",
+    firstContact: "bust",
+    waiver:
+      "The bust scene itself is the teaching: it plays the moment it happens, names the held column it just erased, and states that everything banked is untouched and tomorrow opens normally. It cannot be missed and repeats on every bust.",
+  },
+  {
+    id: "sundayGate",
+    label: "The back room can be attempted on Sunday only",
+    firstContact: "floor",
+    waiver:
+      "The tower's interact prompt carries the gate on every weekday visit (it names Sunday as the day it will answer), and the taskbar clock shows the weekday at all times. The prompt is the teaching and it is visible from the first hour of play.",
+  },
+  {
+    id: "repairsUnlock",
+    label: "Broken stations are repairs: each unlocks a system and turns up an artifact",
+    firstContact: "floor",
+    waiver:
+      "Tier 0 by construction, and the vault's own example of it: a broken station standing in the room teaches its own unlock. Every repairable's examine panel states its condition, its price, and the one-line unlock it buys, on every visit, at the object itself.",
+  },
+  {
+    id: "salvageCurrency",
+    label: "Salvage comes out of cleared machines and buys deck parts",
+    firstContact: "evening",
+    waiver:
+      "Every screen that spends salvage puts the price and the balance in the same row, the credits precedent. The result screen itemizes RECOVERED salvage per job on its own named row, so the currency is met where it is earned and priced where it is spent.",
+  },
+  {
+    id: "deckSlots",
+    label: "Owned boosts exceed the bays: the loadout slots a subset before each dive",
+    firstContact: "loadout",
+  },
 
   // Deliberately untaught. Each waiver is a claim that the interface
   // already carries the mechanic; if that stops being true, delete the
@@ -164,20 +211,8 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
   {
     id: "credits",
     label: "Credits",
-    firstContact: "day",
+    firstContact: "counter",
     waiver: "Every screen that spends puts the price and the balance in the same row.",
-  },
-  // These three were coachmarks until the 2026-07-26 sweep found each one
-  // restating a header the screen already shows on every visit, forever. A
-  // permanent label outranks a callout that fires once, so the callouts went
-  // and the headers became the teaching.
-  {
-    id: "jobBoard",
-    label: "Three tickets, shared strain",
-    firstContact: "day",
-    // Narrowed 2026-07-29 when the INBOX absorb dropped the sentence;
-    // restored the same cycle by inbox-collapsed-row-parity.
-    waiver: "INBOX's collapsed header states it every visit: three tickets, strain shared across all of them, order is yours.",
   },
   {
     id: "programTiers",
@@ -190,26 +225,17 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
     id: "saveSlots",
     label: "Three save slots",
     firstContact: "desktop",
-    waiver: "Standard login affordance. The slot list already states attempts and day reached.",
+    waiver: "Standard login affordance. The slot list already states day reached and the shop's condition.",
   },
   {
-    // firstContact was "result" until the 2026-07-26 sweep: a loss never
-    // routes through the result screen at all, so the reachability check was
-    // confirming an unrelated surface. The loss overlay is on the dive.
-    id: "runReset",
-    label: "The run resets on a loss",
+    id: "diveLoss",
+    label: "A lost dive bills no strain; the ticket goes home unpaid",
     firstContact: "duel",
-    waiver: "The dive's own CORE LOST overlay states it the instant it happens, and the run end scene restates it in story voice.",
+    waiver: "The dive's own CORE LOST overlay states it the instant it happens, and the customer's loss line restates it at the counter in the shop's own voice.",
   },
   {
-    id: "finaleGate",
-    label: "Day 10 is the back room",
-    firstContact: "finalePre",
-    waiver: "Day 10 replaces the job board with the door, and the morning scene frames it.",
-  },
-  {
-    id: "finaleOppOpens",
-    label: "The finale machine takes the first turn",
+    id: "backroomOppOpens",
+    label: "The back room machine takes the first turn",
     firstContact: "duel",
     waiver: "The player watches it happen: the IT IS MOVING turnlight runs before their first input, at the only dive that opens this way.",
   },
@@ -222,12 +248,11 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
     waiver: "The drop row names the recovered shape in text with its glyph inline, on the only screen a piece can arrive.",
   },
   {
-    // Same shape as runReset: the end overlay states the cost the instant
-    // it happens, and the strain breakdown itemizes the exact number.
-    id: "gridlockChip",
-    label: "Gridlock wins chip 6 strain at full pay",
-    firstContact: "duel",
-    waiver: "The gridlock end overlay says the dead link bites, and the result breakdown itemizes the 6 as its own row.",
+    id: "diagDepth",
+    label: "Intake readout depth grows with the diagnostic bench, tier by tier",
+    firstContact: "counter",
+    waiver:
+      "Equal-footprint empty states carry it: an unread field renders as a dead row naming the bench stage that would read it, in exactly the space the reading will occupy. The locked row is the teaching, at the moment the player wants the number it hides.",
   },
   // Blanket waivers over whole content types. Individual entries explain
   // themselves through their own copy, so teaching each one would be noise.
@@ -259,6 +284,34 @@ export const MECHANIC_BY_ID: Record<string, MechanicEntry> = Object.fromEntries(
 
 export const TEACHING: TeachingMoment[] = [
   {
+    id: "walk-interact",
+    teaches: ["walkInteract", "benchSit"],
+    surface: "floor",
+    when: "firstSight",
+    anchor: "screen",
+    order: 10,
+    notBeforeDay: 1,
+    title: "THE SHOP",
+    lines: [
+      "Walk with WASD or the arrow keys. E or a click works whatever is glowing.",
+      "The bench is where the work happens. Sit down at it and the terminal takes over.",
+    ],
+  },
+  {
+    id: "counter-intake",
+    teaches: ["counterIntake"],
+    surface: "counter",
+    when: "firstSight",
+    anchor: "screen",
+    order: 15,
+    notBeforeDay: 1,
+    title: "THE COUNTER",
+    lines: [
+      "One customer at a time, face to face. Take the job or turn it away; declining costs nothing.",
+      "What they say is their account of it. What the bench reads is the truth.",
+    ],
+  },
+  {
     id: "analyze-readout",
     teaches: ["analyzeTell", "threatTier"],
     surface: "analyze",
@@ -269,8 +322,8 @@ export const TEACHING: TeachingMoment[] = [
     title: "DIAGNOSTIC",
     copyOrder: "copy-analyze-readout",
     lines: [
-      "This reads the intrusion cold: its dominant routine, its threat tier. It never bluffs.",
-      "Configure your kit against the named tell before you dive, not after you meet it.",
+      "This reads the intrusion cold, as deep as the bench can see. It never bluffs.",
+      "Configure your deck against the named tell before you dive, not after you meet it.",
     ],
   },
   {
@@ -314,13 +367,27 @@ export const TEACHING: TeachingMoment[] = [
     title: "NEURAL STRAIN",
     copyOrder: "copy-strain-chip",
     lines: [
-      "Strain is shared across every ticket today and will not recover between them. Zero ends the run.",
+      "Strain is shared across every job today and does not recover between them. Zero loses the day.",
       "It bills you for rotations past par, and separately for any of their traps that actually sprung on you.",
     ],
   },
   {
+    id: "held-banked",
+    teaches: ["heldVsBanked"],
+    surface: "result",
+    when: "firstSight",
+    anchor: "rows",
+    order: 62,
+    notBeforeDay: 1,
+    title: "HELD",
+    lines: [
+      "CREDITED is held, not banked. Everything the day earns rides with you until you close.",
+      "Close by going upstairs to bed and it is yours for good. Hit strain zero first and it is gone.",
+    ],
+  },
+  {
     id: "augment-draft",
-    teaches: ["augmentDraft", "augmentCadence"],
+    teaches: ["augmentDraft"],
     surface: "result",
     when: "draftOffered",
     anchor: "draft",
@@ -328,43 +395,53 @@ export const TEACHING: TeachingMoment[] = [
     notBeforeDay: 1,
     title: "AUGMENT DRAFT",
     copyOrder: "copy-augment-draft",
-    // Cadence is per TICKET, not per day. With bays capping boosts the
-    // pool never runs dry; a full bay drafts as a swap instead.
     lines: [
-      "Clearing a ticket offers three augments. Pick one and it holds for the rest of the run.",
-      "Three tickets a day, so a clean day banks three picks. CONFIG unlocks a mode, BOOST bends the economy. A full bay swaps instead of blocking.",
+      "Clearing a job offers three augments. The pick is held today and permanent once the day banks.",
+      "CONFIG unlocks a mode. BOOST bends the economy. The catalog fills up; the deck stays small.",
     ],
   },
   {
-    id: "day-upgrade",
-    teaches: ["dayUpgrade"],
-    surface: "upgrade",
-    when: "firstSight",
-    anchor: "grid",
-    order: 70,
+    id: "deck-slots",
+    teaches: ["deckSlots"],
+    surface: "loadout",
+    when: "swapOffered",
+    anchor: "bays",
+    order: 63,
     notBeforeDay: 1,
-    title: "DAY CLOSED",
-    copyOrder: "copy-day-upgrade",
-    // One line, not two. The screen's own header already says "One upgrade
-    // holds for the rest of the run" on every visit, so the callout carries
-    // only the part a header cannot: the weight of the choice being made.
+    title: "BAYS FULL",
     lines: [
-      "There is no second pick later. Choose the one that fixes what tonight's dive actually needed.",
+      "You own more boosts than the deck can carry. The bays hold what actually dives.",
+      "Slot against what the bench read, not what you like. This is the whole decision now.",
     ],
   },
   {
     id: "night-shop",
-    teaches: ["nightPatch", "darkWebBuy", "slotBuy"],
-    surface: "upgrade",
+    teaches: ["nightPatch", "darkWebBuy"],
+    surface: "evening",
     when: "firstSight",
     anchor: "patch",
     order: 71,
     notBeforeDay: 1,
-    title: "NIGHT SHOP",
+    title: "THE EVENING",
     copyOrder: "copy-night-shop",
     lines: [
-      "You can no longer choose a shape. DARKNET.LNK sells one blind pull, price climbing by the day.",
-      "Night patch still buys your strain back. Buy an extra boost bay tonight to raise your cap above 3.",
+      "The shop is closed and the haul is banked. Credits fix the building; salvage builds the deck.",
+      "A night patch buys strain back with money that could have been a repair. There is no correct answer.",
+    ],
+  },
+  {
+    id: "strain-carryover",
+    teaches: ["strainCarryover"],
+    surface: "evening",
+    when: "strainShort",
+    anchor: "patch",
+    order: 72,
+    notBeforeDay: 1,
+    title: "STRAIN CARRIES OVER",
+    copyOrder: "strain-carryover-notice",
+    lines: [
+      "Sleep does not reset Neural Strain. It gives back only a little.",
+      "Whatever tonight leaves unspent carries into tomorrow. Spend on a night patch to buy back more before you sleep.",
     ],
   },
   // patch-craft retired 2026-07-29: SOLDER.BAY carries the outgrow rule at
@@ -383,21 +460,6 @@ export const TEACHING: TeachingMoment[] = [
     lines: [
       "You are carrying a piece. Click a slag block within reach to fuse it in for 2 RAM. One use, then it is gone.",
       "Arms land exactly as held, never rotating once placed. Fit it to the wall you cannot route around, not the first slag you see.",
-    ],
-  },
-  {
-    id: "boost-swap",
-    teaches: ["boostSwap"],
-    surface: "result",
-    when: "swapOffered",
-    anchor: "draft",
-    order: 62,
-    notBeforeDay: 1,
-    title: "BAY FULL",
-    copyOrder: "copy-boost-swap",
-    lines: [
-      "Boost bays are full. Take this pick and you choose one installed boost to bench in its place.",
-      "CONFIGS never count against the cap and are never affected by a swap.",
     ],
   },
 ];
@@ -426,8 +488,14 @@ export const TEACH_TIPS: TeachTip[] = [
   {
     id: "strain",
     teaches: ["strainChip"],
-    control: "the STRAIN meter in the dive status bar and the day footer",
-    text: "Neural Strain. Shared across every ticket in the run. At zero the run ends.",
+    control: "the STRAIN meter in the room HUD and the dive status bar",
+    text: "Neural Strain. Shared across every job today. At zero the day is lost.",
+  },
+  {
+    id: "held",
+    teaches: ["heldVsBanked"],
+    control: "the HELD readout in the room HUD",
+    text: "Today's unbanked haul. Yours for good when you sleep. Gone at strain zero.",
   },
   {
     id: "ram",
@@ -449,9 +517,9 @@ export const TEACH_TIPS: TeachTip[] = [
   },
   {
     id: "boostSlots",
-    teaches: ["boostSlots"],
+    teaches: ["deckSlots"],
     control: "the boost bay counter on the LOADOUT.CFG bay card",
-    text: "Boost bays hold 3 at once. Buy more at night, up to 5. Configs never count against this cap.",
+    text: "Bays carry 3 slotted boosts, buyable to 5 with salvage. Configs never count against the cap.",
   },
   {
     id: "modeLocked",

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sfx } from "../../../game/audio";
-import { PATCH_POUCH_MAX, armUnionCraft, shapeClassOf } from "../../../game/patch-cells";
-import type { RunAction } from "../../../game/run-reducer";
-import type { RunState } from "../../../game/save";
+import { pouchCapFor } from "../../../game/content/repairs";
+import { armUnionCraft, shapeClassOf } from "../../../game/patch-cells";
+import type { DayAction, GameState } from "../../../game/day-reducer";
 import { PatchGlyph } from "../../game/patch-glyph";
 import { Chip } from "../kp-ui";
 
@@ -27,7 +27,7 @@ import { Chip } from "../kp-ui";
  * surface animates a paint or layout property.
  */
 
-type Dispatch = (a: RunAction) => void;
+type Dispatch = (a: DayAction) => void;
 
 const NOUN: Record<"I" | "L" | "T" | "X", string> = {
   I: "Straight",
@@ -40,7 +40,7 @@ const NO_JOIN_LINE = "No legal join for that piece. The result must be strictly 
 const FOOT_LINE =
   "A piece fills one slag block with exactly the arms it shows, welded where it lands. " +
   "2 RAM, one per turn, single use. Pieces come off the darknet, drop from cleared jobs, " +
-  `or bank on clean wins; the pouch holds ${PATCH_POUCH_MAX}.`;
+  "or bank on clean wins. The weld itself is free: it costs the two pieces.";
 
 const LINE_IDLE = "PICK A PIECE.";
 const LINE_HELD = "PICK A PARTNER. THE WELD MUST OUTGROW BOTH.";
@@ -146,8 +146,13 @@ interface DragState {
   offsetY: number;
 }
 
-export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Dispatch }) {
-  const pouch = run.patchPouch;
+export function SolderContent({ state, dispatch }: { state: GameState; dispatch: Dispatch }) {
+  const { shop, day } = state;
+  // During an open day the working pouch is the day's; in the evening the
+  // banked pouch is what sits on the bench.
+  const evening = day?.phase === "evening" || day?.phase === "sunday";
+  const pouch = shop && day ? (evening ? shop.patchPouch : day.pouch) : [];
+  const cap = shop ? pouchCapFor(shop.repairs) : 5;
   const reduced = useReducedMotion();
   const [sel, setSel] = useState<number | null>(null);
   const [pair, setPair] = useState<number | null>(null);
@@ -233,7 +238,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
   const commitWeld = useCallback(
     (a: number, b: number, union: number) => {
       sfx("pieceFuse", { bus: "ui" });
-      dispatch({ type: "craftPatch", a, b });
+      dispatch({ type: "weldPieces", a, b });
       setSel(null);
       setPair(null);
       setFusing(false);
@@ -460,7 +465,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
         <div className="sv-side">
           <StatusBox text={status} tone={tone} />
           <div className="sv-footchips">
-            <Chip label="POUCH" value={`${pouch.length}/${PATCH_POUCH_MAX}`} />
+            <Chip label="POUCH" value={`${pouch.length}/${cap}`} />
             <span className="sv-weldbox">
               <Chip label="LAST WELD" value="" />
               <span className={lastWeld === null ? "sv-weldcell sv-weldcell-empty" : "sv-weldcell"}>
@@ -478,7 +483,7 @@ export function SolderContent({ run, dispatch }: { run: RunState; dispatch: Disp
           {/* five equal columns, so a 5-piece pouch and an EMPTY pouch
               occupy exactly the same footprint */}
           <div className="sv-rack" ref={rackRef}>
-            {Array.from({ length: PATCH_POUCH_MAX }).map((_, i) => {
+            {Array.from({ length: cap }).map((_, i) => {
               if (i >= pouch.length) {
                 return (
                   <span key={`e${i}`} className="sv-slot sv-slot-empty" data-slot-index={i} aria-hidden="true">
