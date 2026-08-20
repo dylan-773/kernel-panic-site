@@ -8,6 +8,7 @@ import {
   RoomId,
   Vec,
   inRect,
+  clickStationAt,
   interactableAt,
   walkable,
 } from "./world";
@@ -193,20 +194,29 @@ export function bootOverworld(
         if (this.paused || this.seated) return;
         const wp = this.cameras.main.getWorldPoint(p.x, p.y);
         const target = { x: wp.x, y: wp.y };
-        this.clickStation = interactableAt(this.room, target);
+        // A walkable click is a walk (with a zone interact if one covers the
+        // spot); only an unwalkable click may resolve through prop hotspots.
+        this.clickStation = walkable(this.room, target)
+          ? interactableAt(this.room, target)
+          : clickStationAt(this.room, target);
         if (walkable(this.room, target)) {
           this.clickPath = this.findPath({ x: this.player.x, y: this.player.y }, target);
           this.clickTarget = this.clickPath.length > 0 ? this.clickPath[0] : null;
         } else if (this.clickStation) {
-          // Clicked furniture: stand at the nearest walkable point of its
-          // zone (the zone rims furniture, so sample a coarse grid of it).
+          // Clicked furniture: stand at the nearest NAV CELL of its zone.
+          // Nav resolution, not a coarse lattice: a zone whose pad is a
+          // narrow strip must still yield a stand point.
           const z = this.clickStation.zone;
           let best: Vec | null = null;
           let bestD = Infinity;
-          for (let gy = 0; gy <= 4; gy++) {
-            for (let gx = 0; gx <= 4; gx++) {
-              const cand = { x: z.x + (z.w * gx) / 4, y: z.y + (z.h * gy) / 4 };
-              if (!walkable(this.room, cand)) continue;
+          const gx0 = Math.max(0, Math.floor(z.x / this.navCell));
+          const gy0 = Math.max(0, Math.floor(z.y / this.navCell));
+          const gx1 = Math.min(this.navW - 1, Math.floor((z.x + z.w) / this.navCell));
+          const gy1 = Math.min(this.navH - 1, Math.floor((z.y + z.h) / this.navCell));
+          for (let gy = gy0; gy <= gy1; gy++) {
+            for (let gx = gx0; gx <= gx1; gx++) {
+              if (!this.navGrid[gy * this.navW + gx]) continue;
+              const cand = { x: gx * this.navCell + this.navCell / 2, y: gy * this.navCell + this.navCell / 2 };
               const d = (cand.x - this.player.x) ** 2 + (cand.y - this.player.y) ** 2;
               if (d < bestD) {
                 bestD = d;
@@ -405,7 +415,12 @@ export function bootOverworld(
         cam.useBounds = false;
         cam.centerOn(this.room.width / 2, this.room.height / 2);
       } else {
-        cam.setBounds(0, 0, this.room.width, this.room.height);
+        // Follow, but keep any axis that FITS dead centre: widen the bounds
+        // by the viewport excess on that axis so the clamp pins it centred
+        // instead of flush against the world's origin.
+        const ex = Math.max(0, vw / zoom - this.room.width);
+        const ey = Math.max(0, vh / zoom - this.room.height);
+        cam.setBounds(-ex / 2, -ey / 2, this.room.width + ex, this.room.height + ey);
         cam.startFollow(this.player, true, 0.12, 0.12);
       }
     }
@@ -632,6 +647,11 @@ export function bootOverworld(
         paused: this.paused,
         seated: this.seated,
         path: this.clickPath.length,
+        cam: {
+          sx: Math.round(this.cameras.main.scrollX * 10) / 10,
+          sy: Math.round(this.cameras.main.scrollY * 10) / 10,
+          zoom: this.cameras.main.zoom,
+        },
       };
 
       if (this.paused || this.seated) {

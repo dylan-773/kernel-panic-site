@@ -46,8 +46,14 @@ export interface Rect {
 
 export interface Interactable {
   id: StationId;
-  /** Player stands inside this to interact. */
+  /** Player stands inside this to interact. Keep it small and keep its
+   * CENTER on the standing pad: overlapping zones resolve by center
+   * distance, so a zone centered on unwalkable art loses everywhere. */
   zone: Rect;
+  /** The prop's visible pixels. A CLICK anywhere in here routes to this
+   * station (walk to the zone, then interact), so furniture is clickable
+   * even though nobody can stand on it. */
+  hotspot?: Rect;
   /** Where the prompt and the interaction focus anchor. */
   anchor: Vec;
   /** Draw priority when zones overlap: nearest anchor wins, ties by order. */
@@ -82,134 +88,141 @@ export interface RoomDef {
 }
 
 export const ROOMS: Record<RoomId, RoomDef> = {
+  // The shop plate was padded 28px top and bottom on 2026-08-19 to complete
+  // the room's clipped apexes, so every shop coordinate below is the old
+  // value +28 in y unless it was retuned against the art (obstacles,
+  // occluders and zones were: see the debug overlay workflow in the vault).
   shop: {
     id: "shop",
     image: "/assets/overworld/shop.png",
     width: 632,
-    height: 400,
+    height: 456,
     floor: [
-      { x: 97, y: 291 },
-      { x: 303, y: 189 },
-      { x: 352, y: 189 },
-      { x: 560, y: 272 },
-      { x: 614, y: 300 },
-      { x: 566, y: 348 },
-      { x: 348, y: 376 },
-      { x: 152, y: 278 },
+      { x: 97, y: 319 },
+      { x: 303, y: 217 },
+      { x: 352, y: 217 },
+      { x: 548, y: 296 },
+      { x: 552, y: 348 },
+      { x: 542, y: 380 },
+      { x: 348, y: 404 },
+      { x: 152, y: 306 },
     ],
     obstacles: [
-      { x: 62, y: 158, w: 128, h: 92 }, // the solder bay desk
-      { x: 172, y: 50, w: 116, h: 136 }, // the shelves
-      { x: 203, y: 183, w: 134, h: 96 }, // the counter island
-      { x: 356, y: 148, w: 120, h: 104 }, // the bench: desk, terminal, rig
-      { x: 398, y: 252, w: 50, h: 24 }, // the work chair
-      { x: 498, y: 44, w: 134, h: 150 }, // the staircase, upper run
-      { x: 542, y: 182, w: 90, h: 86 }, // the staircase, lower run
-      { x: 22, y: 222, w: 128, h: 116 }, // dead stock, west corner
-      { x: 470, y: 196, w: 36, h: 42 }, // the bench's side rack
-      { x: 424, y: 232, w: 98, h: 54 }, // dead stock, east of the bench
-      { x: 352, y: 270, w: 114, h: 82 }, // the phone desk, south east
+      { x: 62, y: 186, w: 128, h: 92 }, // the solder bay desk
+      { x: 172, y: 78, w: 116, h: 136 }, // the shelves
+      { x: 203, y: 211, w: 134, h: 96 }, // the counter island
+      { x: 356, y: 176, w: 120, h: 104 }, // the bench: desk, terminal, rig
+      { x: 398, y: 280, w: 50, h: 24 }, // the work chair
+      { x: 498, y: 72, w: 134, h: 150 }, // the staircase, upper run
+      { x: 548, y: 210, w: 84, h: 190 }, // the staircase, lower run + stringer
+      { x: 22, y: 250, w: 128, h: 116 }, // dead stock, west corner
+      { x: 470, y: 224, w: 36, h: 42 }, // the bench's side rack
+      { x: 420, y: 256, w: 60, h: 78 }, // east stock, front crates
+      { x: 472, y: 250, w: 74, h: 56 }, // east stock, right stack
+      { x: 352, y: 298, w: 114, h: 82 }, // the phone desk, south east
     ],
     occluders: [
       // The hanging lamp is at ceiling height: always above actors.
-      { x: 288, y: 0, w: 74, h: 110, base: 9999 },
+      { x: 288, y: 28, w: 74, h: 110, base: 9999 },
       // The counter: an actor north of its base walks behind it.
-      { x: 203, y: 176, w: 140, h: 106, base: 276 },
+      { x: 203, y: 204, w: 140, h: 106, base: 304 },
       // The bench desk and terminal.
-      { x: 350, y: 128, w: 160, h: 136, base: 258 },
+      { x: 352, y: 156, w: 152, h: 134, base: 286 },
       // The solder bay desk with its lamp.
-      { x: 60, y: 120, w: 134, h: 132, base: 248 },
+      { x: 60, y: 148, w: 134, h: 132, base: 276 },
       // The south east phone desk.
-      { x: 346, y: 250, w: 124, h: 104, base: 350 },
-      // The east dead stock pile.
-      { x: 422, y: 232, w: 132, h: 112, base: 340 },
+      { x: 350, y: 272, w: 118, h: 110, base: 378 },
+      // East stock, split to match its two masses so the corridor to the
+      // stairs never redraws floor over the player.
+      { x: 418, y: 246, w: 66, h: 90, base: 332 },
+      { x: 470, y: 242, w: 80, h: 66, base: 304 },
     ],
     stateOverlays: [
-      { id: "solder-fixed", requires: "solderBay", rect: { x: 68, y: 158, w: 124, h: 88 }, image: "/assets/overworld/states/solder-fixed.png" },
-      { id: "power-fixed", requires: "powerBox", rect: { x: 42, y: 140, w: 34, h: 38 }, image: "/assets/overworld/states/power-fixed.png" },
-      { id: "router-fixed", requires: "onionRouter", rect: { x: 354, y: 106, w: 74, h: 40 }, image: "/assets/overworld/states/router-fixed.png" },
-      { id: "shelves-fixed", requires: "shelves", rect: { x: 176, y: 55, w: 108, h: 104 }, image: "/assets/overworld/states/shelves-fixed.png" },
-      { id: "drive-fixed", requires: "driveRig", rect: { x: 424, y: 228, w: 96, h: 56 }, image: "/assets/overworld/states/drive-fixed.png" },
+      { id: "solder-fixed", requires: "solderBay", rect: { x: 68, y: 186, w: 124, h: 88 }, image: "/assets/overworld/states/solder-fixed.png" },
+      { id: "power-fixed", requires: "powerBox", rect: { x: 42, y: 168, w: 34, h: 38 }, image: "/assets/overworld/states/power-fixed.png" },
+      { id: "router-fixed", requires: "onionRouter", rect: { x: 354, y: 134, w: 74, h: 40 }, image: "/assets/overworld/states/router-fixed.png" },
+      { id: "shelves-fixed", requires: "shelves", rect: { x: 176, y: 83, w: 108, h: 104 }, image: "/assets/overworld/states/shelves-fixed.png" },
+      { id: "drive-fixed", requires: "driveRig", rect: { x: 424, y: 256, w: 96, h: 56 }, image: "/assets/overworld/states/drive-fixed.png" },
     ],
     interactables: [
-      { id: "counter", zone: { x: 196, y: 156, w: 164, h: 170 }, anchor: { x: 272, y: 240 }, order: 5 },
-      { id: "bench", zone: { x: 356, y: 196, w: 128, h: 110 }, anchor: { x: 416, y: 240 }, order: 4 },
-      { id: "backroomDoor", zone: { x: 284, y: 168, w: 86, h: 92 }, anchor: { x: 327, y: 150 }, order: 3 },
-      { id: "stairsUp", zone: { x: 546, y: 282, w: 72, h: 58 }, anchor: { x: 578, y: 292 }, order: 6 },
-      { id: "solderBay", zone: { x: 144, y: 250, w: 62, h: 54 }, anchor: { x: 150, y: 214 }, order: 7 },
-      { id: "shelves", zone: { x: 170, y: 170, w: 110, h: 56 }, anchor: { x: 228, y: 150 }, order: 8 },
-      { id: "powerBox", zone: { x: 150, y: 222, w: 54, h: 26 }, anchor: { x: 58, y: 165 }, order: 9 },
-      { id: "onionRouter", zone: { x: 344, y: 176, w: 70, h: 56 }, anchor: { x: 385, y: 135 }, order: 10 },
-      { id: "bottomDrawer", zone: { x: 440, y: 240, w: 76, h: 62 }, anchor: { x: 485, y: 262 }, order: 11 },
-      { id: "ledgerTerminal", zone: { x: 196, y: 268, w: 54, h: 50 }, anchor: { x: 220, y: 252 }, order: 12 },
-      { id: "driveRig", zone: { x: 428, y: 292, w: 72, h: 46 }, anchor: { x: 470, y: 262 }, order: 13 },
-      { id: "diagBench", zone: { x: 350, y: 344, w: 120, h: 34 }, anchor: { x: 440, y: 292 }, order: 14 },
+      { id: "counter", zone: { x: 196, y: 184, w: 164, h: 170 }, hotspot: { x: 203, y: 208, w: 138, h: 104 }, anchor: { x: 272, y: 268 }, order: 5 },
+      { id: "bench", zone: { x: 356, y: 224, w: 128, h: 110 }, hotspot: { x: 352, y: 156, w: 152, h: 132 }, anchor: { x: 416, y: 268 }, order: 4 },
+      { id: "backroomDoor", zone: { x: 284, y: 196, w: 86, h: 92 }, hotspot: { x: 296, y: 124, w: 70, h: 118 }, anchor: { x: 327, y: 178 }, order: 3 },
+      { id: "stairsUp", zone: { x: 506, y: 330, w: 54, h: 48 }, hotspot: { x: 500, y: 44, w: 132, h: 356 }, anchor: { x: 566, y: 340 }, order: 6 },
+      { id: "solderBay", zone: { x: 144, y: 278, w: 62, h: 54 }, hotspot: { x: 60, y: 148, w: 136, h: 130 }, anchor: { x: 150, y: 242 }, order: 7 },
+      { id: "shelves", zone: { x: 152, y: 270, w: 52, h: 38 }, hotspot: { x: 160, y: 78, w: 112, h: 202 }, anchor: { x: 228, y: 178 }, order: 8 },
+      { id: "powerBox", zone: { x: 150, y: 280, w: 40, h: 26 }, hotspot: { x: 42, y: 168, w: 34, h: 38 }, anchor: { x: 58, y: 193 }, order: 9 },
+      { id: "onionRouter", zone: { x: 344, y: 204, w: 70, h: 56 }, hotspot: { x: 352, y: 132, w: 76, h: 44 }, anchor: { x: 385, y: 163 }, order: 10 },
+      { id: "bottomDrawer", zone: { x: 476, y: 336, w: 64, h: 44 }, hotspot: { x: 420, y: 290, w: 60, h: 44 }, anchor: { x: 452, y: 318 }, order: 11 },
+      { id: "ledgerTerminal", zone: { x: 196, y: 296, w: 54, h: 50 }, hotspot: { x: 252, y: 214, w: 42, h: 46 }, anchor: { x: 268, y: 240 }, order: 12 },
+      { id: "driveRig", zone: { x: 452, y: 336, w: 76, h: 40 }, hotspot: { x: 472, y: 250, w: 74, h: 56 }, anchor: { x: 505, y: 280 }, order: 13 },
+      { id: "diagBench", zone: { x: 350, y: 372, w: 120, h: 34 }, hotspot: { x: 352, y: 272, w: 114, h: 108 }, anchor: { x: 440, y: 320 }, order: 14 },
     ],
     spawns: {
-      start: { x: 300, y: 295 },
-      fromBedroom: { x: 566, y: 310 },
-      fromBackroom: { x: 327, y: 205 },
-      customerDoor: { x: 206, y: 306 },
-      customerCounter: { x: 272, y: 300 },
+      start: { x: 300, y: 323 },
+      fromBedroom: { x: 528, y: 352 },
+      fromBackroom: { x: 344, y: 240 },
+      customerDoor: { x: 208, y: 332 },
+      customerCounter: { x: 272, y: 328 },
     },
   },
   bedroom: {
     id: "bedroom",
     image: "/assets/overworld/bedroom.png",
-    width: 440,
-    height: 300,
+    width: 500,
+    height: 360,
     floor: [
-      { x: 62, y: 192 },
-      { x: 252, y: 96 },
-      { x: 398, y: 170 },
-      { x: 218, y: 288 },
+      { x: 92, y: 222 },
+      { x: 282, y: 126 },
+      { x: 428, y: 200 },
+      { x: 248, y: 318 },
     ],
     obstacles: [
-      { x: 196, y: 68, w: 148, h: 108 }, // the bed
-      { x: 146, y: 92, w: 58, h: 62 }, // the nightstand and lamp
-      { x: 48, y: 110, w: 104, h: 100 }, // the dresser
-      { x: 292, y: 120, w: 82, h: 100 }, // the unpacked boxes
-      { x: 46, y: 188, w: 96, h: 96 }, // the small desk
-      { x: 250, y: 196, w: 104, h: 100 }, // the stair rail cut
+      { x: 200, y: 124, w: 150, h: 96 }, // the bed
+      { x: 156, y: 128, w: 60, h: 68 }, // the nightstand and lamp
+      { x: 78, y: 140, w: 104, h: 100 }, // the dresser
+      { x: 320, y: 150, w: 72, h: 108 }, // the unpacked boxes
+      { x: 76, y: 218, w: 96, h: 96 }, // the small desk
+      { x: 264, y: 220, w: 92, h: 112 }, // the stair rail cut
     ],
     occluders: [
-      { x: 192, y: 52, w: 156, h: 128, base: 176 }, // the bed
-      { x: 142, y: 70, w: 66, h: 88, base: 154 }, // nightstand and lamp
-      { x: 286, y: 108, w: 92, h: 116, base: 220 }, // the boxes
+      { x: 196, y: 112, w: 152, h: 108, base: 212 }, // the bed
+      { x: 152, y: 116, w: 68, h: 80, base: 194 }, // nightstand and lamp
+      { x: 316, y: 140, w: 80, h: 124, base: 256 }, // the boxes
     ],
     interactables: [
-      { id: "bed", zone: { x: 176, y: 140, w: 168, h: 104 }, anchor: { x: 262, y: 150 }, order: 5 },
-      { id: "stairsDown", zone: { x: 236, y: 200, w: 130, h: 96 }, anchor: { x: 300, y: 250 }, order: 6 },
+      { id: "bed", zone: { x: 196, y: 208, w: 66, h: 70 }, hotspot: { x: 200, y: 116, w: 150, h: 104 }, anchor: { x: 276, y: 190 }, order: 5 },
+      { id: "stairsDown", zone: { x: 226, y: 236, w: 60, h: 72 }, hotspot: { x: 262, y: 218, w: 96, h: 116 }, anchor: { x: 310, y: 270 }, order: 6 },
     ],
     spawns: {
-      fromShop: { x: 258, y: 230 },
+      fromShop: { x: 250, y: 282 },
     },
   },
   backroom: {
     id: "backroom",
     image: "/assets/overworld/backroom.png",
-    width: 400,
-    height: 300,
+    width: 460,
+    height: 360,
     floor: [
-      { x: 72, y: 172 },
-      { x: 232, y: 84 },
-      { x: 362, y: 178 },
-      { x: 182, y: 282 },
+      { x: 102, y: 202 },
+      { x: 262, y: 114 },
+      { x: 392, y: 208 },
+      { x: 212, y: 312 },
     ],
     obstacles: [
-      { x: 160, y: 60, w: 72, h: 120 }, // the tower
-      { x: 88, y: 112, w: 56, h: 74 }, // the stool
+      { x: 190, y: 90, w: 72, h: 120 }, // the tower
+      { x: 118, y: 142, w: 56, h: 74 }, // the stool
     ],
     occluders: [
-      { x: 156, y: 44, w: 82, h: 140, base: 180 }, // the tower
-      { x: 84, y: 96, w: 64, h: 94, base: 186 }, // the stool
+      { x: 186, y: 74, w: 82, h: 140, base: 180 }, // the tower
+      { x: 114, y: 126, w: 64, h: 94, base: 186 }, // the stool
     ],
     interactables: [
-      { id: "tower", zone: { x: 128, y: 150, w: 150, h: 90 }, anchor: { x: 196, y: 130 }, order: 5 },
-      { id: "backroomExit", zone: { x: 96, y: 214, w: 100, h: 86 }, anchor: { x: 138, y: 250 }, order: 6 },
+      { id: "tower", zone: { x: 158, y: 180, w: 150, h: 90 }, hotspot: { x: 186, y: 74, w: 82, h: 140 }, anchor: { x: 226, y: 160 }, order: 5 },
+      { id: "backroomExit", zone: { x: 126, y: 244, w: 100, h: 86 }, anchor: { x: 168, y: 280 }, order: 6 },
     ],
     spawns: {
-      fromShop: { x: 170, y: 240 },
+      fromShop: { x: 200, y: 270 },
     },
   },
 };
@@ -251,6 +264,26 @@ export function interactableAt(room: RoomDef, p: Vec): Interactable | null {
     if (d < bestD) {
       bestD = d;
       best = it;
+    }
+  }
+  return best;
+}
+
+/** The station a CLICK at this point means: among every zone and hotspot
+ * holding the point, the SMALLEST rect wins, so a gadget mounted on a
+ * larger prop (the register on the counter, the drawer in the crates)
+ * stays clickable inside the bigger thing's footprint. */
+export function clickStationAt(room: RoomDef, p: Vec): Interactable | null {
+  let best: Interactable | null = null;
+  let bestArea = Infinity;
+  for (const it of room.interactables) {
+    for (const r of [it.zone, it.hotspot]) {
+      if (!r || !inRect(p, r)) continue;
+      const area = r.w * r.h;
+      if (area < bestArea) {
+        bestArea = area;
+        best = it;
+      }
     }
   }
   return best;
