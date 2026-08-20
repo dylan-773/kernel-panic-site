@@ -97,151 +97,153 @@ export const ROOMS: Record<RoomId, RoomDef> = {
     image: "/assets/overworld/shop.png",
     width: 632,
     height: 456,
-    // Retuned 2026-08-20 against the neon plate (PixelLab job daa98931, see
-    // pipeline/art/overworld/RECORD.md). The old geometry maps onto it through
-    // x' = 0.92x + 26, y' = 0.93(y - 28) + 42; the south east quadrant was
-    // re-derived by hand because the painting moved the stair foot up to a
-    // pocket at (466..530, 232..264) and sealed the old bottom-right lane
-    // with the east stock crates.
+    // Retuned 2026-08-20 v2 against the industrial plate (PixelLab job
+    // af3a0be0 plus two material inpaints, see pipeline/art/overworld/
+    // RECORD.md). Mapping from the original padded coords: x' = 0.93x + 22,
+    // y' = 0.95(y - 28) + 38. The south east quadrant is hand-derived from
+    // the painting: the metal staircase lands at a foot pocket
+    // (466..532 x 216..250) with an open approach across the floor south of
+    // the bench; the east stock repainted as crates, a server rack and a
+    // CRT cabinet in new positions. The work chair has no obstacle: it is
+    // pushable furniture and the strip stays passable.
     floor: [
-      { x: 115, y: 313 },
-      { x: 305, y: 218 },
-      { x: 350, y: 218 },
-      { x: 455, y: 228 },
-      { x: 528, y: 238 },
-      { x: 530, y: 264 },
-      { x: 470, y: 300 },
+      { x: 112, y: 314 },
+      { x: 304, y: 218 },
+      { x: 349, y: 218 },
+      { x: 462, y: 220 },
+      { x: 532, y: 230 },
+      { x: 538, y: 252 },
+      { x: 520, y: 268 },
+      { x: 470, y: 290 },
       { x: 452, y: 340 },
       { x: 430, y: 368 },
-      { x: 346, y: 392 },
-      { x: 166, y: 301 },
+      { x: 346, y: 395 },
+      { x: 163, y: 302 },
     ],
     obstacles: [
-      { x: 83, y: 189, w: 118, h: 86 }, // the solder bay desk
-      { x: 184, y: 88, w: 107, h: 126 }, // the shelves
-      { x: 213, y: 212, w: 123, h: 89 }, // the counter island
-      { x: 354, y: 180, w: 106, h: 97 }, // the bench: desk, terminal, rig
-      { x: 484, y: 83, w: 123, h: 140 }, // the staircase, upper run
-      { x: 530, y: 211, w: 77, h: 177 }, // the staircase stringer, east of the foot pocket
-      { x: 46, y: 248, w: 118, h: 108 }, // dead stock, west corner
-      { x: 430, y: 285, w: 70, h: 58 }, // east stock, low crate and monitor
-      { x: 474, y: 242, w: 72, h: 90 }, // east stock, cabinet and monitor
-      { x: 376, y: 293, w: 66, h: 62 }, // the phone desk and lamp table, south east
+      { x: 80, y: 188, w: 119, h: 87 }, // the solder bay desk
+      { x: 182, y: 86, w: 108, h: 129 }, // the shelves (metal racking)
+      { x: 211, y: 212, w: 110, h: 91 }, // the counter island
+      { x: 353, y: 179, w: 112, h: 92 }, // the bench: desk, terminal, rig
+      { x: 485, y: 80, w: 125, h: 136 }, // the staircase, upper run
+      { x: 540, y: 216, w: 70, h: 175 }, // the stair railing and east wall band
+      { x: 42, y: 249, w: 119, h: 110 }, // dead stock, west corner
+      { x: 428, y: 298, w: 44, h: 50 }, // east stock, plastic crates
+      { x: 468, y: 305, w: 40, h: 58 }, // east stock, server rack
+      { x: 503, y: 283, w: 45, h: 55 }, // east stock, CRT cabinet
+      { x: 349, y: 294, w: 80, h: 72 }, // the phone desk and lamp table
     ],
     occluders: [
-      // The hanging lamp is at ceiling height: always above actors.
-      { x: 291, y: 42, w: 68, h: 102, base: 9999 },
+      // The hanging cable fixture is at ceiling height: always above actors.
+      { x: 290, y: 38, w: 69, h: 104, base: 9999 },
       // The counter: an actor north of its base walks behind it.
-      { x: 213, y: 206, w: 129, h: 99, base: 299 },
-      // The bench desk and terminal. Ends at x462 so the stair-pocket lane
-      // (x460..474) never redraws floor over the actor standing in it, and
-      // at y277 so the south strip (y280..292) stays in front of it.
-      { x: 350, y: 161, w: 112, h: 116, base: 277 },
+      { x: 211, y: 205, w: 112, h: 95, base: 298 },
+      // The bench desk and terminal; ends above the south strip.
+      { x: 349, y: 160, w: 116, h: 112, base: 272 },
       // The solder bay desk with its lamp.
-      { x: 81, y: 154, w: 123, h: 123, base: 273 },
-      // The south east phone desk and lamp table. Top at the painted desk
-      // top (y291) so the frame never carries floor rows over the strip.
-      { x: 374, y: 291, w: 72, h: 66, base: 357 },
-      // East stock, split to match its two masses.
-      { x: 428, y: 283, w: 74, h: 64, base: 345 },
-      { x: 472, y: 238, w: 76, h: 96, base: 331 },
+      { x: 78, y: 152, w: 125, h: 125, base: 274 },
+      // The phone desk and lamp table.
+      { x: 348, y: 291, w: 80, h: 72, base: 360 },
+      // East stock, three masses.
+      { x: 426, y: 296, w: 48, h: 54, base: 348 },
+      { x: 466, y: 303, w: 44, h: 62, base: 362 },
+      { x: 501, y: 281, w: 49, h: 57, base: 336 },
     ],
     stateOverlays: [
-      { id: "solder-fixed", requires: "solderBay", rect: { x: 89, y: 189, w: 114, h: 82 }, image: "/assets/overworld/states/solder-fixed.png" },
-      { id: "power-fixed", requires: "powerBox", rect: { x: 65, y: 172, w: 31, h: 35 }, image: "/assets/overworld/states/power-fixed.png" },
-      { id: "router-fixed", requires: "onionRouter", rect: { x: 352, y: 141, w: 68, h: 37 }, image: "/assets/overworld/states/router-fixed.png" },
-      { id: "shelves-fixed", requires: "shelves", rect: { x: 188, y: 93, w: 99, h: 97 }, image: "/assets/overworld/states/shelves-fixed.png" },
-      { id: "drive-fixed", requires: "driveRig", rect: { x: 474, y: 246, w: 72, h: 62 }, image: "/assets/overworld/states/drive-fixed.png" },
+      { id: "solder-fixed", requires: "solderBay", rect: { x: 85, y: 188, w: 115, h: 84 }, image: "/assets/overworld/states/solder-fixed.png" },
+      { id: "power-fixed", requires: "powerBox", rect: { x: 61, y: 171, w: 32, h: 36 }, image: "/assets/overworld/states/power-fixed.png" },
+      { id: "router-fixed", requires: "onionRouter", rect: { x: 351, y: 139, w: 69, h: 38 }, image: "/assets/overworld/states/router-fixed.png" },
+      { id: "shelves-fixed", requires: "shelves", rect: { x: 186, y: 90, w: 100, h: 99 }, image: "/assets/overworld/states/shelves-fixed.png" },
+      { id: "drive-fixed", requires: "driveRig", rect: { x: 466, y: 292, w: 78, h: 58 }, image: "/assets/overworld/states/drive-fixed.png" },
     ],
     interactables: [
-      { id: "counter", zone: { x: 206, y: 187, w: 151, h: 158 }, hotspot: { x: 213, y: 209, w: 127, h: 97 }, anchor: { x: 276, y: 265 }, order: 5 },
-      { id: "bench", zone: { x: 354, y: 224, w: 118, h: 102 }, hotspot: { x: 350, y: 161, w: 140, h: 123 }, anchor: { x: 409, y: 265 }, order: 4 },
-      { id: "backroomDoor", zone: { x: 287, y: 198, w: 79, h: 86 }, hotspot: { x: 298, y: 131, w: 64, h: 110 }, anchor: { x: 327, y: 182 }, order: 3 },
-      { id: "stairsUp", zone: { x: 458, y: 226, w: 64, h: 26 }, hotspot: { x: 486, y: 57, w: 121, h: 331 }, anchor: { x: 505, y: 225 }, order: 6 },
-      { id: "solderBay", zone: { x: 158, y: 274, w: 57, h: 50 }, hotspot: { x: 81, y: 154, w: 125, h: 121 }, anchor: { x: 164, y: 241 }, order: 7 },
-      { id: "shelves", zone: { x: 166, y: 267, w: 48, h: 35 }, hotspot: { x: 173, y: 88, w: 103, h: 188 }, anchor: { x: 236, y: 182 }, order: 8 },
-      { id: "powerBox", zone: { x: 164, y: 276, w: 37, h: 24 }, hotspot: { x: 65, y: 172, w: 31, h: 35 }, anchor: { x: 79, y: 195 }, order: 9 },
-      { id: "onionRouter", zone: { x: 342, y: 206, w: 64, h: 52 }, hotspot: { x: 350, y: 139, w: 70, h: 41 }, anchor: { x: 380, y: 168 }, order: 10 },
-      { id: "bottomDrawer", zone: { x: 368, y: 279, w: 72, h: 14 }, hotspot: { x: 400, y: 258, w: 56, h: 24 }, anchor: { x: 416, y: 272 }, order: 11 },
-      { id: "ledgerTerminal", zone: { x: 206, y: 291, w: 50, h: 46 }, hotspot: { x: 258, y: 215, w: 39, h: 43 }, anchor: { x: 273, y: 239 }, order: 12 },
-      { id: "driveRig", zone: { x: 456, y: 258, w: 20, h: 34 }, hotspot: { x: 474, y: 242, w: 72, h: 90 }, anchor: { x: 480, y: 268 }, order: 13 },
-      { id: "diagBench", zone: { x: 318, y: 300, w: 36, h: 56 }, hotspot: { x: 376, y: 269, w: 68, h: 88 }, anchor: { x: 352, y: 330 }, order: 14 },
+      { id: "counter", zone: { x: 204, y: 186, w: 153, h: 162 }, hotspot: { x: 211, y: 209, w: 112, h: 92 }, anchor: { x: 270, y: 266 }, order: 5 },
+      { id: "bench", zone: { x: 353, y: 224, w: 119, h: 104 }, hotspot: { x: 349, y: 160, w: 120, h: 112 }, anchor: { x: 409, y: 266 }, order: 4 },
+      { id: "backroomDoor", zone: { x: 286, y: 198, w: 80, h: 87 }, hotspot: { x: 297, y: 129, w: 65, h: 112 }, anchor: { x: 326, y: 180 }, order: 3 },
+      { id: "stairsUp", zone: { x: 468, y: 216, w: 62, h: 32 }, hotspot: { x: 487, y: 53, w: 123, h: 338 }, anchor: { x: 500, y: 212 }, order: 6 },
+      { id: "solderBay", zone: { x: 156, y: 276, w: 58, h: 51 }, hotspot: { x: 78, y: 152, w: 126, h: 124 }, anchor: { x: 162, y: 241 }, order: 7 },
+      { id: "shelves", zone: { x: 163, y: 268, w: 48, h: 36 }, hotspot: { x: 171, y: 86, w: 104, h: 192 }, anchor: { x: 234, y: 180 }, order: 8 },
+      { id: "powerBox", zone: { x: 162, y: 277, w: 37, h: 25 }, hotspot: { x: 61, y: 171, w: 32, h: 36 }, anchor: { x: 76, y: 195 }, order: 9 },
+      { id: "onionRouter", zone: { x: 342, y: 205, w: 65, h: 53 }, hotspot: { x: 349, y: 137, w: 71, h: 42 }, anchor: { x: 380, y: 166 }, order: 10 },
+      { id: "bottomDrawer", zone: { x: 388, y: 274, w: 56, h: 18 }, hotspot: { x: 392, y: 246, w: 56, h: 24 }, anchor: { x: 418, y: 262 }, order: 11 },
+      { id: "ledgerTerminal", zone: { x: 204, y: 293, w: 50, h: 48 }, hotspot: { x: 256, y: 215, w: 39, h: 44 }, anchor: { x: 271, y: 239 }, order: 12 },
+      { id: "driveRig", zone: { x: 430, y: 276, w: 40, h: 20 }, hotspot: { x: 468, y: 305, w: 40, h: 58 }, anchor: { x: 486, y: 300 }, order: 13 },
+      { id: "diagBench", zone: { x: 318, y: 300, w: 30, h: 56 }, hotspot: { x: 349, y: 291, w: 80, h: 72 }, anchor: { x: 352, y: 330 }, order: 14 },
     ],
     spawns: {
-      start: { x: 302, y: 316 },
-      fromBedroom: { x: 502, y: 238 },
+      start: { x: 301, y: 318 },
+      fromBedroom: { x: 496, y: 234 },
       fromBackroom: { x: 342, y: 239 },
-      customerDoor: { x: 220, y: 322 },
-      customerCounter: { x: 276, y: 321 },
+      customerDoor: { x: 218, y: 323 },
+      customerCounter: { x: 275, y: 323 },
     },
   },
-  // Bedroom retuned 2026-08-20 against the neon plate (PixelLab job c6db652f,
-  // see pipeline/art/overworld/RECORD.md). The neon plate ships UNPADDED at
-  // its native 440x300: its walls run full bleed to the canvas, so the old
-  // 30px completion ring no longer exists. Mapping from the old padded
-  // coords: x' = 0.92(x - 30) + 12, y' = 0.94(y - 30). The old "unpacked
-  // boxes" mass is painted as a computer desk now; the rect still blocks it.
+  // Bedroom retuned 2026-08-20 v2 against the industrial plate (PixelLab
+  // job d52cf58a, see pipeline/art/overworld/RECORD.md). Ships UNPADDED at
+  // native 440x300. Mapping from the old padded coords: x' = x - 30,
+  // y' = 1.02(y - 30) - 10. The old boxes are hard plastic equipment cases
+  // now; the stair opening carries a steel grate railing.
   bedroom: {
     id: "bedroom",
     image: "/assets/overworld/bedroom.png",
     width: 440,
     height: 300,
     floor: [
-      { x: 69, y: 180 },
-      { x: 244, y: 90 },
-      { x: 378, y: 160 },
-      { x: 213, y: 271 },
+      { x: 62, y: 186 },
+      { x: 252, y: 88 },
+      { x: 398, y: 163 },
+      { x: 218, y: 284 },
     ],
     obstacles: [
-      { x: 168, y: 88, w: 138, h: 90 }, // the bed
-      { x: 128, y: 92, w: 55, h: 64 }, // the nightstand and lamp
-      { x: 56, y: 103, w: 96, h: 94 }, // the dresser
-      { x: 279, y: 113, w: 66, h: 102 }, // the desk with the terminal (was the boxes)
-      { x: 54, y: 177, w: 88, h: 90 }, // the small desk
-      { x: 227, y: 179, w: 85, h: 105 }, // the stair rail cut
+      { x: 170, y: 86, w: 150, h: 98 }, // the bed
+      { x: 126, y: 90, w: 60, h: 69 }, // the nightstand and lamp
+      { x: 48, y: 102, w: 104, h: 102 }, // the cabinet and server towers
+      { x: 290, y: 112, w: 72, h: 110 }, // the equipment cases
+      { x: 46, y: 182, w: 108, h: 98 }, // the terminal desk
+      { x: 234, y: 184, w: 92, h: 114 }, // the stair opening and rail
     ],
     occluders: [
-      { x: 165, y: 77, w: 140, h: 102, base: 171 }, // the bed
-      { x: 124, y: 81, w: 63, h: 75, base: 154 }, // nightstand and lamp
-      { x: 275, y: 103, w: 74, h: 117, base: 212 }, // the terminal desk
+      { x: 166, y: 74, w: 152, h: 110, base: 176 }, // the bed
+      { x: 122, y: 78, w: 68, h: 82, base: 157 }, // nightstand and lamp
+      { x: 286, y: 102, w: 80, h: 126, base: 221 }, // the equipment cases
     ],
     interactables: [
-      { id: "bed", zone: { x: 165, y: 167, w: 61, h: 66 }, hotspot: { x: 168, y: 81, w: 138, h: 98 }, anchor: { x: 238, y: 150 }, order: 5 },
-      { id: "stairsDown", zone: { x: 192, y: 194, w: 55, h: 68 }, hotspot: { x: 225, y: 177, w: 88, h: 109 }, anchor: { x: 270, y: 226 }, order: 6 },
+      { id: "bed", zone: { x: 166, y: 172, w: 66, h: 71 }, hotspot: { x: 170, y: 78, w: 150, h: 106 }, anchor: { x: 246, y: 153 }, order: 5 },
+      { id: "stairsDown", zone: { x: 196, y: 200, w: 60, h: 73 }, hotspot: { x: 232, y: 182, w: 96, h: 118 }, anchor: { x: 280, y: 235 }, order: 6 },
     ],
     spawns: {
-      fromShop: { x: 214, y: 237 },
+      fromShop: { x: 220, y: 247 },
     },
   },
-  // Backroom retuned 2026-08-20 against the neon plate (PixelLab job
-  // ee28db6a, see pipeline/art/overworld/RECORD.md). Ships UNPADDED at its
-  // native 400x300, same reasoning as the bedroom. Mapping from the old
-  // padded coords: x' = 0.85(x - 30) + 32, y' = 0.85(y - 30) + 24.
+  // Backroom retuned 2026-08-20 v2 against the industrial plate (PixelLab
+  // job 11b3d4fd, see pipeline/art/overworld/RECORD.md). Ships UNPADDED at
+  // native 400x300. Mapping from the old padded coords: x' = 0.84(x - 30)
+  // + 36, y' = 0.83(y - 30) + 30.
   backroom: {
     id: "backroom",
     image: "/assets/overworld/backroom.png",
     width: 400,
     height: 300,
     floor: [
-      { x: 93, y: 170 },
-      { x: 229, y: 95 },
-      { x: 340, y: 175 },
-      { x: 187, y: 264 },
+      { x: 96, y: 173 },
+      { x: 231, y: 100 },
+      { x: 340, y: 178 },
+      { x: 189, y: 264 },
     ],
     obstacles: [
-      { x: 168, y: 75, w: 61, h: 102 }, // the tower
-      { x: 107, y: 119, w: 48, h: 63 }, // the stool
+      { x: 170, y: 80, w: 60, h: 100 }, // the tower
+      { x: 110, y: 123, w: 47, h: 61 }, // the stool
     ],
     occluders: [
-      { x: 165, y: 61, w: 70, h: 119, base: 152 }, // the tower
-      { x: 103, y: 106, w: 54, h: 80, base: 157 }, // the stool
+      { x: 167, y: 67, w: 69, h: 116, base: 155 }, // the tower
+      { x: 107, y: 110, w: 54, h: 78, base: 160 }, // the stool
     ],
     interactables: [
-      { id: "tower", zone: { x: 141, y: 152, w: 128, h: 76 }, hotspot: { x: 165, y: 61, w: 70, h: 119 }, anchor: { x: 199, y: 134 }, order: 5 },
-      { id: "backroomExit", zone: { x: 114, y: 206, w: 85, h: 73 }, anchor: { x: 149, y: 236 }, order: 6 },
+      { id: "tower", zone: { x: 144, y: 155, w: 126, h: 75 }, hotspot: { x: 167, y: 67, w: 69, h: 116 }, anchor: { x: 201, y: 138 }, order: 5 },
+      { id: "backroomExit", zone: { x: 117, y: 208, w: 84, h: 71 }, anchor: { x: 152, y: 238 }, order: 6 },
     ],
     spawns: {
-      fromShop: { x: 176, y: 228 },
+      fromShop: { x: 179, y: 229 },
     },
   },
 };
