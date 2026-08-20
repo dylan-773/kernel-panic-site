@@ -12,8 +12,12 @@ scanline CRT overlay. No marketing page exists; the game is the page.
   edges (`crispEdges`, stepped `steps()` animations, no border-radius).
 - Palette is the committed `--kp-*` token block in `styles.css`: ink slate
   ground, bone text, one rose accent, filament-white player signal, crimson
-  intrusion, gold payload, steel chrome. Every generated asset embeds these
-  hexes in its prompt.
+  intrusion, gold payload, steel chrome. Every generated KP/OS asset embeds
+  these hexes in its prompt.
+- The overworld scene layer (room plates, state patches, walk sprites) is
+  neon cyberpunk under KP-NEON/16, per the scene art law at
+  `vault/40-presentation/rulings/law-12-scene-art.md`. KP/OS keeps the
+  `--kp-*` tokens; the two palettes share their dark bases and rose-hot.
 - Type: Silkscreen (display/chrome), VT323 (terminal body), IBM Plex Mono
   (small labels). Google Fonts, allowed by the worker CSP.
 - Motion is quantized: `steps()` timing everywhere, no smooth easing. The
