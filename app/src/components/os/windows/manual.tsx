@@ -40,15 +40,18 @@ function PageFor({ tab }: { tab: Tab }) {
       <div className="kp-manual-page">
         <h3>HOW A DIVE WORKS</h3>
         <p>
-          The whole grid is scrambled junctions. Click one to rotate it a quarter turn (1 RAM). Your
-          signal floods live from YOUR port through every aligned pipe and claims what it touches.
-          One good rotation can cascade a whole chain. First flood to touch the CORE wins the job.
+          Two boards, one CORE each: yours and theirs. Click a junction to rotate it a quarter turn
+          (1 RAM). Your signal floods live from YOUR port through every aligned pipe on your own
+          board. One good rotation can cascade a whole chain. First signal to route power to its
+          CORE wins the job.
         </p>
         <p>
-          You can rotate your own claimed junctions and any open junction within TWO steps of your
-          territory: set up a chain, then trip it. Cascades of four or more claims BANK bonus RAM for
-          your next turn. The intrusion floods from the far port under the same rules, on its own
-          RAM. Losing a duel zeroes Neural Strain and ends the run. Sloppy wins chip it.
+          You can rotate junctions you have built and any open junction within TWO steps of your
+          built ground: set up a chain, then trip it. Ground you have lit stays built even when its
+          power gets cut. Cascades of three or more BANK bonus RAM for your next turn. ATTACK is the
+          one program that reaches their board; DEFEND guards yours. The intrusion works its own
+          board under the same rules, on its own RAM. Losing a duel zeroes Neural Strain and ends
+          the run. Sloppy wins chip it.
         </p>
       </div>
     );

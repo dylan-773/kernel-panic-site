@@ -42,7 +42,7 @@ import { DuelBoard } from "./duel-board";
 import { PatchGlyph } from "./patch-glyph";
 
 /**
- * DIVE.EXE: the flood-claim duel as a full-screen instrument panel. The
+ * DIVE.EXE: the split-board duel as a full-screen instrument panel. The
  * board is a circuit schematic framed by the ship-diagnostic OS anatomy:
  * solid-ink title strip, breadcrumb with the 25-segment round meter,
  * program keys and BUS.LOG on the left rail, telemetry on the right, and

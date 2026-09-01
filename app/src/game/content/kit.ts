@@ -13,7 +13,7 @@ export type Tier = 1 | 2 | 3;
 
 export const PROGRAM_COST = 1;
 
-/** Scan reveal radius from your territory, by tier (3 = whole board). */
+/** Scan reveal radius from your built ground, by tier (3 = whole board). */
 export const SCAN_RANGE: Record<Tier, number> = { 1: 3, 2: 6, 3: 99 };
 
 /** Attack targets per cast (nodes redirected, or traps planted). */
@@ -48,7 +48,7 @@ export const PAR_FLAT = 2;
 /** Strain lost per rotation past par. */
 export const PAR_STRAIN_PER = 2;
 
-/** Neutral junctions within this many steps of your territory can be rotated. */
+/** Neutral junctions within this many steps of your built ground can be rotated. */
 export const BASE_REACH = 2;
 
 /**
@@ -117,7 +117,7 @@ export function attackModeDesc(mode: AttackMode, tier: Tier): string {
     case "redirect":
       return `Twist ${w === 1 ? "any enemy or open junction" : `${w} enemy or open junctions`} anywhere on the board a quarter turn, no reach limit. Cuts power to everything downstream.`;
     case "armHalt":
-      return `Plant a halt trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When their signal claims it, they lose a full turn.`;
+      return `Plant a halt trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When their signal powers it, they lose a full turn.`;
     case "armSiphon":
       return `Plant a siphon trap on ${n === "one node" ? "an open junction" : `${w} open junctions`}. When it fires, ${SIPHON_STEAL[tier]} RAM drains from their next turn into yours.`;
   }
@@ -139,7 +139,7 @@ export function scanDesc(tier: Tier): string {
   const r = SCAN_RANGE[tier];
   return r >= 99
     ? "Expose every armed node on the entire board, permanently. Always 1 RAM."
-    : `Expose every armed node within ${r} of your territory, permanently. Always 1 RAM.`;
+    : `Expose every armed node within ${r} of your built ground, permanently. Always 1 RAM.`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -218,7 +218,7 @@ export const AUGMENTS: AugmentDef[] = [
     id: "longArms",
     name: "LONG ARMS",
     kind: "boost",
-    desc: "Rotate open junctions up to 4 steps from your territory instead of 2, and place patch pieces just as far. Bigger setups, bigger cascades.",
+    desc: "Rotate open junctions up to 4 steps from your built ground instead of 2, and place patch pieces just as far. Bigger setups, bigger cascades.",
   },
   {
     id: "siphonPlus",
@@ -313,7 +313,7 @@ export const AUGMENT_BY_ID: Record<AugmentId, AugmentDef> = Object.fromEntries(
 
 export const MODE_TELL: Record<OppMode, string> = {
   redirect: "Diagnostic flags rerouting activity. Your junctions will get twisted off true.",
-  armHalt: "Diagnostic flags halt traps. One wrong claim and you lose a whole turn. Scan early.",
+  armHalt: "Diagnostic flags halt traps. One wrong junction and you lose a whole turn. Scan early.",
   armSiphon: "Diagnostic flags siphon traps. It wants your RAM more than your route. Scan early.",
   purge: "Diagnostic flags self-cleaning routines. Traps you plant will not stick around.",
   lock: "Diagnostic flags clamp routines. Junctions you need will freeze solid.",

@@ -3,7 +3,7 @@ import { Rng } from "../rng";
 import { AttackMode, DefendMode, OppMode, Tier } from "./kit";
 
 /**
- * The fixed escalation curve for the flood-claim duel. Every run walks the
+ * The fixed escalation curve for the split-board duel. Every run walks the
  * same ten days, ending in the finale; per-day numbers live here so balance
  * is one table, not code.
  *

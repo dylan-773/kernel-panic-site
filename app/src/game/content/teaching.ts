@@ -109,7 +109,7 @@ export interface MechanicEntry {
 
 export const MECHANIC_INVENTORY: MechanicEntry[] = [
   { id: "rotate", label: "Rotate a junction", firstContact: "tutorial" },
-  { id: "flood", label: "Signal floods and claims", firstContact: "tutorial" },
+  { id: "flood", label: "Signal floods and builds", firstContact: "tutorial" },
   { id: "scan", label: "SCAN.EXE", firstContact: "tutorial" },
   { id: "defend", label: "DEFEND.EXE and purge", firstContact: "tutorial" },
   { id: "attack", label: "ATTACK.EXE and redirect", firstContact: "tutorial" },
@@ -151,7 +151,7 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
   // waiver and the harness will demand a moment.
   {
     id: "reach2",
-    label: "Rotating within two steps of your territory",
+    label: "Rotating within two steps of your built ground",
     firstContact: "tutorial",
     waiver: "The legal set is drawn as glowing junctions. The affordance is the teaching.",
   },
@@ -220,14 +220,6 @@ export const MECHANIC_INVENTORY: MechanicEntry[] = [
     label: "Post dive piece rewards, the job drop and the CLEAN RUN bank",
     firstContact: "result",
     waiver: "The drop row names the recovered shape in text with its glyph inline, on the only screen a piece can arrive.",
-  },
-  {
-    // Same shape as runReset: the end overlay states the cost the instant
-    // it happens, and the strain breakdown itemizes the exact number.
-    id: "gridlockChip",
-    label: "Gridlock wins chip 6 strain at full pay",
-    firstContact: "duel",
-    waiver: "The gridlock end overlay says the dead link bites, and the result breakdown itemizes the 6 as its own row.",
   },
   // Blanket waivers over whole content types. Individual entries explain
   // themselves through their own copy, so teaching each one would be noise.
@@ -381,7 +373,7 @@ export const TEACHING: TeachingMoment[] = [
     title: "PATCH PIECE",
     copyOrder: "copy-patch-cell-use",
     lines: [
-      "You are carrying a piece. Click a slag block within reach to fuse it in for 2 RAM. One use, then it is gone.",
+      "You are carrying a piece. Click a slag block within reach to fuse it in for 4 RAM. One use, then it is gone.",
       "Arms land exactly as held, never rotating once placed. Fit it to the wall you cannot route around, not the first slag you see.",
     ],
   },
@@ -536,7 +528,7 @@ export const TUTORIAL_BEATS: TutorialBeat[] = [
     id: "chain-toward-core",
     teaches: ["flood"],
     test: (c) => c.round === 1,
-    line: "Chain rotations toward the CORE. When a junction clicks into line, everything connected claims at once. Spend your RAM, then END TURN.",
+    line: "Chain rotations toward the CORE. When a junction clicks into line, everything connected powers up at once. Spend your RAM, then END TURN.",
   },
   {
     id: "scan-it",

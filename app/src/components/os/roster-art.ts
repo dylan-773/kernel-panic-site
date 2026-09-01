@@ -118,5 +118,10 @@ export function deviceMacroFor(c: CustomerProfile): DeviceMacro {
   if (c.id === "dex-marlowe") {
     return { src: `${V3}/cramdeck-color.png`, w: 880, h: 880, top: -330, left: -340, feed: "color" };
   }
-  return { src: deviceArtFor(c), w: 304, h: 304, top: -77, left: -52, feed: "ink" };
+  if (DEVICE_ART[c.id]) {
+    return { src: DEVICE_ART[c.id], w: 304, h: 304, top: -77, left: -52, feed: "ink" };
+  }
+  // No device print on file: the bench still is natively 316x212, so it must
+  // be served at that size and centred, or the bezel resamples it.
+  return { src: "/assets/px/stills/still-bench.png", w: 316, h: 212, top: -31, left: -58, feed: "ink" };
 }

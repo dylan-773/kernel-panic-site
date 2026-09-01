@@ -1,5 +1,5 @@
 /**
- * Balance harness for the flood-claim duel. Not imported by app code.
+ * Balance harness for the split-board duel. Not imported by app code.
  * Run from app/: bun run src/game/dev/sim.ts
  *
  * A proxy player using the same Dijkstra routing bot as the opponent (high

@@ -3717,7 +3717,7 @@ body.kp-dragging-piece, body.kp-dragging-piece .kp-slot2:is(button) { cursor: gr
    DIVE.EXE: the duel on the v3 role system
    Integrated 2026-08-01 from ui-demos/dive-v3 (ux-2026-07-31-desktop-dive).
 
-   The flood-claim duel as a full-screen instrument panel, playable end to
+   The split-board duel as a full-screen instrument panel, playable end to
    end on the shipped engine. It does NOT follow the window rules: it is
    full-screen and real-time, and the machine's two-beat telegraph has to
    stay readable above everything else.
