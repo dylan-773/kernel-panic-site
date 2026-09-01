@@ -86,12 +86,14 @@ export function tutorialLessonDone(s: DuelState): boolean {
 }
 
 /**
- * Tutorial gating: programs come online one at a time as the script flags
- * them. Scan wakes when the machine has planted; Defend after the first
- * scan; Attack after the first purge. Outside the tutorial, always on.
+ * Tutorial gating: the PLAYER's programs come online one at a time as the
+ * script flags them. Scan wakes when the machine has planted; Defend after
+ * the first scan; Attack after the first purge. The machine is exempt: its
+ * scripted armHalt is what plants the trap the scan lesson needs, so gating
+ * it deadlocks the whole lesson. Outside the tutorial, always on.
  */
-export function programUnlocked(s: DuelState, prog: Program): boolean {
-  if (!s.cfg.tutorial) return true;
+export function programUnlocked(s: DuelState, side: Side, prog: Program): boolean {
+  if (!s.cfg.tutorial || side === "opp") return true;
   if (prog === "scan") {
     return s.tutFlags.scanned || s.boards.player.cells.some((c) => c.trap);
   }

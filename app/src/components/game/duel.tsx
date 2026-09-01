@@ -1072,7 +1072,7 @@ export function DuelScreen(props: DuelScreenProps) {
 
           {(["scan", "attack", "defend"] as Program[]).map((prog) => {
             const cost = programCost(state, "player", prog);
-            const offline = !programUnlocked(state, prog);
+            const offline = !programUnlocked(state, "player", prog);
             const used = econ.used[prog];
             const tier = tierOf(state, "player", prog);
             const sub =

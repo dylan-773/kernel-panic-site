@@ -93,7 +93,7 @@ export function checkCommand(s: DuelState, side: Side, cmd: DuelCommand): ExecRe
     }
 
     case "cast": {
-      if (!programUnlocked(s, cmd.prog)) return no("programOffline");
+      if (!programUnlocked(s, side, cmd.prog)) return no("programOffline");
       if (econ.ram < programCost(s, side, cmd.prog)) return no("noRam");
       if (cmd.prog === "scan") return OK;
       const want = castWidth(s, side, cmd.prog, cmd.mode);
